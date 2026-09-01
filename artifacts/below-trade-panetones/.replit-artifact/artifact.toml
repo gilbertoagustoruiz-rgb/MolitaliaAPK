@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Below Trade Panetones"
+description = "Mobile-first field sales PWA for Molitalia panetones, with analyst and promoter workflows for market assignments, client sales, bonuses, photo evidence, and offline-ready capture."
+version = "1.0.0"
+id = "artifacts/below-trade-panetones"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24196
+
+[services.development]
+run = "pnpm --filter @workspace/below-trade-panetones run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/below-trade-panetones", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/below-trade-panetones/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24196"
+BASE_PATH = "/"
