@@ -128,9 +128,9 @@ function Login({ onLogin, notify }: { onLogin: (user: AppUser) => void; notify: 
 }
 
 function Shell({ user, logout, children }: { user: AppUser; logout: () => void; children: ReactNode }) {
-  const [online, setOnline] = useState(true);
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
   useEffect(() => { const update = () => setOnline(navigator.onLine); update(); window.addEventListener('online', update); window.addEventListener('offline', update); return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); }; }, []);
-  return <div className="bt-app"><header className="topbar"><Logo compact /><div className="campaign"><small>Campaña</small><strong>Panetones Molitalia</strong></div><div className="top-user"><div className="top-user-info"><strong>{user.name}</strong><small>{user.role}</small></div><Btn variant="ghost" onClick={logout} testId="button-logout"><LogOut /> Salir</Btn></div></header>{!online && <div className="offline-bar" data-testid="status-offline"><WifiOff /> Sin conexión. Los cambios quedarán pendientes.</div>}{online && <div className="offline-bar" style={{ background: 'hsl(153 49% 37%)', color: 'white' }} data-testid="status-online"><Wifi /> Datos guardados localmente</div>}{children}</div>;
+  return <div className="bt-app"><header className="topbar"><Logo compact /><div className="campaign"><small>Campaña</small><strong>Panetones Molitalia</strong></div><div className="top-user"><div className="top-user-info"><strong>{user.name}</strong><small>{user.role}</small></div><Btn variant="ghost" onClick={logout} testId="button-logout"><LogOut /> Salir</Btn></div></header>{!online && <div className="offline-bar" role="status" aria-live="polite" data-testid="status-offline"><WifiOff /> Sin conexión · cambios guardados en este dispositivo</div>}{online && <div className="offline-bar" role="status" aria-live="polite" data-testid="status-online"><Wifi /> Con conexión · aplicación lista para operar</div>}{children}</div>;
 }
 
 function Stat({ icon, label, value, note }: { icon: ReactNode; label: string; value: number; note: string }) {
@@ -225,7 +225,10 @@ function PromoterApp({ user, market, clients, sales, setSales, attendance, setAt
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', seedMarkets)); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', seedUsers)); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', seedClients)); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [toast, setToast] = useState<Toast | null>(null);
   const notify = (message: string, error = false) => setToast({ message, error });
-  useEffect(() => { if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined); }, []);
+  useEffect(() => {
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+    if (navigator.storage?.persist) navigator.storage.persist().catch(() => undefined);
+  }, []);
   useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]);
   const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
   const logout = () => { localStorage.removeItem('bt-session'); setUser(null); };
