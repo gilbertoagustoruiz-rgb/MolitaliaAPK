@@ -54,6 +54,10 @@ button:disabled { cursor: not-allowed; opacity: .52; }
 .field label, .form-label { color:hsl(var(--muted)); font-size:12px; font-weight:700; letter-spacing:.04em; }
 .input, .select { width:100%; min-height:45px; border:1px solid hsl(var(--line)); border-radius:11px; padding:0 13px; outline:none; color:hsl(var(--ink)); background:hsl(var(--surface)); transition:border .18s, box-shadow .18s; }
 .input:focus, .select:focus { border-color:hsl(var(--blue)); box-shadow:0 0 0 3px hsla(var(--blue)/.14); }
+.currency-input { display:flex; align-items:center; overflow:hidden; min-height:45px; border:1px solid #3b5053; border-radius:11px; background:#102023; }
+.currency-input > span { padding-left:13px; color:hsl(var(--orange)); font:700 13px var(--font-mono); }
+.currency-input .input { min-height:43px; border:0; border-radius:0; color:#eaf3f0; background:transparent; }
+.currency-input:focus-within { border-color:hsl(var(--orange)); box-shadow:0 0 0 3px hsla(var(--orange)/.14); }
 .btn { min-height:42px; border:1px solid transparent; border-radius:11px; padding:0 15px; display:inline-flex; align-items:center; justify-content:center; gap:8px; font-weight:700; transition:transform .18s, background .18s, border .18s; }
 .btn:hover:not(:disabled) { transform:translateY(-1px); }
 .btn svg { width:16px; height:16px; }
