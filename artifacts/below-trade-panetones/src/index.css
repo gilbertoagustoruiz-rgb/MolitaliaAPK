@@ -278,6 +278,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .stock-callout strong { font-size:14px; }
 .stock-callout small { margin-top:3px; color:hsl(var(--muted)); font-size:11px; }
 .modal-hint { margin:0; color:hsl(var(--muted)); font-size:12px; line-height:1.5; }
+.modal-error { margin:0; color:hsl(var(--red)); font-size:12px; font-weight:700; line-height:1.45; }
 .inventory-module { display:flex; flex-direction:column; gap:18px; }
 .inventory-overview { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; }
 .inventory-overview h2 { margin:7px 0 5px; font-size:clamp(26px, 3vw, 39px); letter-spacing:-.06em; }

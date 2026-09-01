@@ -178,14 +178,15 @@ function NewClientModal({ markets, count, onSave, close }: { markets: { value: s
 }
 
 function TastingLogoutModal({ available, onConfirm, close }: { available: number; onConfirm: (quantity: number) => void; close: () => void }) {
-  const [quantity, setQuantity] = useState('0');
+  const [quantity, setQuantity] = useState('');
   const parsed = quantity === '' ? NaN : Number(quantity);
   const valid = Number.isInteger(parsed) && parsed >= 0 && parsed <= available;
   return <Modal title="Declara tu degustación" detail="Antes de salir, indica cuántos panetones de degustación utilizaste hoy." close={close}>
     <div className="logout-declaration">
       <div className="stock-callout"><PackageCheck /><div><strong>{available} disponibles</strong><small>Stock de degustación en tu mercado</small></div></div>
-      <Field label="Panetones utilizados *"><Input type="number" value={quantity} onChange={value => setQuantity(value.replace(/\D/g, ''))} min={0} max={available} step={1} placeholder="0" testId="input-tasting-usage" /></Field>
-      <p className="modal-hint">Si no utilizaste ninguno, registra 0. El stock se descontará al confirmar la salida.</p>
+      <Field label="Panetones utilizados *"><Input type="number" value={quantity} onChange={value => setQuantity(value.replace(/\D/g, ''))} min={0} step={1} placeholder="0" testId="input-tasting-usage" /></Field>
+      {Number.isFinite(parsed) && parsed > available && <p className="modal-error">La cantidad ingresada supera el stock disponible ({available}).</p>}
+      <p className="modal-hint">{available > 0 ? 'Si no utilizaste ninguno, registra 0. El stock se descontará al confirmar la salida.' : 'No hay stock disponible en este mercado. Registra 0 para cerrar la sesión o solicita una reposición.'}</p>
     </div>
     <div className="modal-actions"><Btn variant="outline" onClick={close}>Seguir trabajando</Btn><Btn disabled={!valid} onClick={() => onConfirm(parsed)} testId="button-confirm-logout"><LogOut /> Confirmar y salir</Btn></div>
   </Modal>;
