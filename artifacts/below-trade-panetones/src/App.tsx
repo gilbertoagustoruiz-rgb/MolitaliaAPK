@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Camera, Check, CheckCircle2, Clock3, Download, FileSpreadsheet, Gift, LogOut, MapPin, PackageCheck, Plus, RefreshCw, Search, ShieldCheck, ShoppingBag, Smartphone, Store, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react';
+import { Camera, Check, CheckCircle2, Clock3, Download, FileSpreadsheet, Gift, LogOut, MapPin, PackageCheck, Plus, RefreshCw, Search, ShieldCheck, ShoppingBag, Smartphone, Store, Upload, UserRound, Users, Wifi, WifiOff, X } from 'lucide-react';
 
 type Role = 'ANALISTA' | 'PROMOTOR' | 'SUPERVISOR' | 'TRADE' | 'ADMIN';
 type Status = 'ACTIVO' | 'INACTIVO';
@@ -88,6 +88,41 @@ function parseCsvLine(line: string) {
   }
   values.push(current); return values;
 }
+function parseCsvText(text: string) {
+  const firstLine = text.split(/\r?\n/).find(line => line.trim()) || '';
+  const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
+  const rows: string[][] = []; let row: string[] = []; let current = ''; let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const character = text[i];
+    if (character === '"' && text[i + 1] === '"') { current += '"'; i += 1; }
+    else if (character === '"') quoted = !quoted;
+    else if (character === delimiter && !quoted) { row.push(current.trim()); current = ''; }
+    else if (character === '\n' && !quoted) { row.push(current.trim().replace(/\r$/, '')); current = ''; if (row.some(value => value)) rows.push(row); row = []; }
+    else current += character;
+  }
+  if (current || row.length) { row.push(current.trim().replace(/\r$/, '')); if (row.some(value => value)) rows.push(row); }
+  return rows;
+}
+function parseCsvRecords(text: string) {
+  const rows = parseCsvText(text);
+  if (rows.length < 2) throw new Error('El CSV debe tener encabezados y al menos una fila');
+  const headers = rows[0].map(normalizeCsvHeader);
+  return rows.slice(1).map(row => Object.fromEntries(headers.map((header, index) => [header, (row[index] || '').trim()])));
+}
+function normalizeCsvHeader(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function csvField(record: Record<string, string>, aliases: string[]) {
+  const key = aliases.map(normalizeCsvHeader).find(alias => Object.prototype.hasOwnProperty.call(record, alias));
+  return key ? record[key] : '';
+}
+function csvStatus(value: string): Status {
+  return normalizeCsvHeader(value) === 'inactivo' ? 'INACTIVO' : 'ACTIVO';
+}
+function csvMarketId(value: string, markets: Market[]) {
+  const normalized = normalizeCsvHeader(value);
+  return markets.find(market => [market.id, market.name, market.district].some(candidate => normalizeCsvHeader(candidate) === normalized))?.id;
+}
 function formatDate(value: string) { return new Date(value).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }); }
 function formatSoles(value: number | undefined) { return `S/ ${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function parseSoles(value: string) { return Number(value.replace(',', '.')); }
@@ -134,6 +169,18 @@ function Logo({ compact = false }: { compact?: boolean }) {
 }
 function Btn({ children, onClick, variant = 'primary', disabled = false, type = 'button', className = '', testId }: { children: ReactNode; onClick?: () => void; variant?: 'primary' | 'dark' | 'outline' | 'ghost' | 'danger'; disabled?: boolean; type?: 'button' | 'submit'; className?: string; testId?: string }) {
   return <button type={type} disabled={disabled} onClick={onClick} className={`btn btn-${variant} ${className}`} data-testid={testId}>{children}</button>;
+}
+function CsvImportButton({ label, onImport, testId }: { label: string; onImport: (file: File) => Promise<void>; testId: string }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const chooseFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setLoading(true);
+    try { await onImport(file); } finally { setLoading(false); }
+  };
+  return <><input ref={inputRef} className="csv-file-input" type="file" accept=".csv,text/csv" onChange={chooseFile} /><Btn variant="outline" onClick={() => inputRef.current?.click()} disabled={loading} testId={testId}>{loading ? <RefreshCw className="spin" /> : <Upload />}{loading ? 'Leyendo CSV...' : label}</Btn></>;
 }
 function Input({ value, onChange, placeholder, type = 'text', min, max, step, maxLength, autoComplete, testId }: { value: string | number; onChange: (value: string) => void; placeholder?: string; type?: string; min?: number; max?: number; step?: number; maxLength?: number; autoComplete?: string; testId?: string }) {
   return <input className="input" value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} type={type} min={min} max={max} step={step} maxLength={maxLength} autoComplete={autoComplete} data-testid={testId} />;
@@ -229,7 +276,7 @@ function TastingLogoutModal({ available, onConfirm, close }: { available: number
   </Modal>;
 }
 
-function InventoryModule({ markets, inventory, movements, actor, setInventory, setMovements, notify }: { markets: Market[]; inventory: MarketInventory[]; movements: InventoryMovement[]; actor: AppUser; setInventory: (value: MarketInventory[]) => void; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void }) {
+function InventoryModule({ markets, inventory, movements, actor, setInventory, setMovements, notify, onImportCsv }: { markets: Market[]; inventory: MarketInventory[]; movements: InventoryMovement[]; actor: AppUser; setInventory: (value: MarketInventory[]) => void; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onImportCsv: (file: File) => Promise<void> }) {
   type StockDraft = { tasting: string; redemption: Record<RedemptionItemId, string> };
   const [drafts, setDrafts] = useState<Record<string, StockDraft>>({});
   const marketMap = Object.fromEntries(markets.map(market => [market.id, market]));
@@ -276,7 +323,7 @@ function InventoryModule({ markets, inventory, movements, actor, setInventory, s
   const sortedMovements = [...movements].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
   const levelClass = (value: number) => value === 0 ? 'empty' : value <= 5 ? 'low' : 'available';
   return <section className="inventory-module">
-    <div className="inventory-overview"><div><span className="eyebrow">CONTROL DE CAMPAÑA</span><h2>Canjes y degustaciones</h2><p>Administra las existencias de cada mercado y revisa los consumos registrados.</p></div><div className="inventory-actions"><Btn variant="outline" onClick={exportInventory}><Download /> Stock CSV</Btn><Btn variant="outline" onClick={exportMovements}><Download /> Movimientos CSV</Btn></div></div>
+    <div className="inventory-overview"><div><span className="eyebrow">CONTROL DE CAMPAÑA</span><h2>Canjes y degustaciones</h2><p>Administra las existencias de cada mercado y revisa los consumos registrados.</p></div><div className="inventory-actions"><CsvImportButton label="Importar stock" onImport={onImportCsv} testId="button-import-inventory" /><Btn variant="outline" onClick={exportInventory}><Download /> Stock CSV</Btn><Btn variant="outline" onClick={exportMovements}><Download /> Movimientos CSV</Btn></div></div>
     <div className="inventory-summary"><article><span className="inventory-summary-icon"><PackageCheck /></span><div><small>STOCK TOTAL DE DEGUSTACIÓN</small><strong>{totals.tasting}</strong><p>Panetones disponibles</p></div></article><article><span className="inventory-summary-icon accent"><Gift /></span><div><small>UNIDADES DE CANJE</small><strong>{totals.redemption}</strong><p>Premios disponibles</p></div></article><article><span className="inventory-summary-icon blue"><MapPin /></span><div><small>MERCADOS CONTROLADOS</small><strong>{markets.length}</strong><p>Con saldo independiente</p></div></article></div>
     <div className="inventory-grid">{markets.map(market => {
       const stock = inventory.find(item => item.marketId === market.id) || emptyInventory(market.id); const draft = drafts[market.id] || { tasting: String(stock.tastingStock), redemption: redemptionItems.reduce((result, item) => ({ ...result, [item.id]: String(stock.redemptionStock[item.id]) }), {} as Record<RedemptionItemId, string>) }; const totalRedemption = redemptionItems.reduce((sum, item) => sum + stock.redemptionStock[item.id], 0); const minimumStock = Math.min(stock.tastingStock, ...redemptionItems.map(item => stock.redemptionStock[item.id]));
@@ -303,6 +350,55 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
       if (!imported.length) throw new Error('La hoja no contiene mercados'); setMarkets(imported); writeStore('bt-markets', imported); notify(`${imported.length} mercados importados desde Google Sheets`);
     } catch { notify('No se pudo importar la hoja. Los mercados locales siguen disponibles.', true); } finally { setSyncing(false); }
   };
+  const importUsers = async (file: File) => {
+    setSyncing(true);
+    try {
+      const records = parseCsvRecords(await file.text()); const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
+      records.forEach((record, index) => {
+        const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const name = csvField(record, ['nombre', 'nombrecompleto', 'usuario']); const roleValue = normalizeCsvHeader(csvField(record, ['rol', 'cargo'])).toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'mercado', 'market']);
+        if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN'].includes(roleValue) || (roleValue === 'PROMOTOR' && !csvMarketId(marketValue, markets))) { skipped += 1; return; }
+        imported.push({ id: csvField(record, ['id', 'codigo']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? csvMarketId(marketValue, markets) : undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
+      });
+      if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
+      const next = [...users]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.dni === item.dni); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); setUsers(next); writeStore('bt-users', next); notify(`${imported.length} usuarios importados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
+    } catch (error) { notify(`No se pudo importar usuarios: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+  };
+  const importClients = async (file: File) => {
+    setSyncing(true);
+    try {
+      const records = parseCsvRecords(await file.text()); const imported: Client[] = []; let skipped = 0; const importId = Date.now();
+      records.forEach((record, index) => {
+        const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda']); const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'mercado', 'market']), markets);
+        if (!name || !marketId) { skipped += 1; return; }
+        imported.push({ id: csvField(record, ['id']) || `CLI-IMP-${importId}-${index + 1}`, code: csvField(record, ['codigo', 'code']) || `CLI-${String(clients.length + index + 1).padStart(6, '0')}`, name, phone: csvField(record, ['celular', 'telefono', 'phone']) || undefined, marketId, status: csvStatus(csvField(record, ['estado', 'status'])) });
+      });
+      if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa cliente y mercado.');
+      const next = [...clients]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.code === item.code); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); setClients(next); writeStore('bt-clients', next); notify(`${imported.length} clientes importados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
+    } catch (error) { notify(`No se pudo importar clientes: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+  };
+  const importInventory = async (file: File) => {
+    setSyncing(true);
+    try {
+      const records = parseCsvRecords(await file.text()); const imported: { marketId: string; stock: MarketInventory }[] = []; let skipped = 0; const importId = Date.now();
+      records.forEach(record => {
+        const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'mercado', 'market']), markets);
+        if (!marketId) { skipped += 1; return; }
+        const current = inventory.find(item => item.marketId === marketId) || emptyInventory(marketId); const readStock = (aliases: string[], fallback: number) => { const raw = csvField(record, aliases); if (raw === '') return fallback; const value = Number(raw.replace(',', '.')); if (!Number.isInteger(value) || value < 0) throw new Error(`Stock inválido en ${marketId}`); return value; };
+        const redemptionStock = redemptionItems.reduce((result, item) => ({ ...result, [item.id]: readStock([`stock${item.id}`, item.id, `cantidad${item.id}`], current.redemptionStock[item.id]) }), {} as RedemptionStock);
+        imported.push({ marketId, stock: { ...current, marketId, tastingStock: readStock(['stockdegustacion', 'degustacion', 'panetonesdegustacion'], current.tastingStock), redemptionStock, updatedAt: new Date().toISOString() } });
+      });
+      if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa el mercado y las columnas de stock.');
+      const nextInventory = [...inventory]; const newMovements = [...movements];
+      imported.forEach(({ marketId, stock }, rowIndex) => {
+        const current = nextInventory.find(item => item.marketId === marketId) || emptyInventory(marketId); const index = nextInventory.findIndex(item => item.marketId === marketId);
+        if (index >= 0) nextInventory[index] = stock; else nextInventory.push(stock);
+        const date = stock.updatedAt; const addMovement = (kind: InventoryMovementKind, quantity: number, itemId?: RedemptionItemId) => { if (quantity !== 0) newMovements.unshift({ id: `IMP-${importId}-${rowIndex}-${itemId || kind}`, marketId, kind, itemId, quantity, actorId: user.id, actorName: user.name, date, status: syncStatus() }); };
+        addMovement('AJUSTE_DEGUSTACION', stock.tastingStock - current.tastingStock);
+        redemptionItems.forEach(item => addMovement('AJUSTE_CANJES', stock.redemptionStock[item.id] - current.redemptionStock[item.id], item.id));
+      });
+      setInventory(nextInventory); setMovements(newMovements); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', newMovements); notify(`${imported.length} stocks importados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
+    } catch (error) { notify(`No se pudo importar stock: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+  };
   const saveUser = (user: AppUser) => { const next = [...users, user]; setUsers(next); writeStore('bt-users', next); setModal(null); notify('Usuario creado con clave temporal'); };
   const saveClient = (client: Client) => { const next = [...clients, client]; setClients(next); writeStore('bt-clients', next); setModal(null); notify('Cliente creado como ACTIVO'); };
   const filteredClients = clients.filter(client => `${client.name} ${client.code} ${marketMap[client.marketId]?.name || ''}`.toLowerCase().includes(query.toLowerCase()));
@@ -312,11 +408,11 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
     <nav className="tabs" aria-label="Módulos">{tabs.map(([value, label]) => <button key={value} className={`tab ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)} data-testid={`tab-${value}`}>{label}</button>)}</nav>
      {tab === 'inicio' && <><div className="stats-grid"><Stat icon={<MapPin />} label="Mercados activos" value={activeMarkets.length} note="En la campaña" /><Stat icon={<Users />} label="Usuarios activos" value={users.filter(user => user.status === 'ACTIVO').length} note="Con acceso vigente" /><Stat icon={<Store />} label="Clientes activos" value={clients.filter(client => client.status === 'ACTIVO').length} note="Puntos vinculados" /><Stat icon={<ShoppingBag />} label="Ventas registradas" value={sales.length} note={`${sales.filter(sale => sale.status === 'PENDIENTE').length} pendientes`} /></div><div className="section-grid"><section className="panel"><div className="panel-header"><div><h2>Últimas ventas</h2><p>Registros capturados por promotores.</p></div><Btn variant="ghost" onClick={() => setTab('ventas')}>Ver todas</Btn></div><div className="panel-body">{sales.length ? <div className="record-list">{sales.slice(0, 4).map(sale => <article className="record" key={sale.id}><span className="record-icon"><ShoppingBag /></span><div className="record-main"><strong>{clients.find(client => client.id === sale.clientId)?.name || 'Tienda'}</strong><small>{sale.id} · {sale.units} unidades · {formatSoles(sale.amountSoles)} · {formatDate(sale.date)}</small><em><Gift /> {sale.bonus || 'Sin canje'}</em></div><StatusPill status={sale.status} /></article>)}</div> : <Empty />}</div></section><section className="panel"><div className="panel-header"><div><h2>Control operativo</h2><p>Estado del flujo configurado.</p></div></div><div className="panel-body"><div className="check-list"><p className="check"><CheckCircle2 /> Mercado asignado por analista</p><p className="check"><CheckCircle2 /> Clientes vinculados a un mercado</p><p className="check"><CheckCircle2 /> Entrada y salida con fotografía</p><p className="check"><CheckCircle2 /> Evidencias según la venta</p></div></div></section></div><section className="panel"><div className="panel-header"><div><h2>Descargas de campaña</h2><p>Exporta la información local para compartirla con el equipo.</p></div></div><div className="panel-body"><div className="download-grid"><DownloadCard title="Ventas" detail={`${sales.length} registros con evidencias`} onClick={exportSales} /><DownloadCard title="Clientes" detail={`${clients.length} clientes vinculados`} onClick={exportClients} /><DownloadCard title="Usuarios" detail={`${users.length} accesos, roles y asignaciones`} onClick={exportUsers} /><DownloadCard title="Resumen" detail="Indicadores consolidados de campaña" onClick={exportSummary} /></div></div></section></>}
     {tab === 'mercados' && <section className="panel"><div className="panel-header"><div><h2>Mercados</h2><p>Catálogo importado desde Google Sheets o guardado localmente.</p></div><Btn onClick={importMarkets} disabled={syncing} testId="button-refresh-markets"><RefreshCw /> Actualizar hoja</Btn></div><div className="panel-body"><div className="data-table"><div className="table-row header"><span>Mercado</span><span>Distrito</span><span>Provincia</span><span>Departamento</span><span>Estado</span></div>{markets.map(market => <div className="table-row" key={market.id}><span><strong>{market.name}</strong><small>{market.id}</small></span><span>{market.district}</span><span>{market.province}</span><span>{market.department}</span><StatusPill status={market.status} /></div>)}</div></div></section>}
-    {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios</h2><p>Crea accesos, asigna roles y mercados.</p></div><Btn onClick={() => setModal('user')} testId="button-new-user"><Plus /> Nuevo usuario</Btn></div><div className="panel-body"><div className="record-list">{users.map(user => <article className="record" key={user.id}><span className="record-icon"><UserRound /></span><div className="record-main"><strong>{user.name}</strong><small>DNI {user.dni} · {user.role}</small>{user.marketId && <em><MapPin /> {marketMap[user.marketId]?.name || 'Mercado asignado'}</em>}</div><StatusPill status={user.status} /></article>)}</div></div></section>}
-    {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes</h2><p>Todos nacen activos y pertenecen a un mercado.</p></div><Btn onClick={() => setModal('client')} testId="button-new-client"><Plus /> Nuevo cliente</Btn></div><div className="panel-body"><div className="search-row"><div className="search-wrap"><Search /><Input value={query} onChange={setQuery} placeholder="Buscar cliente, código o mercado" testId="input-search-clients" /></div></div><div className="record-list">{filteredClients.length ? filteredClients.map(client => <article className="record" key={client.id}><span className="record-icon"><Store /></span><div className="record-main"><strong>{client.name}</strong><small>{client.code}{client.phone ? ` · ${client.phone}` : ''}</small><em><MapPin /> {marketMap[client.marketId]?.name}</em></div><StatusPill status={client.status} /></article>) : <Empty title="No hay coincidencias" detail="Prueba con otro nombre, código o mercado." />}</div></div></section>}
+      {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios</h2><p>Importa un CSV o crea accesos, roles y mercados.</p></div><div className="panel-actions"><CsvImportButton label="Importar usuarios" onImport={importUsers} testId="button-import-users" /><Btn onClick={() => setModal('user')} testId="button-new-user"><Plus /> Nuevo usuario</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: DNI, Nombre, Rol, Mercado y Estado. En promotores, el mercado es obligatorio.</div><div className="record-list">{users.map(user => <article className="record" key={user.id}><span className="record-icon"><UserRound /></span><div className="record-main"><strong>{user.name}</strong><small>DNI {user.dni} · {user.role}</small>{user.marketId && <em><MapPin /> {marketMap[user.marketId]?.name || 'Mercado asignado'}</em>}</div><StatusPill status={user.status} /></article>)}</div></div></section>}
+     {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes</h2><p>Importa un CSV o registra clientes activos por mercado.</p></div><div className="panel-actions"><CsvImportButton label="Importar clientes" onImport={importClients} testId="button-import-clients" /><Btn onClick={() => setModal('client')} testId="button-new-client"><Plus /> Nuevo cliente</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: Código, Cliente, Celular, Mercado y Estado.</div><div className="search-row"><div className="search-wrap"><Search /><Input value={query} onChange={setQuery} placeholder="Buscar cliente, código o mercado" testId="input-search-clients" /></div></div><div className="record-list">{filteredClients.length ? filteredClients.map(client => <article className="record" key={client.id}><span className="record-icon"><Store /></span><div className="record-main"><strong>{client.name}</strong><small>{client.code}{client.phone ? ` · ${client.phone}` : ''}</small><em><MapPin /> {marketMap[client.marketId]?.name}</em></div><StatusPill status={client.status} /></article>) : <Empty title="No hay coincidencias" detail="Prueba con otro nombre, código o mercado." />}</div></div></section>}
      {tab === 'ventas' && <section className="panel"><div className="panel-header"><div><h2>Ventas y evidencias</h2><p>Seguimiento de registros por promotor.</p></div><Btn variant="outline" onClick={exportSales}><Download /> Descargar</Btn></div><div className="panel-body">{sales.length ? <div className="record-list">{sales.map(sale => <article className="record" key={sale.id}><span className="record-icon"><ShoppingBag /></span><div className="record-main"><strong>{clients.find(client => client.id === sale.clientId)?.name || 'Tienda'}</strong><small>{sale.id} · {sale.units} unidades · {sale.mode} · {formatSoles(sale.amountSoles)}</small><em><Gift /> {sale.bonus || 'Sin canje'} · {formatDate(sale.date)}</em></div><StatusPill status={sale.status} /></article>)}</div> : <Empty />}</div></section>}
      {tab === 'marcaciones' && <section className="panel"><div className="panel-header"><div><h2>Marcaciones de asistencia</h2><p>Entradas y salidas registradas por los promotores.</p></div><Btn variant="outline" onClick={exportAttendance}><Download /> Descargar</Btn></div><div className="panel-body">{attendance.length ? <div className="record-list">{attendance.map(item => <article className="record" key={item.id}><span className="record-icon"><Clock3 /></span><div className="record-main"><strong>{clients.find(client => client.id === item.clientId)?.name || 'Tienda'}</strong><small>{users.find(user => user.id === item.promoterId)?.name} · {formatDate(item.date)}</small><em><Camera /> {item.photo}</em></div><span className={`status ${item.type === 'ENTRADA' ? 'active' : 'pending'}`}>{item.type}</span></article>)}</div> : <Empty title="Aún no hay marcaciones" detail="Las entradas y salidas aparecerán aquí." />}</div></section>}
-     {tab === 'inventario' && <InventoryModule markets={markets} inventory={inventory} movements={movements} actor={user} setInventory={setInventory} setMovements={setMovements} notify={notify} />}
+      {tab === 'inventario' && <InventoryModule markets={markets} inventory={inventory} movements={movements} actor={user} setInventory={setInventory} setMovements={setMovements} notify={notify} onImportCsv={importInventory} />}
     {modal === 'user' && <NewUserModal markets={marketOptions} onSave={saveUser} close={() => setModal(null)} />}
     {modal === 'client' && <NewClientModal markets={marketOptions} count={clients.length} onSave={saveClient} close={() => setModal(null)} />}
   </main>;
