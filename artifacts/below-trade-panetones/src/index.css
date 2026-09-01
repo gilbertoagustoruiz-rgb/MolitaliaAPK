@@ -319,6 +319,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .redemption-inputs > p { grid-column:1/-1; margin:0 0 1px; color:hsl(var(--muted)); font:10px var(--font-mono); letter-spacing:.06em; text-transform:uppercase; }
 .redemption-inputs .field { margin-bottom:0; }
 .redemption-inputs .form-label { font-size:10px; }
+.redemption-summary { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:15px; padding-top:14px; border-top:1px solid hsl(var(--line)); }
+.redemption-summary > p { grid-column:1/-1; margin:0 0 1px; color:hsl(var(--muted)); font:10px var(--font-mono); letter-spacing:.06em; text-transform:uppercase; }
+.redemption-summary > div { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 11px; border-radius:9px; background:hsl(var(--paper)); color:hsl(var(--muted)); font-size:12px; }
+.redemption-summary strong { color:hsl(var(--ink)); font:700 16px var(--font-mono); }
 .inventory-card > .btn { width:100%; }
 .inventory-history { border:1px solid hsl(var(--line)); border-radius:var(--radius); background:hsl(var(--surface)); box-shadow:0 5px 16px hsla(218 41% 17% / .05); overflow:hidden; }
 .movement-list { padding:0 24px; }
