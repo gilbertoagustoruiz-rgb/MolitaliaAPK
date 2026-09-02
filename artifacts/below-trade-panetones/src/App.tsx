@@ -19,6 +19,8 @@ type InventoryMovement = { id: string; marketId: string; kind: InventoryMovement
 type Toast = { message: string; error?: boolean };
 
 const MARKETS_SHEET = 'https://docs.google.com/spreadsheets/d/1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM/export?format=csv&gid=0';
+const CLIENTS_SHEET = 'https://docs.google.com/spreadsheets/d/1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA/export?format=csv&gid=0';
+const USERS_SHEET = 'https://docs.google.com/spreadsheets/d/1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo/export?format=csv&gid=0';
 const seedMarkets: Market[] = [
   { id: '1', department: 'AMAZONAS', province: 'CHACHAPOYAS', district: 'CHACHAPOYAS', name: 'MERCADO MERCA CHACHA', status: 'ACTIVO' },
   { id: '2', department: 'AMAZONAS', province: 'CHACHAPOYAS', district: 'CHACHAPOYAS', name: 'MERCADO MODELO', status: 'ACTIVO' },
@@ -164,6 +166,16 @@ function parseCsvRecords(text: string) {
   if (rows.length < 2) throw new Error('El CSV debe tener encabezados y al menos una fila');
   const headers = rows[0].map(normalizeCsvHeader);
   return rows.slice(1).map(row => Object.fromEntries(headers.map((header, index) => [header, (row[index] || '').trim()])));
+}
+async function fetchGoogleSheetRecords(url: string) {
+  const urls = [url, url.replace('/export?format=csv', '/gviz/tq?tqx=out:csv')];
+  let lastStatus = '';
+  for (const candidate of urls) {
+    const response = await fetch(candidate);
+    if (!response.ok) { lastStatus = `${response.status}`; continue; }
+    return parseCsvRecords(await response.text());
+  }
+  throw new Error(`Google Sheets no disponible (${lastStatus || 'sin respuesta'})`);
 }
 function normalizeCsvHeader(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -531,31 +543,43 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
       const nextMarkets = [...imported, ...preservedAssignments]; const demoUsers = ensureDemoPromoters(nextUsers, nextMarkets); const demoClients = ensureDemoClients(nextClients, nextMarkets); setMarkets(nextMarkets); setUsers(demoUsers); setClients(demoClients); setInventory(nextInventory); setMovements(nextMovements); writeStore('bt-markets', nextMarkets); writeStore('bt-users', demoUsers); writeStore('bt-clients', demoClients); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); notify(`${imported.length} mercados importados desde Google Sheets`);
     } catch { notify('No se pudo importar la hoja. Los mercados locales siguen disponibles.', true); } finally { setSyncing(false); }
   };
+  const mergeImportedUsers = (records: Record<string, string>[]) => {
+    const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
+    records.forEach((record, index) => {
+      const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const name = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']); const roleValue = normalizeCsvHeader(csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario'])).toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'mercado', 'market', 'nombremercado']);
+      if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN'].includes(roleValue) || (roleValue === 'PROMOTOR' && !csvMarketId(marketValue, markets))) { skipped += 1; return; }
+      imported.push({ id: csvField(record, ['id', 'codigo', 'idusuario']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? csvMarketId(marketValue, markets) : undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
+    });
+    if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
+    const next = [...users]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.dni === item.dni); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); const completed = ensureDemoPromoters(next, markets); setUsers(completed); writeStore('bt-users', completed);
+    return `${imported.length} usuarios importados${skipped ? ` · ${skipped} filas omitidas` : ''}`;
+  };
   const importUsers = async (file: File) => {
     setSyncing(true);
-    try {
-      const records = parseCsvRecords(await file.text()); const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
-      records.forEach((record, index) => {
-        const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const name = csvField(record, ['nombre', 'nombrecompleto', 'usuario']); const roleValue = normalizeCsvHeader(csvField(record, ['rol', 'cargo'])).toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'mercado', 'market']);
-        if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN'].includes(roleValue) || (roleValue === 'PROMOTOR' && !csvMarketId(marketValue, markets))) { skipped += 1; return; }
-        imported.push({ id: csvField(record, ['id', 'codigo']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? csvMarketId(marketValue, markets) : undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
-      });
-      if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
-      const next = [...users]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.dni === item.dni); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); setUsers(next); writeStore('bt-users', next); notify(`${imported.length} usuarios importados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
-    } catch (error) { notify(`No se pudo importar usuarios: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+    try { notify(mergeImportedUsers(parseCsvRecords(await file.text()))); } catch (error) { notify(`No se pudo importar usuarios: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+  };
+  const importUsersFromSheet = async () => {
+    setSyncing(true);
+    try { notify(mergeImportedUsers(await fetchGoogleSheetRecords(USERS_SHEET))); } catch (error) { notify(`No se pudo actualizar usuarios desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
+  };
+  const mergeImportedClients = (records: Record<string, string>[]) => {
+    const imported: Client[] = []; let skipped = 0; const importId = Date.now();
+    records.forEach((record, index) => {
+      const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda', 'razonsocial', 'nombrecomercial']); const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'mercado', 'market', 'nombremercado']), markets);
+      if (!name || !marketId) { skipped += 1; return; }
+      imported.push({ id: csvField(record, ['id', 'idcliente']) || `CLI-IMP-${importId}-${index + 1}`, code: csvField(record, ['codigo', 'code', 'codigocliente']) || `CLI-${String(clients.length + index + 1).padStart(6, '0')}`, name, phone: csvField(record, ['celular', 'telefono', 'phone', 'movil']) || undefined, marketId, status: csvStatus(csvField(record, ['estado', 'status'])) });
+    });
+    if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa cliente y mercado.');
+    const next = [...clients]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.code === item.code); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); const completed = ensureDemoClients(next, markets); setClients(completed); writeStore('bt-clients', completed);
+    return `${imported.length} clientes importados${skipped ? ` · ${skipped} filas omitidas` : ''}`;
   };
   const importClients = async (file: File) => {
     setSyncing(true);
-    try {
-      const records = parseCsvRecords(await file.text()); const imported: Client[] = []; let skipped = 0; const importId = Date.now();
-      records.forEach((record, index) => {
-        const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda']); const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'mercado', 'market']), markets);
-        if (!name || !marketId) { skipped += 1; return; }
-        imported.push({ id: csvField(record, ['id']) || `CLI-IMP-${importId}-${index + 1}`, code: csvField(record, ['codigo', 'code']) || `CLI-${String(clients.length + index + 1).padStart(6, '0')}`, name, phone: csvField(record, ['celular', 'telefono', 'phone']) || undefined, marketId, status: csvStatus(csvField(record, ['estado', 'status'])) });
-      });
-      if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa cliente y mercado.');
-      const next = [...clients]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.code === item.code); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); setClients(next); writeStore('bt-clients', next); notify(`${imported.length} clientes importados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
-    } catch (error) { notify(`No se pudo importar clientes: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+    try { notify(mergeImportedClients(parseCsvRecords(await file.text()))); } catch (error) { notify(`No se pudo importar clientes: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+  };
+  const importClientsFromSheet = async () => {
+    setSyncing(true);
+    try { notify(mergeImportedClients(await fetchGoogleSheetRecords(CLIENTS_SHEET))); } catch (error) { notify(`No se pudo actualizar clientes desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
   };
   const importInventory = async (file: File) => {
     setSyncing(true);
@@ -604,8 +628,8 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
     <nav className="tabs" aria-label="Módulos">{tabs.map(([value, label]) => <button key={value} className={`tab ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)} data-testid={`tab-${value}`}>{label}</button>)}</nav>
        {tab === 'inicio' && <SalesDashboard sales={sales} markets={markets} users={users} onViewSales={() => setTab('ventas')} onExport={exportSummary} />}
      {tab === 'mercados' && <section className="panel"><div className="panel-header"><div><h2>Mercados</h2><p>Catálogo importado desde Google Sheets o guardado localmente.</p></div><Btn onClick={importMarkets} disabled={syncing} testId="button-refresh-markets"><RefreshCw /> Actualizar hoja</Btn></div><div className="panel-body"><div className="data-table"><div className="table-row header"><span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span><span>Clientes</span><span>Promotores</span><span>Estado</span></div>{markets.map(market => <div className="table-row" key={market.id}><span><strong>{market.name}</strong><small>{market.id}</small></span><span>{market.region || '—'}</span><span>{market.department}</span><span>{market.province}</span><span>{market.district}</span><span>{marketAssignmentSummary[market.id]?.clients || 0}</span><span>{marketAssignmentSummary[market.id]?.promoters || 0}</span><StatusPill status={market.status} /></div>)}</div></div></section>}
-      {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios</h2><p>Importa un CSV o crea accesos, roles y mercados.</p></div><div className="panel-actions"><CsvImportButton label="Importar usuarios" onImport={importUsers} testId="button-import-users" /><CsvExampleButton onDownload={downloadUsersExample} testId="button-example-users" /><Btn onClick={() => setModal('user')} testId="button-new-user"><Plus /> Nuevo usuario</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: DNI, Nombre, Rol, Mercado y Estado. En promotores, el mercado es obligatorio.</div><div className="record-list">{users.map(user => <article className="record" key={user.id}><span className="record-icon"><UserRound /></span><div className="record-main"><strong>{user.name}</strong><small>DNI {user.dni} · {user.role}</small>{user.marketId && <em><MapPin /> {marketMap[user.marketId]?.name || 'Mercado asignado'}</em>}</div><StatusPill status={user.status} /></article>)}</div></div></section>}
-     {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes</h2><p>Importa un CSV o registra clientes activos por mercado.</p></div><div className="panel-actions"><CsvImportButton label="Importar clientes" onImport={importClients} testId="button-import-clients" /><CsvExampleButton onDownload={downloadClientsExample} testId="button-example-clients" /><Btn onClick={() => setModal('client')} testId="button-new-client"><Plus /> Nuevo cliente</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: Código, Cliente, Celular, Mercado y Estado.</div><div className="search-row"><div className="search-wrap"><Search /><Input value={query} onChange={setQuery} placeholder="Buscar cliente, código o mercado" testId="input-search-clients" /></div></div><div className="record-list">{filteredClients.length ? filteredClients.map(client => <article className="record" key={client.id}><span className="record-icon"><Store /></span><div className="record-main"><strong>{client.name}</strong><small>{client.code}{client.phone ? ` · ${client.phone}` : ''}</small><em><MapPin /> {marketMap[client.marketId]?.name}</em></div><StatusPill status={client.status} /></article>) : <Empty title="No hay coincidencias" detail="Prueba con otro nombre, código o mercado." />}</div></div></section>}
+       {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios</h2><p>Sincroniza la hoja de Google Sheets o importa un CSV.</p></div><div className="panel-actions"><Btn variant="outline" onClick={importUsersFromSheet} disabled={syncing} testId="button-refresh-users"><RefreshCw /> Actualizar hoja</Btn><CsvImportButton label="Importar usuarios" onImport={importUsers} testId="button-import-users" /><CsvExampleButton onDownload={downloadUsersExample} testId="button-example-users" /><Btn onClick={() => setModal('user')} testId="button-new-user"><Plus /> Nuevo usuario</Btn></div></div><div className="panel-body"><div className="import-hint">Origen conectado: Google Sheets · Columnas: DNI, Nombre, Rol, Mercado y Estado.</div><div className="record-list">{users.map(user => <article className="record" key={user.id}><span className="record-icon"><UserRound /></span><div className="record-main"><strong>{user.name}</strong><small>DNI {user.dni} · {user.role}</small>{user.marketId && <em><MapPin /> {marketMap[user.marketId]?.name || 'Mercado asignado'}</em>}</div><StatusPill status={user.status} /></article>)}</div></div></section>}
+     {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes</h2><p>Sincroniza la hoja de Google Sheets o importa un CSV.</p></div><div className="panel-actions"><Btn variant="outline" onClick={importClientsFromSheet} disabled={syncing} testId="button-refresh-clients"><RefreshCw /> Actualizar hoja</Btn><CsvImportButton label="Importar clientes" onImport={importClients} testId="button-import-clients" /><CsvExampleButton onDownload={downloadClientsExample} testId="button-example-clients" /><Btn onClick={() => setModal('client')} testId="button-new-client"><Plus /> Nuevo cliente</Btn></div></div><div className="panel-body"><div className="import-hint">Origen conectado: Google Sheets · Columnas: Código, Cliente, Celular, Mercado y Estado.</div><div className="search-row"><div className="search-wrap"><Search /><Input value={query} onChange={setQuery} placeholder="Buscar cliente, código o mercado" testId="input-search-clients" /></div></div><div className="record-list">{filteredClients.length ? filteredClients.map(client => <article className="record" key={client.id}><span className="record-icon"><Store /></span><div className="record-main"><strong>{client.name}</strong><small>{client.code}{client.phone ? ` · ${client.phone}` : ''}</small><em><MapPin /> {marketMap[client.marketId]?.name}</em></div><StatusPill status={client.status} /></article>) : <Empty title="No hay coincidencias" detail="Prueba con otro nombre, código o mercado." />}</div></div></section>}
       {tab === 'ventas' && <section className="panel"><div className="panel-header"><div><h2>Ventas y evidencias</h2><p>Seguimiento de registros por promotor.</p></div><Btn variant="outline" onClick={exportSales}><Download /> Descargar</Btn></div><div className="panel-body">{sales.length ? <div className="record-list">{sales.map(sale => { const promoter = users.find(item => item.id === sale.promoterId); return <article className="record" key={sale.id}><span className="record-icon"><ShoppingBag /></span><div className="record-main"><strong>{clients.find(client => client.id === sale.clientId)?.name || 'Tienda'}</strong><small>Promotor: {promoter?.name || 'No identificado'} · DNI {promoter?.dni || '—'} · {marketMap[sale.marketId]?.name || 'Mercado no identificado'}</small><small>{sale.id} · {sale.units} unidades · {sale.mode} · {formatSoles(sale.amountSoles)}</small><em><Gift /> {sale.bonus || 'Sin canje'} · {formatDate(sale.date)}</em></div><StatusPill status={sale.status} /></article>; })}</div> : <Empty />}</div></section>}
      {tab === 'marcaciones' && <section className="panel"><div className="panel-header"><div><h2>Marcaciones de asistencia</h2><p>Entradas y salidas registradas por los promotores.</p></div><Btn variant="outline" onClick={exportAttendance}><Download /> Descargar</Btn></div><div className="panel-body">{attendance.length ? <div className="record-list">{attendance.map(item => <article className="record" key={item.id}><span className="record-icon"><Clock3 /></span><div className="record-main"><strong>{clients.find(client => client.id === item.clientId)?.name || 'Tienda'}</strong><small>{users.find(user => user.id === item.promoterId)?.name} · {formatDate(item.date)}</small><em><Camera /> {item.photo}</em></div><span className={`status ${item.type === 'ENTRADA' ? 'active' : 'pending'}`}>{item.type}</span></article>)}</div> : <Empty title="Aún no hay marcaciones" detail="Las entradas y salidas aparecerán aquí." />}</div></section>}
       {tab === 'inventario' && <InventoryModule markets={markets} inventory={inventory} movements={movements} notify={notify} onImportCsv={importInventory} onDownloadExample={downloadInventoryExample} />}
