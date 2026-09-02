@@ -184,7 +184,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .search-wrap svg { position:absolute; left:13px; top:14px; width:17px; color:hsl(var(--muted)); }
 .search-wrap .input { padding-left:39px; }
 .data-table { overflow:auto; }
-.table-row { min-width:700px; display:grid; grid-template-columns:1.2fr 1.15fr 1fr 1fr auto; gap:14px; align-items:center; padding:15px 0; border-bottom:1px solid hsl(var(--line)); font-size:13px; }
+.table-row { min-width:860px; display:grid; grid-template-columns:1.25fr .9fr 1fr 1fr 1fr auto; gap:14px; align-items:center; padding:15px 0; border-bottom:1px solid hsl(var(--line)); font-size:13px; }
 .table-row.header { padding-top:0; color:hsl(var(--muted)); font:10px var(--font-mono); text-transform:uppercase; letter-spacing:.1em; }
 .table-row:last-child { border-bottom:0; }
 .table-row:not(.header):hover { background:hsl(42 32% 95%); }
