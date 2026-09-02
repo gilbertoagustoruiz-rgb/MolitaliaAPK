@@ -56,6 +56,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .input, .select { width:100%; min-height:45px; border:1px solid hsl(var(--line)); border-radius:11px; padding:0 13px; outline:none; color:hsl(var(--ink)); background:hsl(var(--surface)); transition:border .18s, box-shadow .18s; }
 .input::placeholder { color:hsl(214 13% 56%); opacity:1; }
 .input:focus, .select:focus { border-color:hsl(var(--blue)); box-shadow:0 0 0 3px hsla(var(--blue)/.16); }
+.textarea { min-height:76px; padding:11px 13px; resize:vertical; font:inherit; line-height:1.45; }
 .currency-input { display:flex; align-items:center; overflow:hidden; min-height:45px; border:1px solid hsl(213 29% 34%); border-radius:11px; background:hsl(216 37% 15%); }
 .currency-input > span { padding-left:13px; color:hsl(var(--orange)); font:700 13px var(--font-mono); }
 .currency-input .input { min-height:43px; border:0; border-radius:0; color:hsl(42 40% 98%); background:transparent; }
@@ -227,6 +228,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .dark-form-body { display:grid; grid-template-columns:1fr 1fr; gap:0 18px; padding:22px; }
 .promoter-page .field label { color:#b4c1cf; }
 .promoter-page .select, .promoter-page .input { color:#f4f0e8; border-color:#45627f; background:#14253a; }
+.attendance-gate { display:flex; align-items:flex-start; gap:9px; padding:12px 13px; border-radius:11px; margin:14px 0 2px; font-size:12px; line-height:1.45; }
+.attendance-gate svg { flex:0 0 auto; width:17px; margin-top:1px; }
+.attendance-gate.ready { color:#d8f1e2; background:rgba(53,145,92,.16); border:1px solid rgba(95,190,126,.35); }
+.attendance-gate.ready svg { color:#73d596; }
+.attendance-gate.blocked { color:#ffd8c7; background:rgba(211,91,35,.14); border:1px solid rgba(221,106,53,.35); }
+.attendance-gate.blocked svg { color:hsl(var(--orange)); }
 .promoter-page .select option { color:#f4f0e8; background:#17283f; }
 .mode-switch { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .mode-switch button { min-height:44px; display:flex; align-items:center; justify-content:center; gap:8px; border:1px solid #45627f; border-radius:9px; color:#b4c1cf; background:#14253a; font-weight:700; }
