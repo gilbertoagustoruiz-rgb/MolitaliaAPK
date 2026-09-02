@@ -1,2 +1,4 @@
 - [Tarifario privado de Google Sheets](google-sheets-pricing.md) — los precios se sincronizan con acceso autenticado y se conservan localmente para ventas offline.
 - [Almacenamiento operativo en Google Sheets](google-sheets-storage.md) — las colecciones se fusionan por ID en un libro central y localStorage funciona como cola offline.
+- [Referencias y roles](reference-sync.md) — las cuatro referencias se refrescan solas; el permiso de acceso y la etiqueta exacta del rol se conservan por separado.
+- [Evidencias fotográficas](photo-evidence.md) — las imágenes se encolan en IndexedDB, se suben a Drive y el enlace queda asociado al registro operativo.

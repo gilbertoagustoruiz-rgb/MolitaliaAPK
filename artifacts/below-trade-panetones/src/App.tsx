@@ -6,14 +6,14 @@ type Role = 'ANALISTA' | 'PROMOTOR' | 'SUPERVISOR' | 'TRADE' | 'ADMIN' | 'CLIENT
 type Status = 'ACTIVO' | 'INACTIVO';
 type SyncStatus = 'SINCRONIZADA' | 'PENDIENTE';
 type Market = { id: string; department: string; region?: string; province: string; district: string; name: string; status: Status };
-type AppUser = { id: string; dni: string; name: string; role: Role; marketId?: string; clientId?: string; password?: string; status: Status };
+type AppUser = { id: string; dni: string; name: string; role: Role; roleLabel?: string; marketId?: string; clientId?: string; password?: string; status: Status };
 type PromoterAssignment = { promoterId: string; marketIds: string[]; clientIds: string[]; updatedAt: string };
 type AssignmentRelationship = { key: string; promoter: AppUser; marketId: string; client: Client | null };
 type Client = { id: string; code: string; name: string; phone?: string; marketId: string; status: Status };
 type ProductPrice = { sku: string; product: string; unitsPerPackage: number; unitPrice: number; totalPrice: number; updatedAt: string };
-type Sale = { id: string; promoterId: string; promoterRole?: Role; clientId: string; marketId: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; status: SyncStatus };
-type Attendance = { id: string; promoterId: string; promoterRole?: Role; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
-type SessionClosure = { id: string; promoterId: string; promoterRole?: Role; marketId: string; clientId?: string; tastingUsed: number; leads: number; date: string; status: SyncStatus };
+type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; status: SyncStatus };
+type Attendance = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
+type SessionClosure = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; marketId: string; clientId?: string; tastingUsed: number; leads: number; date: string; status: SyncStatus };
 type RedemptionItemId = 'AVENA' | 'BATEA' | 'MANDIL' | 'SPAGHETTI';
 type RedemptionStock = Record<RedemptionItemId, number>;
 type MarketInventory = { marketId: string; tastingStock: number; redemptionStock: RedemptionStock; updatedAt: string; exchangeStock?: number };
@@ -32,12 +32,14 @@ type CloudSnapshot = {
   closures: SessionClosure[];
 };
 
-const MARKETS_SHEET = 'https://docs.google.com/spreadsheets/d/1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM/export?format=csv&gid=0';
+const MARKETS_SHEET_ID = '1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM';
+const MARKETS_SHEET = `https://docs.google.com/spreadsheets/d/${MARKETS_SHEET_ID}/export?format=csv&gid=0`;
 const CLIENTS_SHEET_ID = '1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA';
 const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
 const PRICES_SHEET_ID = '1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8';
 const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
 const GOOGLE_SHEETS_STORAGE_SYNC = '/api/google-sheets-storage/sync';
+const GOOGLE_DRIVE_PHOTO_UPLOAD = '/api/evidence-photos';
 const PRODUCT_PRICES_STORE_KEY = 'bt-product-prices';
 const DEFAULT_CAMPAIGN_TASTING_STOCK = 20;
 const DEFAULT_CAMPAIGN_REDEMPTION_STOCK = 10;
@@ -101,6 +103,72 @@ function cloudSnapshotFromStores(): CloudSnapshot {
     assignments: readStore<PromoterAssignment[]>('bt-promoter-assignments', []),
     closures: readStore<SessionClosure[]>('bt-session-closures', []),
   };
+}
+type PendingPhotoUpload = {
+  id: string;
+  entityType: 'sale' | 'attendance';
+  entityId: string;
+  field: 'receiptPhoto' | 'exchangePhoto' | 'photo';
+  fileName: string;
+  mimeType: string;
+  blob: Blob;
+};
+const PHOTO_QUEUE_DB = 'below-trade-photo-queue';
+const PHOTO_QUEUE_STORE = 'uploads';
+function openPhotoQueue() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(PHOTO_QUEUE_DB, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(PHOTO_QUEUE_STORE)) request.result.createObjectStore(PHOTO_QUEUE_STORE, { keyPath: 'id' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function queuePhotoUpload(file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) {
+  const database = await openPhotoQueue();
+  const upload: PendingPhotoUpload = { id: `${entityType}:${entityId}:${field}`, entityType, entityId, field, fileName: file.name || `${field}.jpg`, mimeType: file.type || 'image/jpeg', blob: file };
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(PHOTO_QUEUE_STORE, 'readwrite');
+    transaction.objectStore(PHOTO_QUEUE_STORE).put(upload);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+async function pendingPhotoUploads() {
+  const database = await openPhotoQueue();
+  const uploads = await new Promise<PendingPhotoUpload[]>((resolve, reject) => {
+    const request = database.transaction(PHOTO_QUEUE_STORE, 'readonly').objectStore(PHOTO_QUEUE_STORE).getAll();
+    request.onsuccess = () => resolve(request.result as PendingPhotoUpload[]);
+    request.onerror = () => reject(request.error);
+  });
+  database.close();
+  return uploads;
+}
+async function removePhotoUpload(id: string) {
+  const database = await openPhotoQueue();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(PHOTO_QUEUE_STORE, 'readwrite');
+    transaction.objectStore(PHOTO_QUEUE_STORE).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+  database.close();
+}
+async function uploadPhoto(upload: PendingPhotoUpload) {
+  const response = await fetch(GOOGLE_DRIVE_PHOTO_UPLOAD, {
+    method: 'POST',
+    headers: {
+      'Content-Type': upload.mimeType,
+      'X-File-Name': encodeURIComponent(upload.fileName),
+      'X-Record-Id': upload.entityId,
+      'X-Evidence-Type': upload.field,
+    },
+    body: upload.blob,
+  });
+  if (!response.ok) throw new Error('No se pudo cargar la evidencia');
+  return response.json() as Promise<{ id: string; url: string }>;
 }
 const APP_DATA_KEYS = ['bt-session', 'bt-markets', 'bt-users', 'bt-clients', 'bt-sales', 'bt-attendance', 'bt-inventory', 'bt-inventory-movements', 'bt-session-closures', PRODUCT_PRICES_STORE_KEY, DEFAULT_STOCK_SEED_KEY];
 const TEST_DATA_CLEARED_KEY = 'bt-test-data-cleared-v1';
@@ -195,12 +263,57 @@ function importedUserFromRecord(record: Record<string, string>, index: number, m
   const firstName = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']);
   const lastName = csvField(record, ['apellido', 'apellidos']);
   const name = [firstName, lastName].filter(Boolean).join(' ');
-  const rawRole = normalizeCsvHeader(csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']));
+  const roleLabel = csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']).trim().toUpperCase();
+  const rawRole = normalizeCsvHeader(roleLabel);
   const roleValue = rawRole.startsWith('promotor') ? 'PROMOTOR' : rawRole === 'coordinador' ? 'SUPERVISOR' : rawRole === 'cliente' ? 'CLIENTE' : rawRole.toUpperCase() as Role;
   const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
   const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
   if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN', 'CLIENTE'].includes(roleValue) || (roleValue === 'PROMOTOR' && marketValue && !marketId)) return null;
-  return { id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? marketId : undefined, clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined, password: csvField(record, ['clave', 'password', 'contrasena']) || undefined, status: csvStatus(csvField(record, ['estado', 'status'])) };
+  return { id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${index + 1}`, dni, name, role: roleValue, roleLabel: roleLabel || roleValue, marketId: roleValue === 'PROMOTOR' ? marketId : undefined, clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined, password: csvField(record, ['clave', 'password', 'contrasena']) || undefined, status: csvStatus(csvField(record, ['estado', 'status'])) };
+}
+function importedMarketsFromRecords(records: Record<string, string>[]) {
+  return records.flatMap<Market>((record) => {
+    const id = csvField(record, ['idmerc', 'idmercado', 'id', 'codigo']);
+    const name = csvField(record, ['nombredelmercado', 'mercado', 'nombre']);
+    if (!id || !name) return [];
+    const department = (csvField(record, ['departamento']) || 'LIMA').toUpperCase();
+    return [{
+      id,
+      department,
+      region: (csvField(record, ['region']) || department).toUpperCase(),
+      province: (csvField(record, ['provincia', 'ciudad']) || department).toUpperCase(),
+      district: (csvField(record, ['distrito']) || department).toUpperCase(),
+      name: name.toUpperCase(),
+      status: csvStatus(csvField(record, ['estado', 'status'])),
+    }];
+  });
+}
+function importedClientsFromRecords(records: Record<string, string>[], markets: Market[]) {
+  return records.flatMap<Client>((record) => {
+    const code = csvField(record, ['codigo', 'code', 'codigocliente']);
+    const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda', 'razonsocial', 'nombrecomercial']);
+    const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercado', 'market', 'nombremercado']), markets);
+    if (!code || !name || !marketId) return [];
+    return {
+      id: csvField(record, ['id', 'idcliente']) || code,
+      code,
+      name,
+      phone: csvField(record, ['celular', 'telefono', 'phone', 'movil']) || undefined,
+      marketId,
+      status: csvStatus(csvField(record, ['estado', 'status'])),
+    };
+  });
+}
+function mergeReferenceRows<T>(current: T[], incoming: T[], keyOf: (item: T) => string) {
+  const merged = new Map(current.map(item => [keyOf(item), item]));
+  incoming.forEach(item => {
+    const key = keyOf(item);
+    if (!key) return;
+    const previous = merged.get(key);
+    const defined = Object.fromEntries(Object.entries(item as Record<string, unknown>).filter(([, value]) => value !== undefined));
+    merged.set(key, { ...(previous as object), ...defined } as T);
+  });
+  return Array.from(merged.values());
 }
 function formatDate(value: string) { return new Date(value).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }); }
 function formatSoles(value: number | undefined) { return `S/ ${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
@@ -320,7 +433,7 @@ function aggregateSalesByPromoter(sales: Sale[], users: AppUser[]) {
   const userMap = Object.fromEntries(users.map(user => [user.id, user]));
   return aggregateSalesMetrics(sales, sale => {
     const promoter = userMap[sale.promoterId];
-    const role = sale.promoterRole || promoter?.role;
+    const role = sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role;
     return { key: sale.promoterId, label: promoter?.name || 'PROMOTOR NO IDENTIFICADO', subtitle: promoter ? `DNI ${promoter.dni} · Rol: ${role || 'ROL NO IDENTIFICADO'}` : `Rol: ${role || 'ROL NO IDENTIFICADO'}` };
   });
 }
@@ -477,7 +590,7 @@ function NewUserModal({ markets, clients, onSave, close }: { markets: { value: s
   const [dni, setDni] = useState(''); const [name, setName] = useState(''); const [marketId, setMarketId] = useState(''); const [clientId, setClientId] = useState(''); const [password, setPassword] = useState(''); const [role, setRole] = useState<Role>('PROMOTOR');
   const save = () => {
     if (dni.length !== 8 || !name.trim() || password.length < 8 || (role === 'PROMOTOR' && !marketId) || (role === 'CLIENTE' && !clientId)) return;
-    onSave({ id: `USR-${Date.now()}`, dni, name: name.trim(), role, marketId: role === 'PROMOTOR' ? marketId : undefined, clientId: role === 'CLIENTE' ? clientId : undefined, password, status: 'ACTIVO' }); close();
+    onSave({ id: `USR-${Date.now()}`, dni, name: name.trim(), role, roleLabel: role, marketId: role === 'PROMOTOR' ? marketId : undefined, clientId: role === 'CLIENTE' ? clientId : undefined, password, status: 'ACTIVO' }); close();
   };
   return <Modal title="Crear usuario" detail="Define acceso, rol y mercado o cliente." close={close}><div className="form-grid"><Field label="DNI *"><Input value={dni} onChange={value => setDni(value.replace(/\D/g, ''))} maxLength={8} testId="input-new-user-dni" /></Field><Field label="Nombre completo *"><Input value={name} onChange={setName} testId="input-new-user-name" /></Field><SelectField label="Rol *" value={role} onChange={value => setRole(value as Role)} items={['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN', 'CLIENTE'].map(value => ({ value, label: value }))} />{role === 'PROMOTOR' && <SelectField label="Mercado asignado *" value={marketId} onChange={setMarketId} items={markets} />}{role === 'CLIENTE' && <SelectField label="Cliente vinculado *" value={clientId} onChange={setClientId} items={clients.filter(client => client.status === 'ACTIVO').map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} placeholder="Seleccionar cliente" />}<Field label="Clave temporal *"><Input value={password} onChange={setPassword} type="password" testId="input-new-user-password" /></Field></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-user">Crear usuario</Btn></div></Modal>;
 }
@@ -651,10 +764,10 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   const [tab, setTab] = useState('inicio'); const [query, setQuery] = useState(''); const [modal, setModal] = useState<'user' | 'client' | null>(null); const [syncing, setSyncing] = useState(false);
    const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const marketAssignmentSummary = useMemo(() => Object.fromEntries(markets.map(market => [market.id, { clients: clients.filter(client => client.marketId === market.id && client.status === 'ACTIVO').length, promoters: users.filter(current => { if (current.role !== 'PROMOTOR' || current.status !== 'ACTIVO') return false; const assignment = assignments.find(item => item.promoterId === current.id); return assignment ? assignment.marketIds.includes(market.id) : current.marketId === market.id; }).length }])), [markets, clients, users, assignments]); const today = new Date().toISOString().slice(0, 10);
   const marketOptions = activeMarkets.map(market => ({ value: market.id, label: `${market.name} · ${market.region || market.department} · ${market.district}` }));
-   const exportSales = () => { downloadCsv(`ventas-${today}.csv`, ['Código venta', 'Fecha', 'Promotor', 'Rol promotor', 'Cliente', 'Mercado', 'Tipo', 'Marca / producto', 'Unidades por marca', 'Monto unitario por marca (S/)', 'Unidades totales', 'Peso (kg)', 'Ingreso total (S/)', 'Bonificación', 'Número de canjes', 'Comentario', 'Stock degustación entregado', 'Degustación utilizada', 'Stock degustación restante', 'Canjes entregados', 'Canjes realizados', 'Stock canjes restante', 'Detalle stock canjes restante', 'Estado'], sales.map(sale => { const breakdown = saleExportBreakdown(sale); const stock = summarizeMarketStock(sale.marketId, inventory, movements); const promoter = users.find(user => user.id === sale.promoterId); return [sale.id, formatDate(sale.date), promoter?.name || 'PROMOTOR NO IDENTIFICADO', sale.promoterRole || promoter?.role || 'ROL NO IDENTIFICADO', clients.find(client => client.id === sale.clientId)?.name, marketMap[sale.marketId]?.name, sale.mode, breakdown.map(item => item.label).join(' | '), breakdown.map(item => item.units).join(' | '), breakdown.map(item => item.unitPrice.toFixed(2)).join(' | '), sale.units, (sale.weightKg ?? 0).toFixed(3), (sale.amountSoles ?? 0).toFixed(2), sale.bonus || 'Sin canje', sale.redemptionCount ?? (sale.bonus ? 1 : 0), sale.comment || '', stock.tastingDelivered, stock.tastingUsed, stock.tastingRemaining, sumRedemptionStock(stock.redemptionDelivered), sumRedemptionStock(stock.redemptionUsed), sumRedemptionStock(stock.redemptionRemaining), redemptionStockText(stock.redemptionRemaining), sale.status]; })); notify('Reporte de ventas con stock por mercado descargado'); };
+    const exportSales = () => { downloadCsv(`ventas-${today}.csv`, ['Código venta', 'Fecha', 'Promotor', 'Rol promotor', 'Cliente', 'Mercado', 'Tipo', 'Marca / producto', 'Unidades por marca', 'Monto unitario por marca (S/)', 'Unidades totales', 'Peso (kg)', 'Ingreso total (S/)', 'Bonificación', 'Número de canjes', 'Comentario', 'Stock degustación entregado', 'Degustación utilizada', 'Stock degustación restante', 'Canjes entregados', 'Canjes realizados', 'Stock canjes restante', 'Detalle stock canjes restante', 'Estado'], sales.map(sale => { const breakdown = saleExportBreakdown(sale); const stock = summarizeMarketStock(sale.marketId, inventory, movements); const promoter = users.find(user => user.id === sale.promoterId); return [sale.id, formatDate(sale.date), promoter?.name || 'PROMOTOR NO IDENTIFICADO', sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role || 'ROL NO IDENTIFICADO', clients.find(client => client.id === sale.clientId)?.name, marketMap[sale.marketId]?.name, sale.mode, breakdown.map(item => item.label).join(' | '), breakdown.map(item => item.units).join(' | '), breakdown.map(item => item.unitPrice.toFixed(2)).join(' | '), sale.units, (sale.weightKg ?? 0).toFixed(3), (sale.amountSoles ?? 0).toFixed(2), sale.bonus || 'Sin canje', sale.redemptionCount ?? (sale.bonus ? 1 : 0), sale.comment || '', stock.tastingDelivered, stock.tastingUsed, stock.tastingRemaining, sumRedemptionStock(stock.redemptionDelivered), sumRedemptionStock(stock.redemptionUsed), sumRedemptionStock(stock.redemptionRemaining), redemptionStockText(stock.redemptionRemaining), sale.status]; })); notify('Reporte de ventas con stock por mercado descargado'); };
   const exportClients = () => { downloadCsv(`clientes-${today}.csv`, ['Código', 'Cliente', 'Celular', 'Mercado', 'Distrito', 'Estado'], clients.map(client => [client.code, client.name, client.phone || '', marketMap[client.marketId]?.name, marketMap[client.marketId]?.district, client.status])); notify('Reporte de clientes descargado'); };
-  const exportUsers = () => { downloadCsv(`usuarios-${today}.csv`, ['ID', 'DNI', 'Nombre', 'Rol', 'Mercado', 'Estado'], users.map(user => [user.id, user.dni, user.name, user.role, marketMap[user.marketId || '']?.name || '', user.status])); notify('Reporte de usuarios descargado'); };
-   const exportAttendance = () => { downloadCsv(`marcaciones-${today}.csv`, ['Código', 'Tipo', 'Fecha', 'Promotor', 'Rol promotor', 'Tienda', 'Foto', 'Estado'], attendance.map(item => { const promoter = users.find(user => user.id === item.promoterId); return [item.id, item.type, formatDate(item.date), promoter?.name || 'PROMOTOR NO IDENTIFICADO', item.promoterRole || promoter?.role || 'ROL NO IDENTIFICADO', clients.find(client => client.id === item.clientId)?.name, item.photo, item.status]; })); notify('Marcaciones descargadas'); };
+   const exportUsers = () => { downloadCsv(`usuarios-${today}.csv`, ['ID', 'DNI', 'Nombre', 'Rol', 'Mercado', 'Estado'], users.map(user => [user.id, user.dni, user.name, user.roleLabel || user.role, marketMap[user.marketId || '']?.name || '', user.status])); notify('Reporte de usuarios descargado'); };
+    const exportAttendance = () => { downloadCsv(`marcaciones-${today}.csv`, ['Código', 'Tipo', 'Fecha', 'Promotor', 'Rol promotor', 'Tienda', 'Foto', 'Estado'], attendance.map(item => { const promoter = users.find(user => user.id === item.promoterId); return [item.id, item.type, formatDate(item.date), promoter?.name || 'PROMOTOR NO IDENTIFICADO', item.promoterRoleLabel || promoter?.roleLabel || item.promoterRole || promoter?.role || 'ROL NO IDENTIFICADO', clients.find(client => client.id === item.clientId)?.name, item.photo, item.status]; })); notify('Marcaciones descargadas'); };
   const exportSummary = () => { const summaryRows = aggregateSalesByRegionCity(sales, markets); downloadCsv(`resumen-${today}.csv`, ['Región', 'Ciudad', 'Ventas (S/)', 'Ventas (unidades)', 'Venta (kg)', 'Pedidos'], summaryRows.map(row => [row.region, row.city, row.soles.toFixed(2), row.units, row.kilos.toFixed(3), row.salesCount])); notify('Resumen por región y ciudad descargado'); };
   const importMarkets = async () => {
     setSyncing(true);
@@ -672,10 +785,10 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   const mergeImportedUsers = (records: Record<string, string>[]) => {
     const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
     records.forEach((record, index) => {
-      const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const firstName = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']); const lastName = csvField(record, ['apellido', 'apellidos']); const name = [firstName, lastName].filter(Boolean).join(' '); const rawRole = normalizeCsvHeader(csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario'])); const roleValue = rawRole.startsWith('promotor') ? 'PROMOTOR' : rawRole.toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
+      const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const firstName = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']); const lastName = csvField(record, ['apellido', 'apellidos']); const name = [firstName, lastName].filter(Boolean).join(' '); const roleLabel = csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']).trim().toUpperCase(); const rawRole = normalizeCsvHeader(roleLabel); const roleValue = rawRole.startsWith('promotor') ? 'PROMOTOR' : rawRole === 'coordinador' ? 'SUPERVISOR' : rawRole.toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
       const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
        if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN', 'CLIENTE'].includes(roleValue) || (roleValue === 'PROMOTOR' && marketValue && !marketId)) { skipped += 1; return; }
-       imported.push({ id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? marketId : undefined, clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined, password: csvField(record, ['clave', 'password', 'contrasena']) || undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
+       imported.push({ id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, roleLabel: roleLabel || roleValue, marketId: roleValue === 'PROMOTOR' ? marketId : undefined, clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined, password: csvField(record, ['clave', 'password', 'contrasena']) || undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
     });
     if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
     const marketLoads = new Map(markets.map(market => [market.id, users.filter(item => item.role === 'PROMOTOR' && item.status === 'ACTIVO' && item.marketId === market.id).length]));
@@ -694,9 +807,10 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   const mergeImportedClients = (records: Record<string, string>[]) => {
     const imported: Client[] = []; let skipped = 0; const importId = Date.now();
     records.forEach((record, index) => {
-      const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda', 'razonsocial', 'nombrecomercial']); const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'mercado', 'market', 'nombremercado']), markets);
+      const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda', 'razonsocial', 'nombrecomercial']); const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercado', 'market', 'nombremercado']), markets);
       if (!name || !marketId) { skipped += 1; return; }
-      imported.push({ id: csvField(record, ['id', 'idcliente']) || `CLI-IMP-${importId}-${index + 1}`, code: csvField(record, ['codigo', 'code', 'codigocliente']) || `CLI-${String(clients.length + index + 1).padStart(6, '0')}`, name, phone: csvField(record, ['celular', 'telefono', 'phone', 'movil']) || undefined, marketId, status: csvStatus(csvField(record, ['estado', 'status'])) });
+      const code = csvField(record, ['codigo', 'code', 'codigocliente']) || `CLI-${String(clients.length + index + 1).padStart(6, '0')}`;
+      imported.push({ id: csvField(record, ['id', 'idcliente']) || code, code, name, phone: csvField(record, ['celular', 'telefono', 'phone', 'movil']) || undefined, marketId, status: csvStatus(csvField(record, ['estado', 'status'])) });
     });
     if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa cliente y mercado.');
     const next = [...clients]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.code === item.code); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); setClients(next); writeStore('bt-clients', next);
@@ -771,7 +885,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
 function PromoterNav({ active, onChange }: { active: 'MARCACIONES' | 'VENTAS'; onChange: (value: 'MARCACIONES' | 'VENTAS') => void }) {
   return <aside className="promoter-nav"><p className="nav-label">TAREAS DIARIAS</p><button className={active === 'MARCACIONES' ? 'active' : ''} onClick={() => onChange('MARCACIONES')} data-testid="nav-marcaciones"><Clock3 /> Marcaciones</button><button className={active === 'VENTAS' ? 'active' : ''} onClick={() => onChange('VENTAS')} data-testid="nav-ventas"><ShoppingBag /> Ventas</button></aside>;
 }
-function PromoterApp({ user, markets, clients, assignments, productPrices, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection }: { user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; productPrices: ProductPrice[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void }) {
+function PromoterApp({ user, markets, clients, assignments, productPrices, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection, enqueueEvidencePhoto }: { user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; productPrices: ProductPrice[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void; enqueueEvidencePhoto: (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) => void }) {
      const promoterAssignment = assignments.find(assignment => assignment.promoterId === user.id); const assignedMarketIds = promoterAssignment ? promoterAssignment.marketIds : user.marketId ? [user.marketId] : []; const selectableMarkets = markets.filter(market => market.status === 'ACTIVO' && assignedMarketIds.includes(market.id)); const [selectedMarketId, setSelectedMarketId] = useState(''); const [selectedClientId, setSelectedClientId] = useState(''); const [module, setModule] = useState<'MARCACIONES' | 'VENTAS'>('MARCACIONES'); const [view, setView] = useState<'LISTA' | 'NUEVA'>('LISTA');
      const available = clients.filter(client => client.marketId === selectedMarketId && client.status === 'ACTIVO' && (!promoterAssignment || promoterAssignment.clientIds.includes(client.id))); const selectedMarket = selectableMarkets.find(market => market.id === selectedMarketId);
       const [clientId, setClientId] = useState(''); const [mode, setMode] = useState<'UNIDADES' | 'PLANCHAS'>('UNIDADES'); const [sku, setSku] = useState(products[0].sku); const [unitQty, setUnitQty] = useState(1); const [unitPriceSoles, setUnitPriceSoles] = useState(''); const [brandPrices, setBrandPrices] = useState({ TODINNO: '', COSTA: '', PASQUALINO: '' }); const [planchas, setPlanchas] = useState(1); const [mix, setMix] = useState({ TODINNO: 1, COSTA: 1, PASQUALINO: 4 }); const [redemptionCount, setRedemptionCount] = useState(1); const [comment, setComment] = useState(''); const [receipt, setReceipt] = useState<File | null>(null); const [exchange, setExchange] = useState<File | null>(null);
@@ -795,8 +909,10 @@ function PromoterApp({ user, markets, clients, assignments, productPrices, sales
        if (!canSellForSelectedClient) { notify(exitedToday(clientId) ? 'Este cliente quedó cerrado por hoy después de registrar la salida. Podrás vender nuevamente mañana.' : 'Debes registrar una entrada activa en este cliente antes de registrar una venta.', true); return; }
        if (!pricesValid) { notify(mode === 'UNIDADES' ? 'Ingresa un precio unitario mayor a S/ 0.00.' : 'Ingresa el precio unitario de cada marca utilizada.', true); return; }
        if (!canConfirm) { notify(mode === 'PLANCHAS' && planchas > 80 ? 'Requiere autorización previa de Trade' : exceptionNeedsComment ? 'Para registrar 3 canjes, agrega el comentario de la excepción.' : bonus && missingRedemption ? `Stock insuficiente de ${redemptionLabel(missingRedemption[0])} para este canje` : Number.isFinite(saleAmount) && saleAmount > 0 ? 'Completa venta y evidencias' : 'Ingresa un precio unitario mayor a S/ 0.00', true); return; }
-        const id = `VTA-${new Date().getFullYear()}-${String(sales.length + 1).padStart(6, '0')}`; const now = new Date().toISOString(); const sale: Sale = { id, promoterId: user.id, promoterRole: user.role, clientId, marketId: selectedMarketId, mode, units: total, amountSoles: saleAmount, weightKg: orderWeightKg, unitPrices: mode === 'UNIDADES' ? { [selectedProduct.sku]: unitPrice } : brandUnitPrices, planchas: mode === 'PLANCHAS' ? planchas : undefined, mix: mode === 'PLANCHAS' ? mix : { [selectedProduct.brand]: unitQty }, bonus, redemptionCount: canjeCount, comment: comment.trim() || undefined, receiptPhoto: `BOLETA - ${id}.jpg`, exchangePhoto: bonus ? `${bonus} - CLIENTE - ${id}.jpg` : undefined, date: now, status: syncStatus() };
-     const next = [sale, ...sales]; setSales(next); writeStore('bt-sales', next);
+        const id = `VTA-${new Date().getFullYear()}-${String(sales.length + 1).padStart(6, '0')}`; const now = new Date().toISOString(); const sale: Sale = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId, marketId: selectedMarketId, mode, units: total, amountSoles: saleAmount, weightKg: orderWeightKg, unitPrices: mode === 'UNIDADES' ? { [selectedProduct.sku]: unitPrice } : brandUnitPrices, planchas: mode === 'PLANCHAS' ? planchas : undefined, mix: mode === 'PLANCHAS' ? mix : { [selectedProduct.brand]: unitQty }, bonus, redemptionCount: canjeCount, comment: comment.trim() || undefined, receiptPhoto: `BOLETA - ${id}.jpg`, exchangePhoto: bonus ? `${bonus} - CLIENTE - ${id}.jpg` : undefined, date: now, status: syncStatus() };
+      const next = [sale, ...sales]; setSales(next); writeStore('bt-sales', next);
+      if (receipt) enqueueEvidencePhoto(receipt, 'sale', id, 'receiptPhoto');
+      if (bonus && exchange) enqueueEvidencePhoto(exchange, 'sale', id, 'exchangePhoto');
       if (bonus) {
         const nextInventory = inventory.map(item => item.marketId === selectedMarketId ? { ...item, redemptionStock: requiredRedemptionEntries(requiredRedemptions).reduce((nextStock, [itemId, quantity]) => ({ ...nextStock, [itemId]: nextStock[itemId] - quantity }), { ...item.redemptionStock }), updatedAt: now } : item);
        const currentMovements = readStore<InventoryMovement[]>('bt-inventory-movements', []);
@@ -809,8 +925,9 @@ function PromoterApp({ user, markets, clients, assignments, productPrices, sales
    const finalizeAttendance = (tastingUsed = 0) => {
       const stock = inventory.find(item => item.marketId === selectedMarketId) || emptyInventory(selectedMarketId);
      if (tastingUsed > stock.tastingStock) { notify(`Solo hay ${stock.tastingStock} panetones de degustación disponibles`, true); return; }
-      const now = new Date(); const id = `MAR-${now.getFullYear()}-${String(attendance.length + 1).padStart(6, '0')}`; const type = markType; const item: Attendance = { id, promoterId: user.id, promoterRole: user.role, clientId: markClientId, marketId: selectedMarketId, type, photo: `${type} - ${available.find(client => client.id === markClientId)?.name || 'TIENDA'} - ${id}.jpg`, date: now.toISOString(), status: syncStatus() };
-     const next = [item, ...attendance]; setAttendance(next); writeStore('bt-attendance', next);
+      const now = new Date(); const id = `MAR-${now.getFullYear()}-${String(attendance.length + 1).padStart(6, '0')}`; const type = markType; const item: Attendance = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId: markClientId, marketId: selectedMarketId, type, photo: `${type} - ${available.find(client => client.id === markClientId)?.name || 'TIENDA'} - ${id}.jpg`, date: now.toISOString(), status: syncStatus() };
+      const next = [item, ...attendance]; setAttendance(next); writeStore('bt-attendance', next);
+      if (markPhoto) enqueueEvidencePhoto(markPhoto, 'attendance', id, 'photo');
      if (type === 'SALIDA') {
         const updatedInventory = inventory.some(entry => entry.marketId === selectedMarketId)
           ? inventory.map(entry => entry.marketId === selectedMarketId ? { ...entry, tastingStock: entry.tastingStock - tastingUsed, updatedAt: now.toISOString() } : entry)
@@ -852,50 +969,133 @@ function ClientApp({ user, clients, sales, markets }: { user: AppUser; clients: 
 
 export default function App() {
    clearTestDataOnce();
-     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' });
+     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
    const notify = (message: string, error = false) => setToast({ message, error });
-   const syncUsersForLogin = (imported: AppUser[]) => {
-     const next = [...users];
-     imported.forEach(item => {
-       const index = next.findIndex(current => current.id === item.id || current.dni === item.dni);
-       if (index >= 0) next[index] = { ...next[index], ...item };
-       else next.push(item);
-     });
-     setUsers(next);
-     writeStore('bt-users', next);
-   };
-   useEffect(() => {
-     let cancelled = false;
-     const syncUsersOnOpen = async () => {
-       try {
-         const records = await fetchGoogleSheetRecords(USERS_SHEET_ID);
-         const imported = records.map((record, index) => importedUserFromRecord(record, index, [])).filter((item): item is AppUser => Boolean(item));
-         if (!cancelled && imported.length) syncUsersForLogin(imported);
-       } catch {
-         // La app conserva los usuarios locales para permitir el acceso offline.
+     const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
+       if (upload.entityType === 'sale') {
+         setSales(current => {
+           const next = current.map(sale => sale.id === upload.entityId ? (upload.field === 'exchangePhoto' ? { ...sale, exchangePhoto: url } : { ...sale, receiptPhoto: url }) : sale);
+           writeStore('bt-sales', next);
+           return next;
+         });
+       } else {
+         setAttendance(current => {
+           const next = current.map(item => item.id === upload.entityId ? { ...item, photo: url } : item);
+           writeStore('bt-attendance', next);
+           return next;
+         });
        }
      };
-     void syncUsersOnOpen();
-     return () => { cancelled = true; };
-   }, []);
+     const flushEvidencePhotos = async () => {
+       if (photoUploadRunning.current || !navigator.onLine) return;
+       photoUploadRunning.current = true;
+       try {
+         for (const upload of await pendingPhotoUploads()) {
+           try {
+             const saved = await uploadPhoto(upload);
+             applyUploadedPhoto(upload, saved.url);
+             await removePhotoUpload(upload.id);
+           } catch {
+             break;
+           }
+         }
+       } finally {
+         photoUploadRunning.current = false;
+       }
+     };
+     const enqueueEvidencePhoto = (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) => {
+       void queuePhotoUpload(file, entityType, entityId, field).then(flushEvidencePhotos).catch(() => undefined);
+     };
     useEffect(() => {
       let cancelled = false;
-      const syncPricesOnOpen = async () => {
+      const syncReferences = async () => {
         try {
-          const records = await fetchGoogleSheetRecords(PRICES_SHEET_ID);
-          const imported = records.map(importedPriceFromRecord).filter((item): item is ProductPrice => Boolean(item));
-          if (!cancelled && imported.length) {
-            setProductPrices(imported);
-            writeStore(PRODUCT_PRICES_STORE_KEY, imported);
+          const [marketRecords, userRecords, clientRecords, priceRecords] = await Promise.all([
+            fetchGoogleSheetRecords(MARKETS_SHEET_ID),
+            fetchGoogleSheetRecords(USERS_SHEET_ID),
+            fetchGoogleSheetRecords(CLIENTS_SHEET_ID),
+            fetchGoogleSheetRecords(PRICES_SHEET_ID),
+          ]);
+          const importedMarkets = importedMarketsFromRecords(marketRecords);
+          if (!importedMarkets.length) throw new Error('La hoja de Mercados no contiene registros válidos');
+          const importedUsers = userRecords.map((record, index) => importedUserFromRecord(record, index, importedMarkets)).filter((item): item is AppUser => Boolean(item));
+          const importedClients = importedClientsFromRecords(clientRecords, importedMarkets);
+          const importedPrices = priceRecords.map(importedPriceFromRecord).filter((item): item is ProductPrice => Boolean(item));
+          if (cancelled) return;
+
+          const previousClients = readStore<Client[]>('bt-clients', []);
+          const clientAliases = new Map<string, string>();
+          importedClients.forEach(incoming => {
+            const previous = previousClients.find(item => item.code === incoming.code);
+            if (previous && previous.id !== incoming.id) clientAliases.set(previous.id, incoming.id);
+          });
+          const remapClientId = (clientId?: string) => clientId ? clientAliases.get(clientId) || clientId : clientId;
+
+          setMarkets(current => {
+            const next = mergeReferenceRows(current, importedMarkets, item => item.id);
+            writeStore('bt-markets', next);
+            return next;
+          });
+          setUsers(current => {
+            const next = mergeReferenceRows(current, importedUsers, item => item.id);
+            writeStore('bt-users', next);
+            return next;
+          });
+          setClients(current => {
+            const next = mergeReferenceRows(current, importedClients, item => item.code);
+            writeStore('bt-clients', next);
+            return next;
+          });
+          setProductPrices(current => {
+            const nextImported = importedPrices.map(price => {
+              const previous = current.find(item => item.sku === price.sku);
+              const unchanged = previous && previous.product === price.product && previous.unitsPerPackage === price.unitsPerPackage && previous.unitPrice === price.unitPrice && previous.totalPrice === price.totalPrice;
+              return unchanged ? { ...price, updatedAt: previous.updatedAt } : price;
+            });
+            const next = mergeReferenceRows(current, nextImported, item => item.sku);
+            writeStore(PRODUCT_PRICES_STORE_KEY, next);
+            return next;
+          });
+          if (clientAliases.size) {
+            setSales(current => {
+              const next = current.map(item => ({ ...item, clientId: remapClientId(item.clientId) || item.clientId }));
+              writeStore('bt-sales', next);
+              return next;
+            });
+            setAttendance(current => {
+              const next = current.map(item => ({ ...item, clientId: remapClientId(item.clientId) || item.clientId }));
+              writeStore('bt-attendance', next);
+              return next;
+            });
+            setAssignments(current => {
+              const next = current.map(item => ({ ...item, clientIds: item.clientIds.map(clientId => remapClientId(clientId) || clientId) }));
+              writeStore('bt-promoter-assignments', next);
+              return next;
+            });
+            setClosures(current => {
+              const next = current.map(item => ({ ...item, clientId: remapClientId(item.clientId) }));
+              writeStore('bt-session-closures', next);
+              return next;
+            });
           }
         } catch {
-          // Mantiene el último tarifario sincronizado para registrar ventas offline.
+          // Las últimas referencias válidas permanecen disponibles para trabajo offline.
+        } finally {
+          if (!cancelled) setReferencesReady(true);
         }
       };
-      void syncPricesOnOpen();
-      return () => { cancelled = true; };
+      const refresh = () => { if (navigator.onLine) void syncReferences(); };
+      void syncReferences();
+      const interval = window.setInterval(refresh, 30_000);
+      window.addEventListener('online', refresh);
+      return () => {
+        cancelled = true;
+        window.clearInterval(interval);
+        window.removeEventListener('online', refresh);
+      };
     }, []);
     useEffect(() => {
+       if (!referencesReady) return;
       let cancelled = false;
       const hydrateCloudStorage = async () => {
         try {
@@ -931,7 +1131,7 @@ export default function App() {
       };
       void hydrateCloudStorage();
       return () => { cancelled = true; };
-    }, []);
+     }, [referencesReady]);
     useEffect(() => {
       if (!cloudReady) return;
       const timeout = window.setTimeout(() => {
@@ -955,7 +1155,11 @@ export default function App() {
       return () => window.clearTimeout(timeout);
     }, [cloudReady, cloudSyncTick, markets, users, clients, sales, attendance, inventory, movements, assignments, closures]);
     useEffect(() => {
-      const retry = () => setCloudSyncTick(value => value + 1);
+       const retry = () => {
+         setCloudSyncTick(value => value + 1);
+         void flushEvidencePhotos();
+       };
+       void flushEvidencePhotos();
       window.addEventListener('online', retry);
       return () => window.removeEventListener('online', retry);
     }, []);
@@ -991,10 +1195,10 @@ export default function App() {
      if (tastingUsed > stock.tastingStock) { notify(`Solo hay ${stock.tastingStock} panetones de degustación disponibles`, true); return; }
      const now = new Date().toISOString(); const updatedInventory = marketId ? (inventory.some(item => item.marketId === marketId) ? inventory.map(item => item.marketId === marketId ? { ...item, tastingStock: item.tastingStock - tastingUsed, updatedAt: now } : item) : [...inventory, { ...stock, tastingStock: stock.tastingStock - tastingUsed, updatedAt: now }]) : inventory;
      const nextMovements = tastingUsed > 0 && marketId ? [{ id: `DEG-CIERRE-${activeUser.id}-${Date.now()}`, marketId, kind: 'DEGUSTACION' as const, quantity: tastingUsed, actorId: activeUser.id, actorName: activeUser.name, date: now, status: syncStatus() }, ...movements] : movements;
-      const closure: SessionClosure = { id: `CIERRE-${new Date().getFullYear()}-${String(closures.length + 1).padStart(6, '0')}`, promoterId: activeUser.id, promoterRole: activeUser.role, marketId, clientId, tastingUsed, leads, date: now, status: syncStatus() };
+      const closure: SessionClosure = { id: `CIERRE-${new Date().getFullYear()}-${String(closures.length + 1).padStart(6, '0')}`, promoterId: activeUser.id, promoterRole: activeUser.role, promoterRoleLabel: activeUser.roleLabel || activeUser.role, marketId, clientId, tastingUsed, leads, date: now, status: syncStatus() };
       const nextClosures = [closure, ...closures]; setClosures(nextClosures); writeStore('bt-session-closures', nextClosures);
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
-     return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+     return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }

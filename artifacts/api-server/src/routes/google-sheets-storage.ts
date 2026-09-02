@@ -170,6 +170,27 @@ function mergeSnapshots(
       collections[name].key,
     );
   });
+  const clientsByCode = new Map<string, StoredRecord[]>();
+  merged.clients.forEach((client) => {
+    const key = String(client.code ?? client.id ?? "").trim();
+    if (key) clientsByCode.set(key, [...(clientsByCode.get(key) ?? []), client]);
+  });
+  const aliases = new Map<string, string>();
+  merged.clients = Array.from(clientsByCode.entries()).map(([code, clients]) => {
+    const canonical = clients.find((client) => String(client.id) === code) ?? clients[clients.length - 1];
+    clients.forEach((client) => aliases.set(String(client.id), String(canonical.id)));
+    return canonical;
+  });
+  const remap = (value: unknown) => aliases.get(String(value ?? "")) ?? value;
+  merged.sales = merged.sales.map((record) => ({ ...record, clientId: remap(record.clientId) }));
+  merged.attendance = merged.attendance.map((record) => ({ ...record, clientId: remap(record.clientId) }));
+  merged.assignments = merged.assignments.map((record) => ({
+    ...record,
+    clientIds: Array.isArray(record.clientIds)
+      ? Array.from(new Set(record.clientIds.map(remap)))
+      : [],
+  }));
+  merged.closures = merged.closures.map((record) => ({ ...record, clientId: remap(record.clientId) }));
   return merged;
 }
 
