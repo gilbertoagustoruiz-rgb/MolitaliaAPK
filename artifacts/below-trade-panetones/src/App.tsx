@@ -36,6 +36,9 @@ const demoPromoterCredentials = [
   { id: 'USR-003', dni: '87654322', name: 'Promotor Demo 2', password: 'Promo2026-2' },
   { id: 'USR-004', dni: '87654323', name: 'Promotor Demo 3', password: 'Promo2026-3' },
 ];
+const DEFAULT_CAMPAIGN_TASTING_STOCK = 20;
+const DEFAULT_CAMPAIGN_REDEMPTION_STOCK = 10;
+const DEFAULT_STOCK_SEED_KEY = 'bt-inventory-defaults-v1';
 const redemptionItems: { id: RedemptionItemId; label: string }[] = [
   { id: 'AVENA', label: 'Avena' },
   { id: 'BATEA', label: 'Batea' },
@@ -43,10 +46,10 @@ const redemptionItems: { id: RedemptionItemId; label: string }[] = [
   { id: 'SPAGHETTI', label: 'Spaghetti' },
 ];
 function emptyRedemptionStock(): RedemptionStock {
-  return { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
+  return { AVENA: DEFAULT_CAMPAIGN_REDEMPTION_STOCK, BATEA: DEFAULT_CAMPAIGN_REDEMPTION_STOCK, MANDIL: DEFAULT_CAMPAIGN_REDEMPTION_STOCK, SPAGHETTI: DEFAULT_CAMPAIGN_REDEMPTION_STOCK };
 }
 function emptyInventory(marketId: string): MarketInventory {
-  return { marketId, tastingStock: 0, redemptionStock: emptyRedemptionStock(), updatedAt: new Date().toISOString() };
+  return { marketId, tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK, redemptionStock: emptyRedemptionStock(), updatedAt: new Date().toISOString() };
 }
 function ensureInventory(markets: Market[], stored: MarketInventory[]) {
   const byMarket = new Map(stored.map(item => [item.marketId, item]));
@@ -60,6 +63,13 @@ function ensureInventory(markets: Market[], stored: MarketInventory[]) {
     if (!byMarket.has(market.id)) next.push(emptyInventory(market.id));
   });
   return next;
+}
+function initializeCampaignInventory(markets: Market[], stored: MarketInventory[]) {
+  const normalized = ensureInventory(markets, stored);
+  if (readStore<boolean>(DEFAULT_STOCK_SEED_KEY, false)) return normalized;
+  const seeded = normalized.map(item => ({ ...item, tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK, redemptionStock: emptyRedemptionStock(), updatedAt: new Date().toISOString() }));
+  writeStore('bt-inventory', seeded); writeStore(DEFAULT_STOCK_SEED_KEY, true);
+  return seeded;
 }
 function demoMarkets(markets: Market[]) {
   return markets.filter(market => market.status === 'ACTIVO').slice(0, demoPromoterCredentials.length);
@@ -496,7 +506,7 @@ function PromoterApp({ user, markets, clients, sales, setSales, attendance, setA
 }
 
 export default function App() {
-   const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', seedMarkets)); const [users, setUsers] = useState<AppUser[]>(() => { const storedMarkets = readStore<Market[]>('bt-markets', seedMarkets); return ensureDemoPromoters(readStore('bt-users', seedUsers), storedMarkets); }); const [clients, setClients] = useState<Client[]>(() => { const storedMarkets = readStore<Market[]>('bt-markets', seedMarkets); return ensureDemoClients(readStore('bt-clients', seedClients), storedMarkets); }); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => ensureInventory(readStore<Market[]>('bt-markets', seedMarkets), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [toast, setToast] = useState<Toast | null>(null);
+   const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', seedMarkets)); const [users, setUsers] = useState<AppUser[]>(() => { const storedMarkets = readStore<Market[]>('bt-markets', seedMarkets); return ensureDemoPromoters(readStore('bt-users', seedUsers), storedMarkets); }); const [clients, setClients] = useState<Client[]>(() => { const storedMarkets = readStore<Market[]>('bt-markets', seedMarkets); return ensureDemoClients(readStore('bt-clients', seedClients), storedMarkets); }); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', seedMarkets), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [toast, setToast] = useState<Toast | null>(null);
   const notify = (message: string, error = false) => setToast({ message, error });
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
