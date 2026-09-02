@@ -244,6 +244,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .formula strong { color:#ffd0a8; }
 .brand-mix { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
 .brand-mix .field { margin-bottom:0; }
+.brand-prices { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:14px; }
+.brand-prices .field { margin-bottom:0; }
 .mix-status { display:flex; align-items:center; gap:6px; margin-top:13px; padding:8px 10px; border-radius:8px; font-size:11px; }
 .mix-status.valid { color:#a7e0bf; background:#214536; }
 .mix-status.invalid { color:#ffc7b6; background:#4a2e2b; }
@@ -271,6 +273,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .sale-form .field { margin-top:15px; }
 .sale-form .field:first-of-type { margin-top:0; }
 .sale-form .bonus-box, .sale-form .evidence-grid, .sale-form .trade-warning { margin-top:15px; }
+.order-total { display:grid; grid-template-columns:1fr auto; align-items:center; gap:3px 12px; padding:15px 16px; margin:16px 0; border:1px solid rgba(221,106,53,.4); border-radius:13px; background:rgba(211,91,35,.1); }
+.order-total span { color:#b9c7d5; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+.order-total strong { color:#fff; font-size:24px; letter-spacing:-.04em; }
+.order-total small { grid-column:1/-1; color:#d6a88f; font-size:12px; }
 .sale-form .form-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; padding-top:18px; border-top:1px solid #385572; }
 .recent { padding:20px; border:1px solid #385572; border-radius:14px; background:#1d314a; align-self:start; }
 .recent h3 { margin:0 0 4px; font-size:16px; }
@@ -393,7 +399,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
   .stat strong { font-size:22px; }
   .stat p { font-size:10px; }
   .panel-header, .panel-body { padding:17px; }
-  .download-grid, .check-list, .form-grid, .dark-form-body, .evidence-grid { grid-template-columns:1fr; }
+   .download-grid, .check-list, .form-grid, .dark-form-body, .evidence-grid, .brand-prices { grid-template-columns:1fr; }
   .download-card { grid-template-columns:35px minmax(0,1fr); }
   .download-card .btn { grid-column:1/-1; width:100%; }
   .tabs { width:100%; }
