@@ -11,7 +11,7 @@ type PromoterAssignment = { promoterId: string; marketIds: string[]; clientIds: 
 type AssignmentRelationship = { key: string; promoter: AppUser; marketId: string; client: Client | null };
 type Client = { id: string; code: string; name: string; phone?: string; marketId: string; status: Status };
 type ProductPrice = { sku: string; product: string; unitsPerPackage: number; unitPrice: number; totalPrice: number; updatedAt: string };
-type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; status: SyncStatus };
+type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; marketRegion?: string; marketDepartment?: string; marketProvince?: string; marketDistrict?: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; status: SyncStatus };
 type Attendance = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
 type SessionClosure = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; marketId: string; clientId?: string; tastingUsed: number; leads: number; date: string; status: SyncStatus };
 type RedemptionItemId = 'AVENA' | 'BATEA' | 'MANDIL' | 'SPAGHETTI';
@@ -436,6 +436,19 @@ function aggregateSalesByPromoter(sales: Sale[], users: AppUser[]) {
     const role = sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role;
     return { key: sale.promoterId, label: promoter?.name || 'PROMOTOR NO IDENTIFICADO', subtitle: promoter ? `DNI ${promoter.dni} · Rol: ${role || 'ROL NO IDENTIFICADO'}` : `Rol: ${role || 'ROL NO IDENTIFICADO'}` };
   });
+}
+function saleMarketLocation(sale: Sale, markets: Market[]) {
+  const market = markets.find(item => item.id === sale.marketId);
+  return {
+    region: sale.marketRegion || market?.region || 'SIN REGIÓN',
+    department: sale.marketDepartment || market?.department || 'SIN DEPARTAMENTO',
+    province: sale.marketProvince || market?.province || 'SIN PROVINCIA',
+    district: sale.marketDistrict || market?.district || 'SIN DISTRITO',
+  };
+}
+function saleMarketLocationText(sale: Sale, markets: Market[]) {
+  const location = saleMarketLocation(sale, markets);
+  return `${location.region} · ${location.department} · ${location.province} · ${location.district}`;
 }
 function aggregateSalesByBrand(sales: Sale[]) {
   const grouped = new Map<string, SalesMetricRow>();
