@@ -164,6 +164,19 @@ function csvMarketId(value: string, markets: Market[]) {
 function formatDate(value: string) { return new Date(value).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }); }
 function formatSoles(value: number | undefined) { return `S/ ${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function formatKilos(value: number | undefined) { return `${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`; }
+function saleExportBreakdown(sale: Sale) {
+  if (sale.mode === 'PLANCHAS') {
+    return Object.entries(sale.mix || {}).filter(([, quantity]) => Number(quantity) > 0).map(([brand, quantity]) => ({
+      label: planchaProducts[brand as keyof typeof planchaProducts]?.brand || brand,
+      units: Number(quantity),
+      unitPrice: Number(sale.unitPrices?.[brand] ?? 0),
+    }));
+  }
+  const sku = Object.keys(sale.unitPrices || {})[0];
+  const product = products.find(item => item.sku === sku);
+  const brand = product?.brand || Object.keys(sale.mix || {})[0] || 'Producto';
+  return [{ label: product ? `${product.brand} · ${product.name}` : brand, units: sale.units, unitPrice: Number(sale.unitPrices?.[sku] ?? (sale.units > 0 ? sale.amountSoles / sale.units : 0)) }];
+}
 function parseSoles(value: string) { return Number(value.replace(',', '.')); }
 function syncStatus(): SyncStatus { return typeof navigator === 'undefined' || navigator.onLine ? 'SINCRONIZADA' : 'PENDIENTE'; }
 function movementLabel(kind: InventoryMovementKind, itemId?: RedemptionItemId) {
@@ -349,7 +362,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   const [tab, setTab] = useState('inicio'); const [query, setQuery] = useState(''); const [modal, setModal] = useState<'user' | 'client' | null>(null); const [syncing, setSyncing] = useState(false);
   const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const today = new Date().toISOString().slice(0, 10);
   const marketOptions = activeMarkets.map(market => ({ value: market.id, label: `${market.name} · ${market.district}` }));
-  const exportSales = () => { downloadCsv(`ventas-${today}.csv`, ['Código venta', 'Fecha', 'Promotor', 'Cliente', 'Mercado', 'Tipo', 'Unidades', 'Peso (kg)', 'Ingreso (S/)', 'Bonificación', 'Comentario', 'Estado'], sales.map(sale => [sale.id, formatDate(sale.date), users.find(user => user.id === sale.promoterId)?.name, clients.find(client => client.id === sale.clientId)?.name, marketMap[sale.marketId]?.name, sale.mode, sale.units, (sale.weightKg ?? 0).toFixed(3), (sale.amountSoles ?? 0).toFixed(2), sale.bonus || 'Sin canje', sale.comment || '', sale.status])); notify('Reporte de ventas descargado'); };
+  const exportSales = () => { downloadCsv(`ventas-${today}.csv`, ['Código venta', 'Fecha', 'Promotor', 'Cliente', 'Mercado', 'Tipo', 'Marca / producto', 'Unidades por marca', 'Monto unitario por marca (S/)', 'Unidades totales', 'Peso (kg)', 'Ingreso total (S/)', 'Bonificación', 'Comentario', 'Estado'], sales.map(sale => { const breakdown = saleExportBreakdown(sale); return [sale.id, formatDate(sale.date), users.find(user => user.id === sale.promoterId)?.name, clients.find(client => client.id === sale.clientId)?.name, marketMap[sale.marketId]?.name, sale.mode, breakdown.map(item => item.label).join(' | '), breakdown.map(item => item.units).join(' | '), breakdown.map(item => item.unitPrice.toFixed(2)).join(' | '), sale.units, (sale.weightKg ?? 0).toFixed(3), (sale.amountSoles ?? 0).toFixed(2), sale.bonus || 'Sin canje', sale.comment || '', sale.status]; })); notify('Reporte de ventas con marcas y precios descargado'); };
   const exportClients = () => { downloadCsv(`clientes-${today}.csv`, ['Código', 'Cliente', 'Celular', 'Mercado', 'Distrito', 'Estado'], clients.map(client => [client.code, client.name, client.phone || '', marketMap[client.marketId]?.name, marketMap[client.marketId]?.district, client.status])); notify('Reporte de clientes descargado'); };
   const exportUsers = () => { downloadCsv(`usuarios-${today}.csv`, ['ID', 'DNI', 'Nombre', 'Rol', 'Mercado', 'Estado'], users.map(user => [user.id, user.dni, user.name, user.role, marketMap[user.marketId || '']?.name || '', user.status])); notify('Reporte de usuarios descargado'); };
   const exportAttendance = () => { downloadCsv(`marcaciones-${today}.csv`, ['Código', 'Tipo', 'Fecha', 'Promotor', 'Tienda', 'Foto', 'Estado'], attendance.map(item => [item.id, item.type, formatDate(item.date), users.find(user => user.id === item.promoterId)?.name, clients.find(client => client.id === item.clientId)?.name, item.photo, item.status])); notify('Marcaciones descargadas'); };
