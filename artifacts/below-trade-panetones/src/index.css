@@ -253,6 +253,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .assignment-person small { margin-top:3px; color:hsl(var(--muted)); font-size:11px; }
 .assignment-subtitle { display:flex; flex-direction:column; gap:3px; margin:20px 0 10px; }
 .assignment-subtitle small { color:hsl(var(--muted)); font-size:11px; }
+.assignment-search { margin-bottom:12px; }
+.assignment-search label { display:block; margin-bottom:7px; color:hsl(var(--muted)); font-size:11px; font-weight:700; letter-spacing:.04em; }
+.assignment-search .search-wrap svg { top:14px; }
+.assignment-dropdown .assignment-search { margin-bottom:13px; }
 .assignment-dropdown { position:relative; }
 .assignment-dropdown summary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:45px; padding:11px 13px; border:1px solid hsl(var(--line)); border-radius:10px; color:hsl(var(--ink)); background:hsl(var(--surface)); cursor:pointer; list-style:none; font-size:12px; }
 .assignment-dropdown summary::-webkit-details-marker { display:none; }
