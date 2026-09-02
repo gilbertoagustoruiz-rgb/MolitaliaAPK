@@ -286,6 +286,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .assignment-client { margin-top:7px; }
 .assignment-empty { margin:0; padding:11px 12px; border-radius:9px; color:hsl(var(--muted)); background:hsl(var(--paper)); font-size:12px; }
 .assignment-actions { display:flex; justify-content:flex-end; gap:9px; }
+.assignment-summary-count { min-width:126px; padding:12px 14px; border:1px solid hsl(var(--line)); border-radius:11px; background:hsl(var(--paper)); text-align:right; }
+.assignment-summary-count strong, .assignment-summary-count small { display:block; }
+.assignment-summary-count strong { color:hsl(var(--orange-deep)); font:700 22px var(--font-mono); letter-spacing:-.07em; }
+.assignment-summary-count small { margin-top:3px; color:hsl(var(--muted)); font-size:10px; }
+.assignment-table { overflow:auto; }
+.assignment-table-row { min-width:720px; display:grid; grid-template-columns:1.1fr 1fr 1.25fr auto; gap:14px; align-items:center; padding:14px 0; border-bottom:1px solid hsl(var(--line)); font-size:12px; }
+.assignment-table-row.header { padding-top:0; color:hsl(var(--muted)); font:10px var(--font-mono); text-transform:uppercase; letter-spacing:.08em; }
+.assignment-table-row:last-child { border-bottom:0; }
+.assignment-table-row:not(.header):hover { background:hsl(42 32% 95%); }
+.assignment-table-row strong, .assignment-table-row small { display:block; }
+.assignment-table-row small { margin-top:3px; color:hsl(var(--muted)); font-size:10px; }
+.assignment-unassigned { color:hsl(var(--orange-deep)); }
 .modal-backdrop { position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:20px; background:hsla(218 41% 12% / .56); }
 .modal { width:min(540px,100%); max-height:calc(100dvh - 40px); overflow:auto; padding:26px; border-radius:18px; background:hsl(var(--surface)); box-shadow:0 25px 80px hsla(218 41% 12% / .32); }
 .modal-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:22px; }
@@ -525,6 +537,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
    .assignment-counter { width:100%; text-align:left; }
    .assignment-actions, .assignment-actions .btn { width:100%; }
    .assignment-actions { flex-direction:column-reverse; }
+   .assignment-summary-count { width:100%; text-align:left; }
   .stats-grid { grid-template-columns:1fr 1fr; gap:9px; }
   .stat { min-height:125px; padding:14px; gap:9px; }
   .stat-icon { width:33px; height:33px; flex-basis:33px; }
