@@ -1,0 +1,1 @@
+- [Tarifario privado de Google Sheets](google-sheets-pricing.md) — los precios se sincronizan con acceso autenticado y se conservan localmente para ventas offline.

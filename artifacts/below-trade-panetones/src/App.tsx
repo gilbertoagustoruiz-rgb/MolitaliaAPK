@@ -10,6 +10,7 @@ type AppUser = { id: string; dni: string; name: string; role: Role; marketId?: s
 type PromoterAssignment = { promoterId: string; marketIds: string[]; clientIds: string[]; updatedAt: string };
 type AssignmentRelationship = { key: string; promoter: AppUser; marketId: string; client: Client | null };
 type Client = { id: string; code: string; name: string; phone?: string; marketId: string; status: Status };
+type ProductPrice = { sku: string; product: string; unitsPerPackage: number; unitPrice: number; totalPrice: number; updatedAt: string };
 type Sale = { id: string; promoterId: string; clientId: string; marketId: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; status: SyncStatus };
 type Attendance = { id: string; promoterId: string; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
 type SessionClosure = { id: string; promoterId: string; marketId: string; clientId?: string; tastingUsed: number; leads: number; date: string; status: SyncStatus };
@@ -23,7 +24,9 @@ type Toast = { message: string; error?: boolean };
 const MARKETS_SHEET = 'https://docs.google.com/spreadsheets/d/1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM/export?format=csv&gid=0';
 const CLIENTS_SHEET_ID = '1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA';
 const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
+const PRICES_SHEET_ID = '1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8';
 const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
+const PRODUCT_PRICES_STORE_KEY = 'bt-product-prices';
 const DEFAULT_CAMPAIGN_TASTING_STOCK = 20;
 const DEFAULT_CAMPAIGN_REDEMPTION_STOCK = 10;
 const DEFAULT_STOCK_SEED_KEY = 'bt-inventory-defaults-v1';
@@ -73,7 +76,7 @@ function readStore<T>(key: string, fallback: T): T {
   try { const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : fallback; } catch { return fallback; }
 }
 function writeStore(key: string, value: unknown) { localStorage.setItem(key, JSON.stringify(value)); }
-const APP_DATA_KEYS = ['bt-session', 'bt-markets', 'bt-users', 'bt-clients', 'bt-sales', 'bt-attendance', 'bt-inventory', 'bt-inventory-movements', 'bt-session-closures', DEFAULT_STOCK_SEED_KEY];
+const APP_DATA_KEYS = ['bt-session', 'bt-markets', 'bt-users', 'bt-clients', 'bt-sales', 'bt-attendance', 'bt-inventory', 'bt-inventory-movements', 'bt-session-closures', PRODUCT_PRICES_STORE_KEY, DEFAULT_STOCK_SEED_KEY];
 const TEST_DATA_CLEARED_KEY = 'bt-test-data-cleared-v1';
 function clearTestDataOnce() {
   if (typeof localStorage === 'undefined' || localStorage.getItem(TEST_DATA_CLEARED_KEY)) return;
@@ -138,6 +141,24 @@ function csvField(record: Record<string, string>, aliases: string[]) {
 }
 function csvStatus(value: string): Status {
   return normalizeCsvHeader(value) === 'inactivo' ? 'INACTIVO' : 'ACTIVO';
+}
+function csvNumber(value: string) {
+  const normalized = value.replace(/[^\d,.-]/g, '').replace(',', '.');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function importedPriceFromRecord(record: Record<string, string>): ProductPrice | null {
+  const sku = csvField(record, ['sku', 'codigo', 'codigoproducto']);
+  const unitPrice = csvNumber(csvField(record, ['preciounitario', 'punitario', 'precio']));
+  if (!sku || unitPrice <= 0) return null;
+  return {
+    sku,
+    product: csvField(record, ['producto', 'descripcion', 'nombreproducto']) || sku,
+    unitsPerPackage: csvNumber(csvField(record, ['und', 'unidades', 'unidadesporcaja'])),
+    unitPrice,
+    totalPrice: csvNumber(csvField(record, ['preciototal', 'total'])),
+    updatedAt: new Date().toISOString(),
+  };
 }
 function csvMarketId(value: string, markets: Market[]) {
   const normalized = normalizeCsvHeader(value);
@@ -361,8 +382,8 @@ function CsvImportButton({ label, onImport, testId }: { label: string; onImport:
 function CsvExampleButton({ onDownload, testId }: { onDownload: () => void; testId: string }) {
   return <Btn variant="outline" onClick={onDownload} testId={testId}><Download /> Descargar ejemplo</Btn>;
 }
-function Input({ value, onChange, placeholder, type = 'text', min, max, step, maxLength, autoComplete, testId }: { value: string | number; onChange: (value: string) => void; placeholder?: string; type?: string; min?: number; max?: number; step?: number; maxLength?: number; autoComplete?: string; testId?: string }) {
-  return <input className="input" value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} type={type} min={min} max={max} step={step} maxLength={maxLength} autoComplete={autoComplete} data-testid={testId} />;
+function Input({ value, onChange, placeholder, type = 'text', min, max, step, maxLength, autoComplete, readOnly = false, testId }: { value: string | number; onChange: (value: string) => void; placeholder?: string; type?: string; min?: number; max?: number; step?: number; maxLength?: number; autoComplete?: string; readOnly?: boolean; testId?: string }) {
+  return <input className="input" value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} type={type} min={min} max={max} step={step} maxLength={maxLength} autoComplete={autoComplete} readOnly={readOnly} data-testid={testId} />;
 }
 function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
   return <label className={`field ${className}`}><span className="form-label">{label}</span>{children}</label>;
@@ -723,11 +744,23 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
 function PromoterNav({ active, onChange }: { active: 'MARCACIONES' | 'VENTAS'; onChange: (value: 'MARCACIONES' | 'VENTAS') => void }) {
   return <aside className="promoter-nav"><p className="nav-label">TAREAS DIARIAS</p><button className={active === 'MARCACIONES' ? 'active' : ''} onClick={() => onChange('MARCACIONES')} data-testid="nav-marcaciones"><Clock3 /> Marcaciones</button><button className={active === 'VENTAS' ? 'active' : ''} onClick={() => onChange('VENTAS')} data-testid="nav-ventas"><ShoppingBag /> Ventas</button></aside>;
 }
-function PromoterApp({ user, markets, clients, assignments, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection }: { user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void }) {
+function PromoterApp({ user, markets, clients, assignments, productPrices, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection }: { user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; productPrices: ProductPrice[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void }) {
      const promoterAssignment = assignments.find(assignment => assignment.promoterId === user.id); const assignedMarketIds = promoterAssignment ? promoterAssignment.marketIds : user.marketId ? [user.marketId] : []; const selectableMarkets = markets.filter(market => market.status === 'ACTIVO' && assignedMarketIds.includes(market.id)); const [selectedMarketId, setSelectedMarketId] = useState(''); const [selectedClientId, setSelectedClientId] = useState(''); const [module, setModule] = useState<'MARCACIONES' | 'VENTAS'>('MARCACIONES'); const [view, setView] = useState<'LISTA' | 'NUEVA'>('LISTA');
      const available = clients.filter(client => client.marketId === selectedMarketId && client.status === 'ACTIVO' && (!promoterAssignment || promoterAssignment.clientIds.includes(client.id))); const selectedMarket = selectableMarkets.find(market => market.id === selectedMarketId);
       const [clientId, setClientId] = useState(''); const [mode, setMode] = useState<'UNIDADES' | 'PLANCHAS'>('UNIDADES'); const [sku, setSku] = useState(products[0].sku); const [unitQty, setUnitQty] = useState(1); const [unitPriceSoles, setUnitPriceSoles] = useState(''); const [brandPrices, setBrandPrices] = useState({ TODINNO: '', COSTA: '', PASQUALINO: '' }); const [planchas, setPlanchas] = useState(1); const [mix, setMix] = useState({ TODINNO: 1, COSTA: 1, PASQUALINO: 4 }); const [redemptionCount, setRedemptionCount] = useState(1); const [comment, setComment] = useState(''); const [receipt, setReceipt] = useState<File | null>(null); const [exchange, setExchange] = useState<File | null>(null);
      const [markClientId, setMarkClientId] = useState(''); const [markType, setMarkType] = useState<'ENTRADA' | 'SALIDA'>('ENTRADA'); const [markPhoto, setMarkPhoto] = useState<File | null>(null); const [search, setSearch] = useState(''); const [modeFilter, setModeFilter] = useState<'TODO' | 'UNIDADES' | 'PLANCHAS'>('TODO');
+      const priceBySku = useMemo(() => Object.fromEntries(productPrices.map(price => [price.sku, price])), [productPrices]);
+      useEffect(() => {
+        const price = priceBySku[sku]?.unitPrice;
+        setUnitPriceSoles(price ? String(price) : '');
+      }, [sku, priceBySku]);
+      useEffect(() => {
+        setBrandPrices({
+          TODINNO: String(priceBySku[planchaProducts.TODINNO.sku]?.unitPrice || ''),
+          COSTA: String(priceBySku[planchaProducts.COSTA.sku]?.unitPrice || ''),
+          PASQUALINO: String(priceBySku[planchaProducts.PASQUALINO.sku]?.unitPrice || ''),
+        });
+      }, [priceBySku]);
      useEffect(() => { setClientId(selectedClientId); setMarkClientId(selectedClientId); onSessionSelection({ marketId: selectedMarketId, clientId: selectedClientId }); }, [selectedMarketId, selectedClientId]);
       const selectedProduct = products.find(product => product.sku === sku) || products[0]; const brandUnitPrices = Object.fromEntries(Object.keys(planchaProducts).map(brand => [brand, parseSoles(brandPrices[brand as keyof typeof brandPrices])])) as Record<string, number>; const marketStock = inventory.find(item => item.marketId === selectedMarketId) || emptyInventory(selectedMarketId); const redemptionTotal = redemptionItems.reduce((sum, item) => sum + marketStock.redemptionStock[item.id], 0); const totalMix = mix.TODINNO + mix.COSTA + mix.PASQUALINO; const total = mode === 'UNIDADES' ? unitQty : totalMix; const unitPrice = parseSoles(unitPriceSoles); const saleAmount = mode === 'UNIDADES' ? unitQty * unitPrice : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (brandUnitPrices[brand] || 0), 0); const orderWeightKg = mode === 'UNIDADES' ? unitQty * selectedProduct.weightKg : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0), 0); const weightPerPlanchaKg = mode === 'PLANCHAS' && planchas > 0 ? orderWeightKg / planchas : 0; const pricesValid = mode === 'UNIDADES' ? unitPrice > 0 : Object.entries(mix).filter(([, quantity]) => quantity > 0).every(([brand]) => (brandUnitPrices[brand] || 0) > 0); const bonus = bonusFor(mode, total, planchas); const canjeCount = bonus ? redemptionCount : 0; const requiredRedemptions = multiplyRedemptionRequirements(parseBonusItems(bonus), canjeCount); const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(([itemId, quantity]) => marketStock.redemptionStock[itemId] < quantity); const exceptionNeedsComment = Boolean(bonus && canjeCount === 3 && !comment.trim()); const validMix = mode === 'UNIDADES' || (totalMix === planchas * 6 && Object.values(mix).every(value => value >= 1)); const saleFormValid = Boolean(clientId && receipt && pricesValid && Number.isFinite(saleAmount) && saleAmount > 0 && validMix && (!bonus || (exchange && !missingRedemption && !exceptionNeedsComment)) && !(mode === 'PLANCHAS' && planchas > 80));
     const mineSales = sales.filter(sale => sale.promoterId === user.id); const mineAttendance = attendance.filter(item => item.promoterId === user.id); const today = new Date().toISOString().slice(0, 10); const todayAttendanceFor = (id: string) => mineAttendance.filter(item => item.clientId === id && item.date.slice(0, 10) === today); const latestAttendanceFor = (id: string) => todayAttendanceFor(id).sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime())[0]; const exitedToday = (id: string) => todayAttendanceFor(id).some(item => item.type === 'SALIDA'); const sellingClients = available.filter(client => latestAttendanceFor(client.id)?.type === 'ENTRADA' && !exitedToday(client.id)); const canSellForSelectedClient = Boolean(clientId && latestAttendanceFor(clientId)?.type === 'ENTRADA' && !exitedToday(clientId)); const canConfirm = Boolean(canSellForSelectedClient && saleFormValid); const filteredSales = mineSales.filter(sale => (modeFilter === 'TODO' || sale.mode === modeFilter) && `${sale.id} ${clients.find(client => client.id === sale.clientId)?.name || ''} ${sale.bonus || ''} ${sale.comment || ''}`.toLowerCase().includes(search.toLowerCase())); const filteredAttendance = mineAttendance.filter(item => `${clients.find(client => client.id === item.clientId)?.name || ''} ${item.type}`.toLowerCase().includes(search.toLowerCase()));
@@ -744,7 +777,7 @@ function PromoterApp({ user, markets, clients, assignments, sales, setSales, att
         const nextMovements = [...canjeMovements, ...currentMovements];
        setInventory(nextInventory); setMovements(nextMovements); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements);
      }
-      setUnitPriceSoles(''); setBrandPrices({ TODINNO: '', COSTA: '', PASQUALINO: '' }); setRedemptionCount(1); setComment(''); setReceipt(null); setExchange(null); setView('LISTA'); notify(bonus ? `${canjeCount} canje${canjeCount === 1 ? '' : 's'} registrado${canjeCount === 1 ? '' : 's'}. Stock actualizado.` : 'Venta sin canje registrada');
+       setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || '')); setBrandPrices({ TODINNO: String(priceBySku[planchaProducts.TODINNO.sku]?.unitPrice || ''), COSTA: String(priceBySku[planchaProducts.COSTA.sku]?.unitPrice || ''), PASQUALINO: String(priceBySku[planchaProducts.PASQUALINO.sku]?.unitPrice || '') }); setRedemptionCount(1); setComment(''); setReceipt(null); setExchange(null); setView('LISTA'); notify(bonus ? `${canjeCount} canje${canjeCount === 1 ? '' : 's'} registrado${canjeCount === 1 ? '' : 's'}. Stock actualizado.` : 'Venta sin canje registrada');
   };
    const finalizeAttendance = (tastingUsed = 0) => {
       const stock = inventory.find(item => item.marketId === selectedMarketId) || emptyInventory(selectedMarketId);
@@ -792,7 +825,7 @@ function ClientApp({ user, clients, sales, markets }: { user: AppUser; clients: 
 
 export default function App() {
    clearTestDataOnce();
-   const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' });
+    const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' });
    const notify = (message: string, error = false) => setToast({ message, error });
    const syncUsersForLogin = (imported: AppUser[]) => {
      const next = [...users];
@@ -818,6 +851,23 @@ export default function App() {
      void syncUsersOnOpen();
      return () => { cancelled = true; };
    }, []);
+    useEffect(() => {
+      let cancelled = false;
+      const syncPricesOnOpen = async () => {
+        try {
+          const records = await fetchGoogleSheetRecords(PRICES_SHEET_ID);
+          const imported = records.map(importedPriceFromRecord).filter((item): item is ProductPrice => Boolean(item));
+          if (!cancelled && imported.length) {
+            setProductPrices(imported);
+            writeStore(PRODUCT_PRICES_STORE_KEY, imported);
+          }
+        } catch {
+          // Mantiene el último tarifario sincronizado para registrar ventas offline.
+        }
+      };
+      void syncPricesOnOpen();
+      return () => { cancelled = true; };
+    }, []);
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => undefined);
@@ -855,5 +905,5 @@ export default function App() {
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
-     return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+     return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }
