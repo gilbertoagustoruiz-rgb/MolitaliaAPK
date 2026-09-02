@@ -347,25 +347,12 @@ function Modal({ title, detail, children, close }: { title: string; detail: stri
   </div>;
 }
 
-function Login({ users, onLogin, onSyncUsers, notify }: { users: AppUser[]; onLogin: (user: AppUser) => void; onSyncUsers: (users: AppUser[]) => void; notify: (message: string, error?: boolean) => void }) {
+function Login({ users, onLogin, notify }: { users: AppUser[]; onLogin: (user: AppUser) => void; notify: (message: string, error?: boolean) => void }) {
   const [dni, setDni] = useState(''); const [password, setPassword] = useState('');
-  const [syncing, setSyncing] = useState(false);
   const submit = () => {
     const user = users.find(item => item.dni === dni && item.password === password && item.status === 'ACTIVO') || null;
     if (!user) { notify('DNI o clave incorrectos', true); return; }
     writeStore('bt-session', user); onLogin(user);
-  };
-  const syncUsers = async () => {
-    setSyncing(true);
-    try {
-      const records = await fetchGoogleSheetRecords(USERS_SHEET_ID);
-      const imported = records.map((record, index) => importedUserFromRecord(record, index, [])).filter((item): item is AppUser => Boolean(item));
-      if (!imported.length) throw new Error('No se encontró ningún usuario válido en la hoja.');
-      onSyncUsers(imported);
-      notify(`${imported.length} usuarios sincronizados. Ya puedes ingresar con tu DNI y clave.`);
-    } catch (error) {
-      notify(`No se pudo sincronizar usuarios: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true);
-    } finally { setSyncing(false); }
   };
   return <main className="login-shell">
     <section className="login-hero"><Logo compact /><div className="hero-copy"><span className="eyebrow">CAMPAÑA 2026</span><h1>Panetones Molitalia</h1><p>Ventas, clientes, dinámicas y evidencias en una sola aplicación.</p></div><div className="hero-foot"><span /> Captura segura para trabajo en campo</div></section>
@@ -373,7 +360,6 @@ function Login({ users, onLogin, onSyncUsers, notify }: { users: AppUser[]; onLo
        <Field label="DNI"><Input value={dni} onChange={value => setDni(value.replace(/\D/g, ''))} placeholder="12345678" maxLength={8} autoComplete="username" testId="input-dni" /></Field>
        <Field label="Clave"><Input value={password} onChange={setPassword} placeholder="Ingresa tu clave" type="password" autoComplete="current-password" testId="input-password" /></Field>
        <Btn className="primary full" type="submit" testId="button-login">Ingresar</Btn>
-        <div className="login-sync"><p>{users.length ? '¿Se actualizaron los usuarios en Google Sheets?' : 'No hay usuarios cargados en este dispositivo.'}</p><Btn variant="outline" onClick={syncUsers} disabled={syncing} testId="button-sync-users-login">{syncing ? <RefreshCw className="spin" /> : <RefreshCw />}{syncing ? 'Sincronizando...' : 'Actualizar usuarios'}</Btn></div>
       <div className="login-note"><Smartphone /> Instalable en iPhone y Android</div>
      </form></section>
   </main>;
@@ -750,6 +736,20 @@ export default function App() {
      setUsers(next);
      writeStore('bt-users', next);
    };
+   useEffect(() => {
+     let cancelled = false;
+     const syncUsersOnOpen = async () => {
+       try {
+         const records = await fetchGoogleSheetRecords(USERS_SHEET_ID);
+         const imported = records.map((record, index) => importedUserFromRecord(record, index, [])).filter((item): item is AppUser => Boolean(item));
+         if (!cancelled && imported.length) syncUsersForLogin(imported);
+       } catch {
+         // La app conserva los usuarios locales para permitir el acceso offline.
+       }
+     };
+     void syncUsersOnOpen();
+     return () => { cancelled = true; };
+   }, []);
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => undefined);
@@ -781,5 +781,5 @@ export default function App() {
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
-    return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} onSyncUsers={syncUsersForLogin} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+    return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }
