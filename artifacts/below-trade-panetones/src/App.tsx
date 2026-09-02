@@ -442,6 +442,7 @@ function AssignmentModule({ markets, users, clients, assignments, setAssignments
   const filteredPromoters = promoters.filter(promoter => `${promoter.name} ${promoter.dni}`.toLowerCase().includes(employeeSearch.toLowerCase()));
   const filteredMarkets = activeMarkets.filter(market => `${market.name} ${market.region || ''} ${market.department} ${market.province} ${market.district}`.toLowerCase().includes(marketSearch.toLowerCase()));
   const promoterOptions = selectedPromoter && !filteredPromoters.some(promoter => promoter.id === selectedPromoter.id) ? [selectedPromoter, ...filteredPromoters] : filteredPromoters;
+  const assignmentFor = (promoterId: string) => assignments.find(assignment => assignment.promoterId === promoterId);
   const relationshipRows = promoters.flatMap<AssignmentRelationship>(promoter => {
     const saved = assignmentFor(promoter.id);
     const marketIds = saved ? saved.marketIds : promoter.marketId ? [promoter.marketId] : [];
@@ -450,7 +451,6 @@ function AssignmentModule({ markets, users, clients, assignments, setAssignments
       return marketClients.length ? marketClients.map(client => ({ key: `${promoter.id}-${marketId}-${client.id}`, promoter, marketId, client })) : [{ key: `${promoter.id}-${marketId}-empty`, promoter, marketId, client: null }];
     });
   });
-  const assignmentFor = (promoterId: string) => assignments.find(assignment => assignment.promoterId === promoterId);
   const selectPromoter = (promoterId: string) => {
     setSelectedPromoterId(promoterId);
     const promoter = promoters.find(item => item.id === promoterId);
