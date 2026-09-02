@@ -72,23 +72,41 @@ function initializeCampaignInventory(markets: Market[], stored: MarketInventory[
   writeStore('bt-inventory', seeded); writeStore(DEFAULT_STOCK_SEED_KEY, true);
   return seeded;
 }
-function demoMarkets(markets: Market[]) {
-  return markets.filter(market => market.status === 'ACTIVO').slice(0, demoPromoterCredentials.length);
-}
 function ensureDemoPromoters(users: AppUser[], markets: Market[]) {
   const next = [...users];
-  demoMarkets(markets).forEach((market, index) => {
-    const credential = demoPromoterCredentials[index]; const record: AppUser = { id: credential.id, dni: credential.dni, name: credential.name, role: 'PROMOTOR', marketId: market.id, status: 'ACTIVO' }; const existingIndex = next.findIndex(user => user.id === record.id || user.dni === record.dni);
-    if (existingIndex >= 0) next[existingIndex] = { ...next[existingIndex], ...record }; else next.push(record);
+  demoPromoterCredentials.forEach((credential, index) => {
+    const market = markets[index]; if (!market) return;
+    const existingIndex = next.findIndex(user => user.id === credential.id || user.dni === credential.dni);
+    if (existingIndex >= 0) next[existingIndex] = { ...next[existingIndex], id: credential.id, dni: credential.dni, name: credential.name, role: 'PROMOTOR', marketId: next[existingIndex].marketId || market.id, status: 'ACTIVO' };
+    else next.push({ id: credential.id, dni: credential.dni, name: credential.name, role: 'PROMOTOR', marketId: market.id, status: 'ACTIVO' });
+  });
+  markets.forEach(market => {
+    let assigned = next.filter(user => user.role === 'PROMOTOR' && user.status === 'ACTIVO' && user.marketId === market.id).length;
+    let slot = 1;
+    while (assigned < 2) {
+      const id = `DEMO-USR-${market.id}-${slot}`;
+      const dni = `777${market.id.replace(/\D/g, '').slice(-3).padStart(3, '0')}${String(slot).padStart(2, '0')}`;
+      if (!next.some(user => user.id === id || user.dni === dni)) {
+        next.push({ id, dni, name: `Promotor Demo ${slot} · ${market.name}`, role: 'PROMOTOR', marketId: market.id, status: 'ACTIVO' });
+        assigned += 1;
+      }
+      slot += 1;
+    }
   });
   return next;
 }
 function ensureDemoClients(clients: Client[], markets: Market[]) {
   const next = [...clients];
-  demoMarkets(markets).forEach((market, marketIndex) => {
-    for (let clientIndex = 1; clientIndex <= 5; clientIndex += 1) {
-      const id = `DEMO-CLI-${market.id}-${clientIndex}`; if (next.some(client => client.id === id)) continue;
-      next.push({ id, code: `DEMO-${String(marketIndex + 1).padStart(2, '0')}-${String(clientIndex).padStart(2, '0')}`, name: `Cliente Demo ${clientIndex} · ${market.name}`, phone: `999 000 ${String(marketIndex * 10 + clientIndex).padStart(3, '0')}`, marketId: market.id, status: 'ACTIVO' });
+  markets.forEach(market => {
+    let assigned = next.filter(client => client.marketId === market.id && client.status === 'ACTIVO').length;
+    let clientIndex = 1;
+    while (assigned < 5) {
+      const id = `DEMO-CLI-${market.id}-${clientIndex}`;
+      if (!next.some(client => client.id === id)) {
+        next.push({ id, code: `DEMO-${market.id}-${String(clientIndex).padStart(2, '0')}`, name: `Cliente Demo ${clientIndex} · ${market.name}`, phone: `999 000 ${market.id.replace(/\D/g, '').slice(-3).padStart(3, '0')}`, marketId: market.id, status: 'ACTIVO' });
+        assigned += 1;
+      }
+      clientIndex += 1;
     }
   });
   return next;
@@ -493,7 +511,7 @@ function SalesDashboard({ sales, markets, users, onViewSales, onExport }: { sale
 
 function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setClients, sales, attendance, inventory, movements, setInventory, setMovements, notify }: { user: AppUser; markets: Market[]; setMarkets: (value: Market[]) => void; users: AppUser[]; setUsers: (value: AppUser[]) => void; clients: Client[]; setClients: (value: Client[]) => void; sales: Sale[]; attendance: Attendance[]; inventory: MarketInventory[]; movements: InventoryMovement[]; setInventory: (value: MarketInventory[]) => void; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void }) {
   const [tab, setTab] = useState('inicio'); const [query, setQuery] = useState(''); const [modal, setModal] = useState<'user' | 'client' | null>(null); const [syncing, setSyncing] = useState(false);
-  const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const today = new Date().toISOString().slice(0, 10);
+   const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const marketAssignmentSummary = useMemo(() => Object.fromEntries(markets.map(market => [market.id, { clients: clients.filter(client => client.marketId === market.id && client.status === 'ACTIVO').length, promoters: users.filter(current => current.marketId === market.id && current.role === 'PROMOTOR' && current.status === 'ACTIVO').length }])), [markets, clients, users]); const today = new Date().toISOString().slice(0, 10);
   const marketOptions = activeMarkets.map(market => ({ value: market.id, label: `${market.name} · ${market.region || market.department} · ${market.district}` }));
   const exportSales = () => { downloadCsv(`ventas-${today}.csv`, ['Código venta', 'Fecha', 'Promotor', 'Cliente', 'Mercado', 'Tipo', 'Marca / producto', 'Unidades por marca', 'Monto unitario por marca (S/)', 'Unidades totales', 'Peso (kg)', 'Ingreso total (S/)', 'Bonificación', 'Comentario', 'Estado'], sales.map(sale => { const breakdown = saleExportBreakdown(sale); return [sale.id, formatDate(sale.date), users.find(user => user.id === sale.promoterId)?.name, clients.find(client => client.id === sale.clientId)?.name, marketMap[sale.marketId]?.name, sale.mode, breakdown.map(item => item.label).join(' | '), breakdown.map(item => item.units).join(' | '), breakdown.map(item => item.unitPrice.toFixed(2)).join(' | '), sale.units, (sale.weightKg ?? 0).toFixed(3), (sale.amountSoles ?? 0).toFixed(2), sale.bonus || 'Sin canje', sale.comment || '', sale.status]; })); notify('Reporte de ventas con marcas y precios descargado'); };
   const exportClients = () => { downloadCsv(`clientes-${today}.csv`, ['Código', 'Cliente', 'Celular', 'Mercado', 'Distrito', 'Estado'], clients.map(client => [client.code, client.name, client.phone || '', marketMap[client.marketId]?.name, marketMap[client.marketId]?.district, client.status])); notify('Reporte de clientes descargado'); };
@@ -585,7 +603,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
     <div className="page-head"><div><span className="eyebrow">PANEL DE CONTROL</span><h1>Hola, analista</h1><p>Supervisa el pulso de la campaña desde un solo lugar.</p></div></div>
     <nav className="tabs" aria-label="Módulos">{tabs.map(([value, label]) => <button key={value} className={`tab ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)} data-testid={`tab-${value}`}>{label}</button>)}</nav>
        {tab === 'inicio' && <SalesDashboard sales={sales} markets={markets} users={users} onViewSales={() => setTab('ventas')} onExport={exportSummary} />}
-    {tab === 'mercados' && <section className="panel"><div className="panel-header"><div><h2>Mercados</h2><p>Catálogo importado desde Google Sheets o guardado localmente.</p></div><Btn onClick={importMarkets} disabled={syncing} testId="button-refresh-markets"><RefreshCw /> Actualizar hoja</Btn></div><div className="panel-body"><div className="data-table"><div className="table-row header"><span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span><span>Estado</span></div>{markets.map(market => <div className="table-row" key={market.id}><span><strong>{market.name}</strong><small>{market.id}</small></span><span>{market.region || '—'}</span><span>{market.department}</span><span>{market.province}</span><span>{market.district}</span><StatusPill status={market.status} /></div>)}</div></div></section>}
+     {tab === 'mercados' && <section className="panel"><div className="panel-header"><div><h2>Mercados</h2><p>Catálogo importado desde Google Sheets o guardado localmente.</p></div><Btn onClick={importMarkets} disabled={syncing} testId="button-refresh-markets"><RefreshCw /> Actualizar hoja</Btn></div><div className="panel-body"><div className="data-table"><div className="table-row header"><span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span><span>Clientes</span><span>Promotores</span><span>Estado</span></div>{markets.map(market => <div className="table-row" key={market.id}><span><strong>{market.name}</strong><small>{market.id}</small></span><span>{market.region || '—'}</span><span>{market.department}</span><span>{market.province}</span><span>{market.district}</span><span>{marketAssignmentSummary[market.id]?.clients || 0}</span><span>{marketAssignmentSummary[market.id]?.promoters || 0}</span><StatusPill status={market.status} /></div>)}</div></div></section>}
       {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios</h2><p>Importa un CSV o crea accesos, roles y mercados.</p></div><div className="panel-actions"><CsvImportButton label="Importar usuarios" onImport={importUsers} testId="button-import-users" /><CsvExampleButton onDownload={downloadUsersExample} testId="button-example-users" /><Btn onClick={() => setModal('user')} testId="button-new-user"><Plus /> Nuevo usuario</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: DNI, Nombre, Rol, Mercado y Estado. En promotores, el mercado es obligatorio.</div><div className="record-list">{users.map(user => <article className="record" key={user.id}><span className="record-icon"><UserRound /></span><div className="record-main"><strong>{user.name}</strong><small>DNI {user.dni} · {user.role}</small>{user.marketId && <em><MapPin /> {marketMap[user.marketId]?.name || 'Mercado asignado'}</em>}</div><StatusPill status={user.status} /></article>)}</div></div></section>}
      {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes</h2><p>Importa un CSV o registra clientes activos por mercado.</p></div><div className="panel-actions"><CsvImportButton label="Importar clientes" onImport={importClients} testId="button-import-clients" /><CsvExampleButton onDownload={downloadClientsExample} testId="button-example-clients" /><Btn onClick={() => setModal('client')} testId="button-new-client"><Plus /> Nuevo cliente</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: Código, Cliente, Celular, Mercado y Estado.</div><div className="search-row"><div className="search-wrap"><Search /><Input value={query} onChange={setQuery} placeholder="Buscar cliente, código o mercado" testId="input-search-clients" /></div></div><div className="record-list">{filteredClients.length ? filteredClients.map(client => <article className="record" key={client.id}><span className="record-icon"><Store /></span><div className="record-main"><strong>{client.name}</strong><small>{client.code}{client.phone ? ` · ${client.phone}` : ''}</small><em><MapPin /> {marketMap[client.marketId]?.name}</em></div><StatusPill status={client.status} /></article>) : <Empty title="No hay coincidencias" detail="Prueba con otro nombre, código o mercado." />}</div></div></section>}
       {tab === 'ventas' && <section className="panel"><div className="panel-header"><div><h2>Ventas y evidencias</h2><p>Seguimiento de registros por promotor.</p></div><Btn variant="outline" onClick={exportSales}><Download /> Descargar</Btn></div><div className="panel-body">{sales.length ? <div className="record-list">{sales.map(sale => { const promoter = users.find(item => item.id === sale.promoterId); return <article className="record" key={sale.id}><span className="record-icon"><ShoppingBag /></span><div className="record-main"><strong>{clients.find(client => client.id === sale.clientId)?.name || 'Tienda'}</strong><small>Promotor: {promoter?.name || 'No identificado'} · DNI {promoter?.dni || '—'} · {marketMap[sale.marketId]?.name || 'Mercado no identificado'}</small><small>{sale.id} · {sale.units} unidades · {sale.mode} · {formatSoles(sale.amountSoles)}</small><em><Gift /> {sale.bonus || 'Sin canje'} · {formatDate(sale.date)}</em></div><StatusPill status={sale.status} /></article>; })}</div> : <Empty />}</div></section>}
