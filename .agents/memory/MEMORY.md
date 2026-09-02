@@ -2,3 +2,4 @@
 - [Almacenamiento operativo en Google Sheets](google-sheets-storage.md) — las colecciones se fusionan por ID en un libro central y localStorage funciona como cola offline.
 - [Referencias y roles](reference-sync.md) — las cuatro referencias se refrescan solas; el permiso de acceso y la etiqueta exacta del rol se conservan por separado.
 - [Evidencias fotográficas](photo-evidence.md) — las imágenes se encolan en IndexedDB, se suben a Drive y el enlace queda asociado al registro operativo.
+- [Ubicación histórica de ventas](sales-location-history.md) — cada venta conserva la ubicación del mercado al registrarse; los análisis usan ese snapshot antes que el catálogo actual.
