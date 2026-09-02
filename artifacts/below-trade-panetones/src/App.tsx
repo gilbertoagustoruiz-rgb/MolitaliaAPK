@@ -203,6 +203,64 @@ function aggregateSalesByRegionCity(sales: Sale[], markets: Market[]) {
   });
   return Array.from(grouped.values()).sort((first, second) => second.soles - first.soles);
 }
+type SalesMetricRow = { key: string; label: string; subtitle: string; soles: number; units: number; kilos: number; salesCount: number };
+function aggregateSalesMetrics(sales: Sale[], getGroup: (sale: Sale) => { key: string; label: string; subtitle: string }) {
+  const grouped = new Map<string, SalesMetricRow>();
+  sales.forEach(sale => {
+    const group = getGroup(sale);
+    const current = grouped.get(group.key) || { ...group, soles: 0, units: 0, kilos: 0, salesCount: 0 };
+    current.soles += Number(sale.amountSoles) || 0;
+    current.units += Number(sale.units) || 0;
+    current.kilos += saleWeightKg(sale);
+    current.salesCount += 1;
+    grouped.set(group.key, current);
+  });
+  return Array.from(grouped.values()).sort((first, second) => second.soles - first.soles);
+}
+function aggregateSalesByRegion(sales: Sale[], markets: Market[]) {
+  const marketMap = Object.fromEntries(markets.map(market => [market.id, market]));
+  return aggregateSalesMetrics(sales, sale => {
+    const market = marketMap[sale.marketId];
+    const region = market?.region || market?.department || 'SIN REGIÓN';
+    return { key: region, label: region, subtitle: 'Región' };
+  });
+}
+function aggregateSalesByMarket(sales: Sale[], markets: Market[]) {
+  const marketMap = Object.fromEntries(markets.map(market => [market.id, market]));
+  return aggregateSalesMetrics(sales, sale => {
+    const market = marketMap[sale.marketId];
+    return { key: sale.marketId, label: market?.name || 'MERCADO NO IDENTIFICADO', subtitle: `${market?.region || market?.department || 'SIN REGIÓN'} · ${market?.province || market?.district || 'SIN CIUDAD'}` };
+  });
+}
+function aggregateSalesByPromoter(sales: Sale[], users: AppUser[]) {
+  const userMap = Object.fromEntries(users.map(user => [user.id, user]));
+  return aggregateSalesMetrics(sales, sale => {
+    const promoter = userMap[sale.promoterId];
+    return { key: sale.promoterId, label: promoter?.name || 'PROMOTOR NO IDENTIFICADO', subtitle: promoter?.dni ? `DNI ${promoter.dni}` : 'Promotor' };
+  });
+}
+function aggregateSalesByBrand(sales: Sale[]) {
+  const grouped = new Map<string, SalesMetricRow>();
+  sales.forEach(sale => {
+    const entries = Object.entries(sale.mix || {});
+    const brandEntries = entries.length ? entries : [['SIN MARCA', sale.units] as [string, number]];
+    brandEntries.forEach(([brand, rawQuantity]) => {
+      const units = Number(rawQuantity) || 0;
+      if (units <= 0) return;
+      const unitPrice = Number(sale.unitPrices?.[brand] ?? 0);
+      const amount = sale.mode === 'PLANCHAS' ? units * unitPrice : (sale.units > 0 ? sale.amountSoles * (units / sale.units) : 0);
+      const kilos = sale.mode === 'PLANCHAS' ? units * (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0) : saleWeightKg(sale) * (sale.units > 0 ? units / sale.units : 0);
+      const key = brand.toUpperCase();
+      const current = grouped.get(key) || { key, label: key, subtitle: 'Marca', soles: 0, units: 0, kilos: 0, salesCount: 0 };
+      current.soles += amount;
+      current.units += units;
+      current.kilos += kilos;
+      current.salesCount += 1;
+      grouped.set(key, current);
+    });
+  });
+  return Array.from(grouped.values()).sort((first, second) => second.units - first.units);
+}
 function parseSoles(value: string) { return Number(value.replace(',', '.')); }
 function syncStatus(): SyncStatus { return typeof navigator === 'undefined' || navigator.onLine ? 'SINCRONIZADA' : 'PENDIENTE'; }
 function movementLabel(kind: InventoryMovementKind, itemId?: RedemptionItemId) {
@@ -384,7 +442,7 @@ function InventoryModule({ markets, inventory, movements, notify, onImportCsv, o
   </section>;
 }
 
-function SalesDashboard({ sales, markets, onViewSales, onExport }: { sales: Sale[]; markets: Market[]; onViewSales: () => void; onExport: () => void }) {
+function LegacySalesDashboard({ sales, markets, onViewSales, onExport }: { sales: Sale[]; markets: Market[]; onViewSales: () => void; onExport: () => void }) {
   const rows = useMemo(() => aggregateSalesByRegionCity(sales, markets), [sales, markets]);
   const totals = rows.reduce((result, row) => ({ soles: result.soles + row.soles, units: result.units + row.units, kilos: result.kilos + row.kilos }), { soles: 0, units: 0, kilos: 0 });
   const maxSoles = Math.max(...rows.map(row => row.soles), 1);
@@ -399,6 +457,40 @@ function SalesDashboard({ sales, markets, onViewSales, onExport }: { sales: Sale
     <div className="sales-dashboard-grid">
       <section className="panel"><div className="panel-header"><div><h2>Ventas en soles por zona</h2><p>Las zonas están ordenadas de mayor a menor facturación.</p></div></div><div className="panel-body">{rows.length ? <div className="sales-bars">{rows.slice(0, 8).map(row => <div className="sales-bar" key={row.key}><div className="sales-bar-label"><strong>{row.region} · {row.city}</strong><b>{formatSoles(row.soles)}</b></div><div className="sales-bar-track"><span style={{ width: `${Math.max(4, (row.soles / maxSoles) * 100)}%` }} /></div><small>{row.units.toLocaleString('es-PE')} unidades · {formatKilos(row.kilos)} · {row.salesCount} pedido{row.salesCount === 1 ? '' : 's'}</small></div>)}</div> : <Empty title="Aún no hay ventas" detail="El dashboard se actualizará al registrar el primer pedido." />}</div></section>
       <section className="panel"><div className="panel-header"><div><h2>Detalle por región · ciudad</h2><p>Ventas acumuladas por cada zona.</p></div></div><div className="panel-body dashboard-table-wrap">{rows.length ? <div className="dashboard-table"><div className="dashboard-table-row header"><span>Región · Ciudad</span><span>Ventas (S/)</span><span>Unidades</span><span>Kilos</span></div>{rows.map(row => <div className="dashboard-table-row" key={row.key}><strong>{row.region} · {row.city}</strong><b>{formatSoles(row.soles)}</b><span>{row.units.toLocaleString('es-PE')}</span><span>{formatKilos(row.kilos)}</span></div>)}</div> : <Empty title="Sin datos para mostrar" detail="Registra ventas para ver el consolidado." />}</div></section>
+    </div>
+  </div>;
+}
+
+function SalesDashboard({ sales, markets, users, onViewSales, onExport }: { sales: Sale[]; markets: Market[]; users: AppUser[]; onViewSales: () => void; onExport: () => void }) {
+  const regionRows = useMemo(() => aggregateSalesByRegion(sales, markets), [sales, markets]);
+  const marketRows = useMemo(() => aggregateSalesByMarket(sales, markets), [sales, markets]);
+  const promoterRows = useMemo(() => aggregateSalesByPromoter(sales, users), [sales, users]);
+  const brandRows = useMemo(() => aggregateSalesByBrand(sales), [sales]);
+  const totals = sales.reduce((result, sale) => ({ soles: result.soles + (Number(sale.amountSoles) || 0), units: result.units + (Number(sale.units) || 0), kilos: result.kilos + saleWeightKg(sale) }), { soles: 0, units: 0, kilos: 0 });
+  const maxRegionSoles = Math.max(...regionRows.map(row => row.soles), 1);
+  const totalBrandUnits = brandRows.reduce((sum, row) => sum + row.units, 0);
+  let pieOffset = 0;
+  const brandColors = ['#d85b2b', '#2b6d9c', '#3f9670', '#e4a83d', '#7565a8', '#8c9aa9'];
+  const pieSegments = brandRows.map((row, index) => {
+    const start = pieOffset;
+    pieOffset += totalBrandUnits ? (row.units / totalBrandUnits) * 100 : 0;
+    return `${brandColors[index % brandColors.length]} ${start}% ${pieOffset}%`;
+  });
+  const pieStyle = { background: pieSegments.length ? `conic-gradient(${pieSegments.join(', ')})` : 'conic-gradient(#dfe6ee 0 100%)' };
+  return <div className="sales-dashboard">
+    <div className="dashboard-heading"><div><span className="eyebrow">RESUMEN DE VENTAS</span><h2>Desempeño de la campaña</h2><p>Consolidado de todos los pedidos registrados por región, mercado, promotor y marca.</p></div><div className="page-actions"><Btn variant="outline" onClick={onExport}><Download /> Descargar resumen</Btn><Btn onClick={onViewSales}>Ver ventas</Btn></div></div>
+    <div className="dashboard-kpis">
+      <article className="dashboard-kpi"><span className="dashboard-kpi-icon orange"><ShoppingBag /></span><div><small>VENTA EN SOLES</small><strong>{formatSoles(totals.soles)}</strong><p>{sales.length} pedidos registrados</p></div></article>
+      <article className="dashboard-kpi"><span className="dashboard-kpi-icon blue"><PackageCheck /></span><div><small>VENTA EN UNIDADES</small><strong>{totals.units.toLocaleString('es-PE')}</strong><p>Unidades vendidas</p></div></article>
+      <article className="dashboard-kpi"><span className="dashboard-kpi-icon green"><MapPin /></span><div><small>VENTA EN KILOS</small><strong>{formatKilos(totals.kilos)}</strong><p>Peso estimado vendido</p></div></article>
+    </div>
+    <div className="summary-sections">
+      <section className="panel"><div className="panel-header"><div><h2>Resumen por Región</h2><p>Ventas agrupadas por la región de cada mercado.</p></div></div><div className="panel-body">{regionRows.length ? <div className="summary-list">{regionRows.map((row, index) => <div className="summary-row" key={row.key}><div className="summary-row-head"><strong>{index + 1}. {row.label}</strong><b>{formatSoles(row.soles)}</b></div><div className="summary-track"><span style={{ width: `${Math.max(4, (row.soles / maxRegionSoles) * 100)}%` }} /></div><small>{row.units.toLocaleString('es-PE')} unidades · {formatKilos(row.kilos)} · {row.salesCount} pedido{row.salesCount === 1 ? '' : 's'}</small></div>)}</div> : <Empty title="Aún no hay ventas" detail="El resumen por región se actualizará con el primer pedido." />}</div></section>
+      <section className="panel"><div className="panel-header"><div><h2>Resumen por Mercados</h2><p>Resultado acumulado de cada mercado.</p></div></div><div className="panel-body summary-table-wrap">{marketRows.length ? <div className="summary-table"><div className="summary-table-row header"><span>Mercado</span><span>Ventas (S/)</span><span>Unidades</span><span>Kilos</span></div>{marketRows.map(row => <div className="summary-table-row" key={row.key}><div><strong>{row.label}</strong><small>{row.subtitle}</small></div><b>{formatSoles(row.soles)}</b><span>{row.units.toLocaleString('es-PE')}</span><span>{formatKilos(row.kilos)}</span></div>)}</div> : <Empty title="Sin mercados con ventas" detail="Los mercados aparecerán aquí al registrar pedidos." />}</div></section>
+    </div>
+    <div className="summary-sections">
+      <section className="panel"><div className="panel-header"><div><h2>Mejores Promotores</h2><p>Ordenados por venta total en soles.</p></div></div><div className="panel-body">{promoterRows.length ? <div className="promoter-ranking">{promoterRows.slice(0, 5).map((row, index) => <div className="promoter-ranking-row" key={row.key}><span className="ranking-position">{index + 1}</span><div><strong>{row.label}</strong><small>{row.subtitle} · {row.units.toLocaleString('es-PE')} unidades · {formatKilos(row.kilos)}</small></div><b>{formatSoles(row.soles)}</b></div>)}</div> : <Empty title="Aún no hay promotores con ventas" detail="El ranking aparecerá con los primeros pedidos." />}</div></section>
+      <section className="panel"><div className="panel-header"><div><h2>Detalle por Marcas</h2><p>Distribución de unidades vendidas por marca.</p></div></div><div className="panel-body brand-pie-layout">{brandRows.length ? <><div className="brand-pie" style={pieStyle} aria-label="Distribución de ventas por marca"><span>{totalBrandUnits.toLocaleString('es-PE')}<small>unidades</small></span></div><div className="brand-legend">{brandRows.map((row, index) => <div className="brand-legend-row" key={row.key}><span className="brand-swatch" style={{ background: brandColors[index % brandColors.length] }} /><div><strong>{row.label}</strong><small>{row.units.toLocaleString('es-PE')} unidades · {formatSoles(row.soles)}</small></div><b>{totalBrandUnits ? `${((row.units / totalBrandUnits) * 100).toFixed(1)}%` : '0%'}</b></div>)}</div></> : <Empty title="Sin detalle por marcas" detail="El pastel aparecerá al registrar ventas." />}</div></section>
     </div>
   </div>;
 }
@@ -496,7 +588,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   return <main className="workspace">
     <div className="page-head"><div><span className="eyebrow">PANEL DE CONTROL</span><h1>Hola, analista</h1><p>Supervisa el pulso de la campaña desde un solo lugar.</p></div></div>
     <nav className="tabs" aria-label="Módulos">{tabs.map(([value, label]) => <button key={value} className={`tab ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)} data-testid={`tab-${value}`}>{label}</button>)}</nav>
-      {tab === 'inicio' && <SalesDashboard sales={sales} markets={markets} onViewSales={() => setTab('ventas')} onExport={exportSummary} />}
+       {tab === 'inicio' && <SalesDashboard sales={sales} markets={markets} users={users} onViewSales={() => setTab('ventas')} onExport={exportSummary} />}
     {tab === 'mercados' && <section className="panel"><div className="panel-header"><div><h2>Mercados</h2><p>Catálogo importado desde Google Sheets o guardado localmente.</p></div><Btn onClick={importMarkets} disabled={syncing} testId="button-refresh-markets"><RefreshCw /> Actualizar hoja</Btn></div><div className="panel-body"><div className="data-table"><div className="table-row header"><span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span><span>Estado</span></div>{markets.map(market => <div className="table-row" key={market.id}><span><strong>{market.name}</strong><small>{market.id}</small></span><span>{market.region || '—'}</span><span>{market.department}</span><span>{market.province}</span><span>{market.district}</span><StatusPill status={market.status} /></div>)}</div></div></section>}
       {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios</h2><p>Importa un CSV o crea accesos, roles y mercados.</p></div><div className="panel-actions"><CsvImportButton label="Importar usuarios" onImport={importUsers} testId="button-import-users" /><CsvExampleButton onDownload={downloadUsersExample} testId="button-example-users" /><Btn onClick={() => setModal('user')} testId="button-new-user"><Plus /> Nuevo usuario</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: DNI, Nombre, Rol, Mercado y Estado. En promotores, el mercado es obligatorio.</div><div className="record-list">{users.map(user => <article className="record" key={user.id}><span className="record-icon"><UserRound /></span><div className="record-main"><strong>{user.name}</strong><small>DNI {user.dni} · {user.role}</small>{user.marketId && <em><MapPin /> {marketMap[user.marketId]?.name || 'Mercado asignado'}</em>}</div><StatusPill status={user.status} /></article>)}</div></div></section>}
      {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes</h2><p>Importa un CSV o registra clientes activos por mercado.</p></div><div className="panel-actions"><CsvImportButton label="Importar clientes" onImport={importClients} testId="button-import-clients" /><CsvExampleButton onDownload={downloadClientsExample} testId="button-example-clients" /><Btn onClick={() => setModal('client')} testId="button-new-client"><Plus /> Nuevo cliente</Btn></div></div><div className="panel-body"><div className="import-hint">Columnas: Código, Cliente, Celular, Mercado y Estado.</div><div className="search-row"><div className="search-wrap"><Search /><Input value={query} onChange={setQuery} placeholder="Buscar cliente, código o mercado" testId="input-search-clients" /></div></div><div className="record-list">{filteredClients.length ? filteredClients.map(client => <article className="record" key={client.id}><span className="record-icon"><Store /></span><div className="record-main"><strong>{client.name}</strong><small>{client.code}{client.phone ? ` · ${client.phone}` : ''}</small><em><MapPin /> {marketMap[client.marketId]?.name}</em></div><StatusPill status={client.status} /></article>) : <Empty title="No hay coincidencias" detail="Prueba con otro nombre, código o mercado." />}</div></div></section>}
