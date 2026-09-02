@@ -520,7 +520,19 @@ export default function App() {
   useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { const next = ensureInventory(markets, inventory); if (next.length !== inventory.length) { setInventory(next); writeStore('bt-inventory', next); } }, [markets, inventory]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]);
    const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
    const logoutImmediately = () => { localStorage.removeItem('bt-session'); setSessionClosePrompt(false); setPromoterSession({ marketId: '', clientId: '' }); setUser(null); };
-   const requestLogout = () => { if (activeUser?.role === 'PROMOTOR') { setSessionClosePrompt(true); return; } logoutImmediately(); };
+    const requestLogout = () => {
+      if (activeUser?.role === 'PROMOTOR') {
+        const today = new Date().toISOString().slice(0, 10);
+        const hasAttendanceToday = attendance.some(item => item.promoterId === activeUser.id && item.type === 'ENTRADA' && item.date.slice(0, 10) === today);
+        if (!hasAttendanceToday) {
+          notify('Debes marcar Entrada en asistencia antes de cerrar sesión.', true);
+          return;
+        }
+        setSessionClosePrompt(true);
+        return;
+      }
+      logoutImmediately();
+    };
    const completePromoterLogout = (tastingUsed: number, leads: number) => {
      if (!activeUser) return;
      const marketId = promoterSession.marketId || activeUser.marketId || ''; const clientId = promoterSession.clientId || undefined; const stock = inventory.find(item => item.marketId === marketId) || emptyInventory(marketId);
