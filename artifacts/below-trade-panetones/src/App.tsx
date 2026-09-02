@@ -779,6 +779,12 @@ export default function App() {
    const logoutImmediately = () => { localStorage.removeItem('bt-session'); setSessionClosePrompt(false); setPromoterSession({ marketId: '', clientId: '' }); setUser(null); };
     const requestLogout = () => {
       if (activeUser?.role === 'PROMOTOR') {
+         const assignment = assignments.find(item => item.promoterId === activeUser.id);
+         const assignedMarketIds = assignment ? assignment.marketIds : activeUser.marketId ? [activeUser.marketId] : [];
+         if (!assignedMarketIds.length) {
+           logoutImmediately();
+           return;
+         }
         const today = new Date().toISOString().slice(0, 10);
         const hasAttendanceToday = attendance.some(item => item.promoterId === activeUser.id && item.type === 'ENTRADA' && item.date.slice(0, 10) === today);
         if (!hasAttendanceToday) {
