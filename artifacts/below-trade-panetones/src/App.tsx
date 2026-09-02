@@ -141,6 +141,18 @@ function csvMarketId(value: string, markets: Market[]) {
   const normalized = normalizeCsvHeader(value);
   return markets.find(market => [market.id, market.name, market.district].some(candidate => normalizeCsvHeader(candidate) === normalized))?.id;
 }
+function importedUserFromRecord(record: Record<string, string>, index: number, markets: Market[]): AppUser | null {
+  const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']);
+  const firstName = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']);
+  const lastName = csvField(record, ['apellido', 'apellidos']);
+  const name = [firstName, lastName].filter(Boolean).join(' ');
+  const rawRole = normalizeCsvHeader(csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']));
+  const roleValue = rawRole.startsWith('promotor') ? 'PROMOTOR' : rawRole === 'coordinador' ? 'SUPERVISOR' : rawRole.toUpperCase() as Role;
+  const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
+  const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
+  if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN'].includes(roleValue) || (roleValue === 'PROMOTOR' && marketValue && !marketId)) return null;
+  return { id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? marketId : undefined, password: csvField(record, ['clave', 'password', 'contrasena']) || undefined, status: csvStatus(csvField(record, ['estado', 'status'])) };
+}
 function formatDate(value: string) { return new Date(value).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }); }
 function formatSoles(value: number | undefined) { return `S/ ${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function formatKilos(value: number | undefined) { return `${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`; }
@@ -334,12 +346,25 @@ function Modal({ title, detail, children, close }: { title: string; detail: stri
   </div>;
 }
 
-function Login({ users, onLogin, notify }: { users: AppUser[]; onLogin: (user: AppUser) => void; notify: (message: string, error?: boolean) => void }) {
+function Login({ users, onLogin, onSyncUsers, notify }: { users: AppUser[]; onLogin: (user: AppUser) => void; onSyncUsers: (users: AppUser[]) => void; notify: (message: string, error?: boolean) => void }) {
   const [dni, setDni] = useState(''); const [password, setPassword] = useState('');
+  const [syncing, setSyncing] = useState(false);
   const submit = () => {
     const user = users.find(item => item.dni === dni && item.password === password && item.status === 'ACTIVO') || null;
     if (!user) { notify('DNI o clave incorrectos', true); return; }
     writeStore('bt-session', user); onLogin(user);
+  };
+  const syncUsers = async () => {
+    setSyncing(true);
+    try {
+      const records = await fetchGoogleSheetRecords(USERS_SHEET_ID);
+      const imported = records.map((record, index) => importedUserFromRecord(record, index, [])).filter((item): item is AppUser => Boolean(item));
+      if (!imported.length) throw new Error('No se encontró ningún usuario válido en la hoja.');
+      onSyncUsers(imported);
+      notify(`${imported.length} usuarios sincronizados. Ya puedes ingresar con tu DNI y clave.`);
+    } catch (error) {
+      notify(`No se pudo sincronizar usuarios: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true);
+    } finally { setSyncing(false); }
   };
   return <main className="login-shell">
     <section className="login-hero"><Logo compact /><div className="hero-copy"><span className="eyebrow">CAMPAÑA 2026</span><h1>Panetones Molitalia</h1><p>Ventas, clientes, dinámicas y evidencias en una sola aplicación.</p></div><div className="hero-foot"><span /> Captura segura para trabajo en campo</div></section>
@@ -347,6 +372,7 @@ function Login({ users, onLogin, notify }: { users: AppUser[]; onLogin: (user: A
        <Field label="DNI"><Input value={dni} onChange={value => setDni(value.replace(/\D/g, ''))} placeholder="12345678" maxLength={8} autoComplete="username" testId="input-dni" /></Field>
        <Field label="Clave"><Input value={password} onChange={setPassword} placeholder="Ingresa tu clave" type="password" autoComplete="current-password" testId="input-password" /></Field>
        <Btn className="primary full" type="submit" testId="button-login">Ingresar</Btn>
+        <div className="login-sync"><p>{users.length ? '¿Se actualizaron los usuarios en Google Sheets?' : 'No hay usuarios cargados en este dispositivo.'}</p><Btn variant="outline" onClick={syncUsers} disabled={syncing} testId="button-sync-users-login">{syncing ? <RefreshCw className="spin" /> : <RefreshCw />}{syncing ? 'Sincronizando...' : 'Actualizar usuarios'}</Btn></div>
       <div className="login-note"><Smartphone /> Instalable en iPhone y Android</div>
      </form></section>
   </main>;
@@ -652,7 +678,17 @@ function PromoterApp({ user, markets, clients, sales, setSales, attendance, setA
 export default function App() {
    clearTestDataOnce();
    const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' });
-  const notify = (message: string, error = false) => setToast({ message, error });
+   const notify = (message: string, error = false) => setToast({ message, error });
+   const syncUsersForLogin = (imported: AppUser[]) => {
+     const next = [...users];
+     imported.forEach(item => {
+       const index = next.findIndex(current => current.id === item.id || current.dni === item.dni);
+       if (index >= 0) next[index] = { ...next[index], ...item };
+       else next.push(item);
+     });
+     setUsers(next);
+     writeStore('bt-users', next);
+   };
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => undefined);
@@ -684,5 +720,5 @@ export default function App() {
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
-   return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+    return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} onSyncUsers={syncUsersForLogin} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }
