@@ -402,6 +402,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .bonus-box small, .bonus-box strong { display:block; }
 .bonus-box small { font:10px var(--font-mono); letter-spacing:.1em; }
 .bonus-box strong { margin-top:3px; color:#f4f0e8; font-size:13px; }
+.sale-form-note { grid-column:1/-1; margin:10px 0 0 !important; color:#ffd0a8 !important; font-size:11px !important; }
+.sale-form-note.error { color:#ffc7b6 !important; }
 .evidence-grid { display:grid; grid-template-columns:1fr 1fr; grid-column:1/-1; gap:13px; }
 .photo-field { min-height:108px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:15px; border:1px dashed #607a95; border-radius:11px; color:#b4c1cf; background:#14253a; text-align:center; transition:border .18s, background .18s; }
 .photo-field:hover { border-color:hsl(var(--orange)); background:#203650; }
