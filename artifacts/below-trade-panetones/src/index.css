@@ -75,8 +75,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .login-card .primary { min-height:51px; margin-top:3px; font-size:15px; }
 .demo-box { margin-top:18px; padding:16px; border-radius:14px; background:hsl(var(--blue-pale)); }
 .demo-box p { margin:0 0 10px; color:hsl(var(--blue)); font:700 11px var(--font-mono); letter-spacing:.1em; text-transform:uppercase; }
-.demo-actions { display:flex; gap:8px; }
-.demo-actions button { flex:1; padding:9px; border:1px solid hsla(var(--blue)/.25); border-radius:9px; color:hsl(var(--blue)); background:transparent; font-weight:700; }
+.demo-actions { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; }
+.demo-actions button { width:100%; padding:9px; border:1px solid hsla(var(--blue)/.25); border-radius:9px; color:hsl(var(--blue)); background:transparent; font-weight:700; }
 .demo-actions button:hover { background:hsl(var(--surface)); }
 .login-note { display:flex; align-items:center; justify-content:center; gap:7px; margin-top:22px; color:hsl(var(--muted)); font-size:12px; }
 

@@ -31,6 +31,11 @@ const seedClients: Client[] = [
   { id: '1', code: 'CLI-000001', name: 'Bodega Rosita', phone: '999 555 101', marketId: '2', status: 'ACTIVO' },
   { id: '2', code: 'CLI-000002', name: 'Puesto El Buen Precio', marketId: '2', status: 'ACTIVO' },
 ];
+const demoPromoterCredentials = [
+  { id: 'USR-002', dni: '87654321', name: 'Promotor Demo', password: 'Promo2026' },
+  { id: 'USR-003', dni: '87654322', name: 'Promotor Demo 2', password: 'Promo2026-2' },
+  { id: 'USR-004', dni: '87654323', name: 'Promotor Demo 3', password: 'Promo2026-3' },
+];
 const redemptionItems: { id: RedemptionItemId; label: string }[] = [
   { id: 'AVENA', label: 'Avena' },
   { id: 'BATEA', label: 'Batea' },
@@ -53,6 +58,27 @@ function ensureInventory(markets: Market[], stored: MarketInventory[]) {
   });
   markets.forEach(market => {
     if (!byMarket.has(market.id)) next.push(emptyInventory(market.id));
+  });
+  return next;
+}
+function demoMarkets(markets: Market[]) {
+  return markets.filter(market => market.status === 'ACTIVO').slice(0, demoPromoterCredentials.length);
+}
+function ensureDemoPromoters(users: AppUser[], markets: Market[]) {
+  const next = [...users];
+  demoMarkets(markets).forEach((market, index) => {
+    const credential = demoPromoterCredentials[index]; const record: AppUser = { id: credential.id, dni: credential.dni, name: credential.name, role: 'PROMOTOR', marketId: market.id, status: 'ACTIVO' }; const existingIndex = next.findIndex(user => user.id === record.id || user.dni === record.dni);
+    if (existingIndex >= 0) next[existingIndex] = { ...next[existingIndex], ...record }; else next.push(record);
+  });
+  return next;
+}
+function ensureDemoClients(clients: Client[], markets: Market[]) {
+  const next = [...clients];
+  demoMarkets(markets).forEach((market, marketIndex) => {
+    for (let clientIndex = 1; clientIndex <= 5; clientIndex += 1) {
+      const id = `DEMO-CLI-${market.id}-${clientIndex}`; if (next.some(client => client.id === id)) continue;
+      next.push({ id, code: `DEMO-${String(marketIndex + 1).padStart(2, '0')}-${String(clientIndex).padStart(2, '0')}`, name: `Cliente Demo ${clientIndex} · ${market.name}`, phone: `999 000 ${String(marketIndex * 10 + clientIndex).padStart(3, '0')}`, marketId: market.id, status: 'ACTIVO' });
+    }
   });
   return next;
 }
@@ -218,20 +244,21 @@ function Modal({ title, detail, children, close }: { title: string; detail: stri
   </div>;
 }
 
-function Login({ onLogin, notify }: { onLogin: (user: AppUser) => void; notify: (message: string, error?: boolean) => void }) {
+function Login({ users, onLogin, notify }: { users: AppUser[]; onLogin: (user: AppUser) => void; notify: (message: string, error?: boolean) => void }) {
   const [dni, setDni] = useState(''); const [password, setPassword] = useState('');
   const submit = () => {
-    const user = dni === '12345678' && password === 'Below2026' ? seedUsers[0] : dni === '87654321' && password === 'Promo2026' ? seedUsers[1] : null;
+    const credential = dni === '12345678' ? 'Below2026' : demoPromoterCredentials.find(item => item.dni === dni)?.password; const user = credential === password ? users.find(item => item.dni === dni && item.status === 'ACTIVO') || null : null;
     if (!user) { notify('DNI o clave incorrectos en esta demostración', true); return; }
     writeStore('bt-session', user); onLogin(user);
   };
+  const fillDemoPromoter = (credential: typeof demoPromoterCredentials[number]) => { setDni(credential.dni); setPassword(credential.password); };
   return <main className="login-shell">
     <section className="login-hero"><Logo compact /><div className="hero-copy"><span className="eyebrow">CAMPAÑA 2026</span><h1>Panetones Molitalia</h1><p>Ventas, clientes, dinámicas y evidencias en una sola aplicación.</p></div><div className="hero-foot"><span /> Captura segura para trabajo en campo</div></section>
     <section className="login-panel"><form className="login-card" onSubmit={event => { event.preventDefault(); submit(); }}><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><ShieldCheck /></span><div><h2>Bienvenido</h2><p>Ingresa con tu DNI y clave.</p></div></div>
        <Field label="DNI"><Input value={dni} onChange={value => setDni(value.replace(/\D/g, ''))} placeholder="12345678" maxLength={8} autoComplete="username" testId="input-dni" /></Field>
        <Field label="Clave"><Input value={password} onChange={setPassword} placeholder="Ingresa tu clave" type="password" autoComplete="current-password" testId="input-password" /></Field>
        <Btn className="primary full" type="submit" testId="button-login">Ingresar</Btn>
-      <div className="demo-box"><p>Accesos de demostración</p><div className="demo-actions"><button onClick={() => { setDni('12345678'); setPassword('Below2026'); }} data-testid="button-demo-analista">Analista</button><button onClick={() => { setDni('87654321'); setPassword('Promo2026'); }} data-testid="button-demo-promotor">Promotor</button></div></div>
+       <div className="demo-box"><p>Accesos de demostración</p><div className="demo-actions"><button onClick={() => { setDni('12345678'); setPassword('Below2026'); }} data-testid="button-demo-analista">Analista</button>{demoPromoterCredentials.map((credential, index) => <button key={credential.id} onClick={() => fillDemoPromoter(credential)} data-testid={index === 0 ? 'button-demo-promotor' : `button-demo-promotor-${index + 1}`}>{index === 0 ? 'Promotor' : `Promotor ${index + 1}`}</button>)}</div></div>
       <div className="login-note"><Smartphone /> Instalable en iPhone y Android</div>
      </form></section>
   </main>;
@@ -324,7 +351,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
       const nextUsers = users.map(item => ({ ...item, marketId: remapMarketId(item.marketId) })); const nextClients = clients.map(item => ({ ...item, marketId: remapMarketId(item.marketId) || item.marketId })); const nextInventory = inventory.map(item => ({ ...item, marketId: remapMarketId(item.marketId) || item.marketId })); const nextMovements = movements.map(item => ({ ...item, marketId: remapMarketId(item.marketId) || item.marketId }));
       const importedIds = new Set(imported.map(market => market.id)); const referencedIds = new Set([...nextUsers.map(item => item.marketId), ...nextClients.map(item => item.marketId), ...nextInventory.map(item => item.marketId)].filter(Boolean) as string[]);
       const preservedAssignments = markets.filter(market => referencedIds.has(market.id) && !importedIds.has(market.id));
-      const nextMarkets = [...imported, ...preservedAssignments]; setMarkets(nextMarkets); setUsers(nextUsers); setClients(nextClients); setInventory(nextInventory); setMovements(nextMovements); writeStore('bt-markets', nextMarkets); writeStore('bt-users', nextUsers); writeStore('bt-clients', nextClients); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); notify(`${imported.length} mercados importados desde Google Sheets`);
+      const nextMarkets = [...imported, ...preservedAssignments]; const demoUsers = ensureDemoPromoters(nextUsers, nextMarkets); const demoClients = ensureDemoClients(nextClients, nextMarkets); setMarkets(nextMarkets); setUsers(demoUsers); setClients(demoClients); setInventory(nextInventory); setMovements(nextMovements); writeStore('bt-markets', nextMarkets); writeStore('bt-users', demoUsers); writeStore('bt-clients', demoClients); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); notify(`${imported.length} mercados importados desde Google Sheets`);
     } catch { notify('No se pudo importar la hoja. Los mercados locales siguen disponibles.', true); } finally { setSyncing(false); }
   };
   const importUsers = async (file: File) => {
@@ -467,7 +494,7 @@ function PromoterApp({ user, market, clients, sales, setSales, attendance, setAt
 }
 
 export default function App() {
-  const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', seedMarkets)); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', seedUsers)); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', seedClients)); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => ensureInventory(readStore<Market[]>('bt-markets', seedMarkets), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [toast, setToast] = useState<Toast | null>(null);
+   const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', seedMarkets)); const [users, setUsers] = useState<AppUser[]>(() => { const storedMarkets = readStore<Market[]>('bt-markets', seedMarkets); return ensureDemoPromoters(readStore('bt-users', seedUsers), storedMarkets); }); const [clients, setClients] = useState<Client[]>(() => { const storedMarkets = readStore<Market[]>('bt-markets', seedMarkets); return ensureDemoClients(readStore('bt-clients', seedClients), storedMarkets); }); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => ensureInventory(readStore<Market[]>('bt-markets', seedMarkets), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [toast, setToast] = useState<Toast | null>(null);
   const notify = (message: string, error = false) => setToast({ message, error });
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
@@ -476,5 +503,5 @@ export default function App() {
   useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { const next = ensureInventory(markets, inventory); if (next.length !== inventory.length) { setInventory(next); writeStore('bt-inventory', next); } }, [markets, inventory]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]);
   const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
   const logout = () => { localStorage.removeItem('bt-session'); setUser(null); };
-  return <>{activeUser ? <Shell user={activeUser} logout={logout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} market={markets.find(market => market.id === activeUser.marketId) || seedMarkets.find(market => market.id === activeUser.marketId)} clients={clients} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell> : <Login onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+  return <>{activeUser ? <Shell user={activeUser} logout={logout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} market={markets.find(market => market.id === activeUser.marketId) || seedMarkets.find(market => market.id === activeUser.marketId)} clients={clients} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }
