@@ -1,1 +1,2 @@
 - [Tarifario privado de Google Sheets](google-sheets-pricing.md) — los precios se sincronizan con acceso autenticado y se conservan localmente para ventas offline.
+- [Almacenamiento operativo en Google Sheets](google-sheets-storage.md) — las colecciones se fusionan por ID en un libro central y localStorage funciona como cola offline.

@@ -20,12 +20,24 @@ type MarketInventory = { marketId: string; tastingStock: number; redemptionStock
 type InventoryMovementKind = 'CANJE' | 'DEGUSTACION' | 'AJUSTE_DEGUSTACION' | 'AJUSTE_CANJES';
 type InventoryMovement = { id: string; marketId: string; kind: InventoryMovementKind; itemId?: RedemptionItemId; quantity: number; actorId: string; actorName: string; date: string; status: SyncStatus };
 type Toast = { message: string; error?: boolean };
+type CloudSnapshot = {
+  markets: Market[];
+  users: AppUser[];
+  clients: Client[];
+  sales: Sale[];
+  attendance: Attendance[];
+  inventory: MarketInventory[];
+  movements: InventoryMovement[];
+  assignments: PromoterAssignment[];
+  closures: SessionClosure[];
+};
 
 const MARKETS_SHEET = 'https://docs.google.com/spreadsheets/d/1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM/export?format=csv&gid=0';
 const CLIENTS_SHEET_ID = '1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA';
 const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
 const PRICES_SHEET_ID = '1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8';
 const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
+const GOOGLE_SHEETS_STORAGE_SYNC = '/api/google-sheets-storage/sync';
 const PRODUCT_PRICES_STORE_KEY = 'bt-product-prices';
 const DEFAULT_CAMPAIGN_TASTING_STOCK = 20;
 const DEFAULT_CAMPAIGN_REDEMPTION_STOCK = 10;
@@ -76,6 +88,20 @@ function readStore<T>(key: string, fallback: T): T {
   try { const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : fallback; } catch { return fallback; }
 }
 function writeStore(key: string, value: unknown) { localStorage.setItem(key, JSON.stringify(value)); }
+function cloudSnapshotFromStores(): CloudSnapshot {
+  const users = readStore<AppUser[]>('bt-users', []).map(({ password: _password, ...user }) => user);
+  return {
+    markets: readStore<Market[]>('bt-markets', []),
+    users,
+    clients: readStore<Client[]>('bt-clients', []),
+    sales: readStore<Sale[]>('bt-sales', []),
+    attendance: readStore<Attendance[]>('bt-attendance', []),
+    inventory: readStore<MarketInventory[]>('bt-inventory', []),
+    movements: readStore<InventoryMovement[]>('bt-inventory-movements', []),
+    assignments: readStore<PromoterAssignment[]>('bt-promoter-assignments', []),
+    closures: readStore<SessionClosure[]>('bt-session-closures', []),
+  };
+}
 const APP_DATA_KEYS = ['bt-session', 'bt-markets', 'bt-users', 'bt-clients', 'bt-sales', 'bt-attendance', 'bt-inventory', 'bt-inventory-movements', 'bt-session-closures', PRODUCT_PRICES_STORE_KEY, DEFAULT_STOCK_SEED_KEY];
 const TEST_DATA_CLEARED_KEY = 'bt-test-data-cleared-v1';
 function clearTestDataOnce() {
@@ -825,7 +851,7 @@ function ClientApp({ user, clients, sales, markets }: { user: AppUser; clients: 
 
 export default function App() {
    clearTestDataOnce();
-    const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' });
+     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' });
    const notify = (message: string, error = false) => setToast({ message, error });
    const syncUsersForLogin = (imported: AppUser[]) => {
      const next = [...users];
@@ -868,11 +894,75 @@ export default function App() {
       void syncPricesOnOpen();
       return () => { cancelled = true; };
     }, []);
+    useEffect(() => {
+      let cancelled = false;
+      const hydrateCloudStorage = async () => {
+        try {
+          const response = await fetch(GOOGLE_SHEETS_STORAGE_SYNC, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ snapshot: cloudSnapshotFromStores() }),
+          });
+          if (!response.ok) throw new Error('Sincronización inicial no disponible');
+          const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
+          if (cancelled || !payload.snapshot) return;
+          const snapshot = payload.snapshot;
+          const localUsers = readStore<AppUser[]>('bt-users', []);
+          const nextMarkets = Array.isArray(snapshot.markets) ? snapshot.markets : [];
+          const nextUsers = (Array.isArray(snapshot.users) ? snapshot.users : []).map(cloudUser => {
+            const localUser = localUsers.find(item => item.id === cloudUser.id || item.dni === cloudUser.dni);
+            return { ...cloudUser, password: localUser?.password };
+          });
+          const nextClients = Array.isArray(snapshot.clients) ? snapshot.clients : [];
+          const nextSales = Array.isArray(snapshot.sales) ? snapshot.sales : [];
+          const nextAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
+          const nextInventory = ensureInventory(nextMarkets, Array.isArray(snapshot.inventory) ? snapshot.inventory : []);
+          const nextMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
+          const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
+          const nextClosures = Array.isArray(snapshot.closures) ? snapshot.closures : [];
+          setMarkets(nextMarkets); setUsers(nextUsers); setClients(nextClients); setSales(nextSales); setAttendance(nextAttendance); setInventory(nextInventory); setMovements(nextMovements); setAssignments(nextAssignments); setClosures(nextClosures);
+          writeStore('bt-markets', nextMarkets); writeStore('bt-users', nextUsers); writeStore('bt-clients', nextClients); writeStore('bt-sales', nextSales); writeStore('bt-attendance', nextAttendance); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); writeStore('bt-promoter-assignments', nextAssignments); writeStore('bt-session-closures', nextClosures);
+        } catch {
+          // La operación continúa en localStorage y se reintentará al volver a estar en línea.
+        } finally {
+          if (!cancelled) setCloudReady(true);
+        }
+      };
+      void hydrateCloudStorage();
+      return () => { cancelled = true; };
+    }, []);
+    useEffect(() => {
+      if (!cloudReady) return;
+      const timeout = window.setTimeout(() => {
+        const snapshot: CloudSnapshot = {
+          markets,
+          users: users.map(({ password: _password, ...currentUser }) => currentUser),
+          clients,
+          sales,
+          attendance,
+          inventory,
+          movements,
+          assignments,
+          closures,
+        };
+        void fetch(GOOGLE_SHEETS_STORAGE_SYNC, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ snapshot }),
+        }).catch(() => undefined);
+      }, 1500);
+      return () => window.clearTimeout(timeout);
+    }, [cloudReady, cloudSyncTick, markets, users, clients, sales, attendance, inventory, movements, assignments, closures]);
+    useEffect(() => {
+      const retry = () => setCloudSyncTick(value => value + 1);
+      window.addEventListener('online', retry);
+      return () => window.removeEventListener('online', retry);
+    }, []);
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
     if (navigator.storage?.persist) navigator.storage.persist().catch(() => undefined);
   }, []);
-   useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { const next = ensureInventory(markets, inventory); if (next.length !== inventory.length) { setInventory(next); writeStore('bt-inventory', next); } }, [markets, inventory]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]); useEffect(() => { writeStore('bt-promoter-assignments', assignments); }, [assignments]);
+    useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { writeStore('bt-sales', sales); }, [sales]); useEffect(() => { writeStore('bt-attendance', attendance); }, [attendance]); useEffect(() => { const next = ensureInventory(markets, inventory); if (next.length !== inventory.length) { setInventory(next); writeStore('bt-inventory', next); } }, [markets, inventory]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]); useEffect(() => { writeStore('bt-promoter-assignments', assignments); }, [assignments]); useEffect(() => { writeStore('bt-session-closures', closures); }, [closures]);
    const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
    const logoutImmediately = () => { localStorage.removeItem('bt-session'); setSessionClosePrompt(false); setPromoterSession({ marketId: '', clientId: '' }); setUser(null); };
     const requestLogout = () => {
@@ -900,8 +990,8 @@ export default function App() {
      if (tastingUsed > stock.tastingStock) { notify(`Solo hay ${stock.tastingStock} panetones de degustación disponibles`, true); return; }
      const now = new Date().toISOString(); const updatedInventory = marketId ? (inventory.some(item => item.marketId === marketId) ? inventory.map(item => item.marketId === marketId ? { ...item, tastingStock: item.tastingStock - tastingUsed, updatedAt: now } : item) : [...inventory, { ...stock, tastingStock: stock.tastingStock - tastingUsed, updatedAt: now }]) : inventory;
      const nextMovements = tastingUsed > 0 && marketId ? [{ id: `DEG-CIERRE-${activeUser.id}-${Date.now()}`, marketId, kind: 'DEGUSTACION' as const, quantity: tastingUsed, actorId: activeUser.id, actorName: activeUser.name, date: now, status: syncStatus() }, ...movements] : movements;
-     const closure: SessionClosure = { id: `CIERRE-${new Date().getFullYear()}-${String(readStore<SessionClosure[]>('bt-session-closures', []).length + 1).padStart(6, '0')}`, promoterId: activeUser.id, marketId, clientId, tastingUsed, leads, date: now, status: syncStatus() };
-     const closures = [closure, ...readStore<SessionClosure[]>('bt-session-closures', [])]; writeStore('bt-session-closures', closures);
+      const closure: SessionClosure = { id: `CIERRE-${new Date().getFullYear()}-${String(closures.length + 1).padStart(6, '0')}`, promoterId: activeUser.id, marketId, clientId, tastingUsed, leads, date: now, status: syncStatus() };
+      const nextClosures = [closure, ...closures]; setClosures(nextClosures); writeStore('bt-session-closures', nextClosures);
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
