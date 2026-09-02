@@ -19,8 +19,9 @@ type InventoryMovement = { id: string; marketId: string; kind: InventoryMovement
 type Toast = { message: string; error?: boolean };
 
 const MARKETS_SHEET = 'https://docs.google.com/spreadsheets/d/1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM/export?format=csv&gid=0';
-const CLIENTS_SHEET = 'https://docs.google.com/spreadsheets/d/1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA/export?format=csv&gid=0';
-const USERS_SHEET = 'https://docs.google.com/spreadsheets/d/1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo/export?format=csv&gid=0';
+const CLIENTS_SHEET_ID = '1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA';
+const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
+const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
 const seedMarkets: Market[] = [
   { id: '1', department: 'AMAZONAS', province: 'CHACHAPOYAS', district: 'CHACHAPOYAS', name: 'MERCADO MERCA CHACHA', status: 'ACTIVO' },
   { id: '2', department: 'AMAZONAS', province: 'CHACHAPOYAS', district: 'CHACHAPOYAS', name: 'MERCADO MODELO', status: 'ACTIVO' },
@@ -167,15 +168,14 @@ function parseCsvRecords(text: string) {
   const headers = rows[0].map(normalizeCsvHeader);
   return rows.slice(1).map(row => Object.fromEntries(headers.map((header, index) => [header, (row[index] || '').trim()])));
 }
-async function fetchGoogleSheetRecords(url: string) {
-  const urls = [url, url.replace('/export?format=csv', '/gviz/tq?tqx=out:csv')];
-  let lastStatus = '';
-  for (const candidate of urls) {
-    const response = await fetch(candidate);
-    if (!response.ok) { lastStatus = `${response.status}`; continue; }
-    return parseCsvRecords(await response.text());
+async function fetchGoogleSheetRecords(sheetId: string) {
+  const response = await fetch(`${GOOGLE_SHEETS_PROXY}/${encodeURIComponent(sheetId)}?gid=0`);
+  if (!response.ok) {
+    let detail = '';
+    try { detail = (await response.json() as { message?: string }).message || ''; } catch { detail = ''; }
+    throw new Error(detail || `Google Sheets no disponible (${response.status})`);
   }
-  throw new Error(`Google Sheets no disponible (${lastStatus || 'sin respuesta'})`);
+  return parseCsvRecords(await response.text());
 }
 function normalizeCsvHeader(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -546,11 +546,14 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   const mergeImportedUsers = (records: Record<string, string>[]) => {
     const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
     records.forEach((record, index) => {
-      const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const name = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']); const roleValue = normalizeCsvHeader(csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario'])).toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'mercado', 'market', 'nombremercado']);
-      if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN'].includes(roleValue) || (roleValue === 'PROMOTOR' && !csvMarketId(marketValue, markets))) { skipped += 1; return; }
-      imported.push({ id: csvField(record, ['id', 'codigo', 'idusuario']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? csvMarketId(marketValue, markets) : undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
+      const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const firstName = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']); const lastName = csvField(record, ['apellido', 'apellidos']); const name = [firstName, lastName].filter(Boolean).join(' '); const rawRole = normalizeCsvHeader(csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario'])); const roleValue = rawRole.startsWith('promotor') ? 'PROMOTOR' : rawRole.toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
+      const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
+      if (!/^\d{8}$/.test(dni) || !name || !['PROMOTOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN'].includes(roleValue) || (roleValue === 'PROMOTOR' && marketValue && !marketId)) { skipped += 1; return; }
+      imported.push({ id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, marketId: roleValue === 'PROMOTOR' ? marketId : undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
     });
     if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
+    const marketLoads = new Map(markets.map(market => [market.id, users.filter(item => item.role === 'PROMOTOR' && item.status === 'ACTIVO' && item.marketId === market.id).length]));
+    imported.forEach(item => { if (item.role !== 'PROMOTOR' || item.marketId) return; const target = markets.slice().sort((first, second) => (marketLoads.get(first.id) || 0) - (marketLoads.get(second.id) || 0))[0]; if (target) { item.marketId = target.id; marketLoads.set(target.id, (marketLoads.get(target.id) || 0) + 1); } });
     const next = [...users]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.dni === item.dni); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); const completed = ensureDemoPromoters(next, markets); setUsers(completed); writeStore('bt-users', completed);
     return `${imported.length} usuarios importados${skipped ? ` · ${skipped} filas omitidas` : ''}`;
   };
@@ -560,7 +563,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   };
   const importUsersFromSheet = async () => {
     setSyncing(true);
-    try { notify(mergeImportedUsers(await fetchGoogleSheetRecords(USERS_SHEET))); } catch (error) { notify(`No se pudo actualizar usuarios desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
+    try { notify(mergeImportedUsers(await fetchGoogleSheetRecords(USERS_SHEET_ID))); } catch (error) { notify(`No se pudo actualizar usuarios desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
   };
   const mergeImportedClients = (records: Record<string, string>[]) => {
     const imported: Client[] = []; let skipped = 0; const importId = Date.now();
@@ -579,7 +582,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
   };
   const importClientsFromSheet = async () => {
     setSyncing(true);
-    try { notify(mergeImportedClients(await fetchGoogleSheetRecords(CLIENTS_SHEET))); } catch (error) { notify(`No se pudo actualizar clientes desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
+    try { notify(mergeImportedClients(await fetchGoogleSheetRecords(CLIENTS_SHEET_ID))); } catch (error) { notify(`No se pudo actualizar clientes desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
   };
   const importInventory = async (file: File) => {
     setSyncing(true);
