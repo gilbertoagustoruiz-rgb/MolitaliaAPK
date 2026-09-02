@@ -253,7 +253,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .assignment-person small { margin-top:3px; color:hsl(var(--muted)); font-size:11px; }
 .assignment-subtitle { display:flex; flex-direction:column; gap:3px; margin:20px 0 10px; }
 .assignment-subtitle small { color:hsl(var(--muted)); font-size:11px; }
+.assignment-dropdown { position:relative; }
+.assignment-dropdown summary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:45px; padding:11px 13px; border:1px solid hsl(var(--line)); border-radius:10px; color:hsl(var(--ink)); background:hsl(var(--surface)); cursor:pointer; list-style:none; font-size:12px; }
+.assignment-dropdown summary::-webkit-details-marker { display:none; }
+.assignment-dropdown summary:after { content:"⌄"; color:hsl(var(--muted)); font-size:16px; line-height:1; transition:transform .18s; }
+.assignment-dropdown[open] summary { border-color:hsl(var(--orange)); border-radius:10px 10px 0 0; }
+.assignment-dropdown[open] summary:after { transform:rotate(180deg); }
+.assignment-dropdown summary strong { color:hsl(var(--orange-deep)); font-size:11px; text-align:right; }
+.assignment-dropdown-menu { padding:12px; border:1px solid hsl(var(--orange)); border-top:0; border-radius:0 0 10px 10px; background:hsl(var(--surface)); box-shadow:0 12px 24px hsla(218 41% 17% / .1); }
+.assignment-dropdown-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 1px 9px; }
+.assignment-dropdown-head small { color:hsl(var(--muted)); font:10px var(--font-mono); letter-spacing:.04em; text-transform:uppercase; }
 .assignment-check-list { display:flex; flex-direction:column; gap:8px; }
+.assignment-dropdown .assignment-check-list { max-height:310px; overflow-y:auto; padding-right:3px; }
 .assignment-check, .assignment-client { display:flex; align-items:flex-start; gap:10px; padding:11px 12px; border:1px solid hsl(var(--line)); border-radius:10px; cursor:pointer; transition:border .18s, background .18s; }
 .assignment-check:hover, .assignment-client:hover, .assignment-check.selected { border-color:hsl(var(--orange)); background:hsl(20 72% 97%); }
 .assignment-check input, .assignment-client input { width:16px; height:16px; flex:none; margin:2px 0 0; accent-color:hsl(var(--orange)); }
