@@ -165,6 +165,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .summary-table-row small { margin-top:4px; color:hsl(var(--muted)); font-size:10px; }
 .summary-table-row b { color:hsl(var(--orange-deep)); font:700 12px var(--font-mono); }
 .summary-table-row > span { color:hsl(var(--muted)); }
+.stock-reconciliation-table { min-width:980px; }
+.stock-reconciliation-row { display:grid; grid-template-columns:minmax(170px,1.35fr) repeat(6,minmax(118px,1fr)); align-items:center; gap:12px; min-height:70px; border-bottom:1px solid hsl(var(--line)); font-size:12px; }
+.stock-reconciliation-row:last-child { border-bottom:0; }
+.stock-reconciliation-row.header { min-height:42px; color:hsl(var(--muted)); font:700 10px var(--font-mono); text-transform:uppercase; letter-spacing:.03em; }
+.stock-reconciliation-row strong, .stock-reconciliation-row small { display:block; }
+.stock-reconciliation-row strong { color:hsl(var(--ink)); }
+.stock-reconciliation-row > span, .stock-reconciliation-row > b { color:hsl(var(--muted)); }
+.stock-reconciliation-row > b { color:hsl(153 43% 26%); font:700 12px var(--font-mono); }
+.stock-reconciliation-row small { margin-top:4px; color:hsl(var(--muted)); font-size:10px; line-height:1.35; }
+.stock-reconciliation-row > b small { color:hsl(var(--muted)); font:400 10px var(--font-sans); }
 .promoter-ranking { display:flex; flex-direction:column; }
 .promoter-ranking-row { display:grid; grid-template-columns:32px minmax(0,1fr) auto; align-items:center; gap:12px; min-height:62px; border-bottom:1px solid hsl(var(--line)); }
 .promoter-ranking-row:last-child { border-bottom:0; }
@@ -607,6 +617,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
   .dashboard-kpis { grid-template-columns:1fr; }
   .dashboard-heading h2 { font-size:22px; }
   .dashboard-table { min-width:520px; }
+  .stock-reconciliation-table { min-width:900px; }
   .brand-pie-layout { grid-template-columns:1fr; justify-items:center; }
   .brand-legend { width:100%; }
    .client-heading { flex-direction:column; }
