@@ -30,6 +30,7 @@ type CloudSnapshot = {
   movements: InventoryMovement[];
   assignments: PromoterAssignment[];
   closures: SessionClosure[];
+  productPrices: ProductPrice[];
 };
 
 const MARKETS_SHEET_ID = '1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM';
@@ -38,8 +39,9 @@ const CLIENTS_SHEET_ID = '1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA';
 const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
 const PRICES_SHEET_ID = '1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8';
 const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
-const GOOGLE_SHEETS_STORAGE_SYNC = '/api/google-sheets-storage/sync';
-const GOOGLE_SHEETS_ASSIGNMENTS = '/api/google-sheets-storage/assignments';
+const APP_STORAGE_SYNC = '/api/app-storage/sync';
+const APP_STORAGE_ASSIGNMENTS = '/api/app-storage/assignments';
+const APP_STORAGE_LOGIN = '/api/app-storage/login';
 const GOOGLE_DRIVE_PHOTO_UPLOAD = '/api/evidence-photos';
 const PRODUCT_PRICES_STORE_KEY = 'bt-product-prices';
 const DEFAULT_CAMPAIGN_TASTING_STOCK = 20;
@@ -115,6 +117,7 @@ function cloudSnapshotFromStores(): CloudSnapshot {
     movements: readStore<InventoryMovement[]>('bt-inventory-movements', []),
     assignments: readStore<PromoterAssignment[]>('bt-promoter-assignments', []),
     closures: readStore<SessionClosure[]>('bt-session-closures', []),
+    productPrices: readStore<ProductPrice[]>(PRODUCT_PRICES_STORE_KEY, []),
   };
 }
 type PendingPhotoUpload = {
@@ -606,18 +609,32 @@ function Modal({ title, detail, children, close }: { title: string; detail: stri
 }
 
 function Login({ users, onLogin, notify }: { users: AppUser[]; onLogin: (user: AppUser) => void; notify: (message: string, error?: boolean) => void }) {
-  const [dni, setDni] = useState(''); const [password, setPassword] = useState('');
-  const submit = () => {
-    const user = users.find(item => item.dni === dni && item.password === password && item.status === 'ACTIVO') || null;
-    if (!user) { notify('DNI o clave incorrectos', true); return; }
-    writeStore('bt-session', user); onLogin(user);
+  const [dni, setDni] = useState(''); const [password, setPassword] = useState(''); const [loading, setLoading] = useState(false);
+  const submit = async () => {
+    setLoading(true);
+    try {
+      if (navigator.onLine) {
+        const response = await fetch(APP_STORAGE_LOGIN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dni, password }) });
+        const payload = await response.json() as { user?: AppUser; message?: string };
+        if (!response.ok || !payload.user) { notify(payload.message || 'DNI o clave incorrectos', true); return; }
+        const user = { ...payload.user, password };
+        writeStore('bt-session', user); onLogin(user); return;
+      }
+      const user = users.find(item => item.dni === dni && item.password === password && item.status === 'ACTIVO') || null;
+      if (!user) { notify('Sin conexión: usa una cuenta que ya haya ingresado en este dispositivo', true); return; }
+      writeStore('bt-session', user); onLogin(user);
+    } catch {
+      notify('No se pudo validar el acceso con el servidor', true);
+    } finally {
+      setLoading(false);
+    }
   };
   return <main className="login-shell">
     <section className="login-hero"><Logo compact /><div className="hero-copy"><span className="eyebrow">CAMPAÑA 2026</span><h1>Panetones Molitalia</h1><p>Ventas, clientes, dinámicas y evidencias en una sola aplicación.</p></div><div className="hero-foot"><span /> Captura segura para trabajo en campo</div></section>
     <section className="login-panel"><form className="login-card" onSubmit={event => { event.preventDefault(); submit(); }}><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><ShieldCheck /></span><div><h2>Bienvenido</h2><p>Ingresa con tu DNI y clave.</p></div></div>
        <Field label="DNI"><Input value={dni} onChange={value => setDni(value.replace(/\D/g, ''))} placeholder="12345678" maxLength={8} autoComplete="username" testId="input-dni" /></Field>
        <Field label="Clave"><Input value={password} onChange={setPassword} placeholder="Ingresa tu clave" type="password" autoComplete="current-password" testId="input-password" /></Field>
-       <Btn className="primary full" type="submit" testId="button-login">Ingresar</Btn>
+        <Btn className="primary full" type="submit" disabled={loading} testId="button-login">{loading ? 'Validando...' : 'Ingresar'}</Btn>
       <div className="login-note"><Smartphone /> Instalable en iPhone y Android</div>
      </form></section>
   </main>;
@@ -740,7 +757,7 @@ function AssignmentModule({ markets, users, clients, assignments, setAssignments
      writeStore('bt-promoter-assignments', next);
     setUsers(users.map(user => user.id === selectedPromoterId ? { ...user, marketId: selectedMarketIds[0] } : user));
      try {
-       const response = await fetch(GOOGLE_SHEETS_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
+        const response = await fetch(APP_STORAGE_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
        if (!response.ok) throw new Error('No se pudo sincronizar');
        const payload = await response.json() as { assignments?: PromoterAssignment[] };
        if (Array.isArray(payload.assignments)) {
@@ -761,7 +778,7 @@ function AssignmentModule({ markets, users, clients, assignments, setAssignments
     setUsers(users.map(user => user.id === selectedPromoterId ? { ...user, marketId: undefined } : user));
     setSelectedMarketIds([]); setSelectedClientIds([]);
      try {
-       const response = await fetch(GOOGLE_SHEETS_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
+        const response = await fetch(APP_STORAGE_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
        if (!response.ok) throw new Error('No se pudo sincronizar');
        notify(`Asignación retirada para ${selectedPromoter?.name || 'el promotor'}`);
      } catch {
@@ -1081,100 +1098,15 @@ export default function App() {
      const enqueueEvidencePhoto = (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) => {
        void queuePhotoUpload(file, entityType, entityId, field).then(flushEvidencePhotos).catch(() => undefined);
      };
-    useEffect(() => {
-      let cancelled = false;
-      const syncReferences = async () => {
-        try {
-          const [marketRecords, userRecords, clientRecords, priceRecords] = await Promise.all([
-            fetchGoogleSheetRecords(MARKETS_SHEET_ID),
-            fetchGoogleSheetRecords(USERS_SHEET_ID),
-            fetchGoogleSheetRecords(CLIENTS_SHEET_ID),
-            fetchGoogleSheetRecords(PRICES_SHEET_ID),
-          ]);
-          const importedMarkets = importedMarketsFromRecords(marketRecords);
-          if (!importedMarkets.length) throw new Error('La hoja de Mercados no contiene registros válidos');
-           const importedUsers = mergeUsersByDni([], userRecords.map((record, index) => importedUserFromRecord(record, index, importedMarkets)).filter((item): item is AppUser => Boolean(item)));
-          const importedClients = importedClientsFromRecords(clientRecords, importedMarkets);
-          const importedPrices = priceRecords.map(importedPriceFromRecord).filter((item): item is ProductPrice => Boolean(item));
-          if (cancelled) return;
-
-          const previousClients = readStore<Client[]>('bt-clients', []);
-          const clientAliases = new Map<string, string>();
-          importedClients.forEach(incoming => {
-            const previous = previousClients.find(item => item.code === incoming.code);
-            if (previous && previous.id !== incoming.id) clientAliases.set(previous.id, incoming.id);
-          });
-          const remapClientId = (clientId?: string) => clientId ? clientAliases.get(clientId) || clientId : clientId;
-
-          setMarkets(current => {
-            const next = mergeReferenceRows(current, importedMarkets, item => item.id);
-            writeStore('bt-markets', next);
-            return next;
-          });
-          setUsers(current => {
-             const next = mergeUsersByDni(current, importedUsers);
-            writeStore('bt-users', next);
-            return next;
-          });
-          setClients(current => {
-            const next = mergeReferenceRows(current, importedClients, item => item.code);
-            writeStore('bt-clients', next);
-            return next;
-          });
-          setProductPrices(current => {
-            const nextImported = importedPrices.map(price => {
-              const previous = current.find(item => item.sku === price.sku);
-              const unchanged = previous && previous.product === price.product && previous.unitsPerPackage === price.unitsPerPackage && previous.unitPrice === price.unitPrice && previous.totalPrice === price.totalPrice;
-              return unchanged ? { ...price, updatedAt: previous.updatedAt } : price;
-            });
-            const next = mergeReferenceRows(current, nextImported, item => item.sku);
-            writeStore(PRODUCT_PRICES_STORE_KEY, next);
-            return next;
-          });
-          if (clientAliases.size) {
-            setSales(current => {
-              const next = current.map(item => ({ ...item, clientId: remapClientId(item.clientId) || item.clientId }));
-              writeStore('bt-sales', next);
-              return next;
-            });
-            setAttendance(current => {
-              const next = current.map(item => ({ ...item, clientId: remapClientId(item.clientId) || item.clientId }));
-              writeStore('bt-attendance', next);
-              return next;
-            });
-            setAssignments(current => {
-              const next = current.map(item => ({ ...item, clientIds: item.clientIds.map(clientId => remapClientId(clientId) || clientId) }));
-              writeStore('bt-promoter-assignments', next);
-              return next;
-            });
-            setClosures(current => {
-              const next = current.map(item => ({ ...item, clientId: remapClientId(item.clientId) }));
-              writeStore('bt-session-closures', next);
-              return next;
-            });
-          }
-        } catch {
-          // Las últimas referencias válidas permanecen disponibles para trabajo offline.
-        } finally {
-          if (!cancelled) setReferencesReady(true);
-        }
-      };
-      const refresh = () => { if (navigator.onLine) void syncReferences(); };
-      void syncReferences();
-      const interval = window.setInterval(refresh, 30_000);
-      window.addEventListener('online', refresh);
-      return () => {
-        cancelled = true;
-        window.clearInterval(interval);
-        window.removeEventListener('online', refresh);
-      };
-    }, []);
+     useEffect(() => {
+       setReferencesReady(true);
+     }, []);
     useEffect(() => {
        if (!referencesReady) return;
       let cancelled = false;
       const hydrateCloudStorage = async () => {
         try {
-          const response = await fetch(GOOGLE_SHEETS_STORAGE_SYNC, {
+           const response = await fetch(APP_STORAGE_SYNC, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ snapshot: cloudSnapshotFromStores() }),
@@ -1196,8 +1128,10 @@ export default function App() {
           const nextMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
           const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
           const nextClosures = Array.isArray(snapshot.closures) ? snapshot.closures : [];
+           const nextProductPrices = Array.isArray(snapshot.productPrices) ? snapshot.productPrices : productPrices;
           setMarkets(nextMarkets); setUsers(nextUsers); setClients(nextClients); setSales(nextSales); setAttendance(nextAttendance); setInventory(nextInventory); setMovements(nextMovements); setAssignments(nextAssignments); setClosures(nextClosures);
-          writeStore('bt-markets', nextMarkets); writeStore('bt-users', nextUsers); writeStore('bt-clients', nextClients); writeStore('bt-sales', nextSales); writeStore('bt-attendance', nextAttendance); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); writeStore('bt-promoter-assignments', nextAssignments); writeStore('bt-session-closures', nextClosures);
+           setProductPrices(nextProductPrices);
+           writeStore('bt-markets', nextMarkets); writeStore('bt-users', nextUsers); writeStore('bt-clients', nextClients); writeStore('bt-sales', nextSales); writeStore('bt-attendance', nextAttendance); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); writeStore('bt-promoter-assignments', nextAssignments); writeStore('bt-session-closures', nextClosures); writeStore(PRODUCT_PRICES_STORE_KEY, nextProductPrices);
         } catch {
           // La operación continúa en localStorage y se reintentará al volver a estar en línea.
         } finally {
@@ -1213,7 +1147,7 @@ export default function App() {
        const refreshAssignments = async () => {
          if (!navigator.onLine) return;
          try {
-           const response = await fetch(GOOGLE_SHEETS_ASSIGNMENTS);
+            const response = await fetch(APP_STORAGE_ASSIGNMENTS);
            if (!response.ok) throw new Error('Asignaciones no disponibles');
            const payload = await response.json() as { assignments?: PromoterAssignment[] };
            if (cancelled || !Array.isArray(payload.assignments)) return;
@@ -1248,15 +1182,16 @@ export default function App() {
           movements,
           assignments,
           closures,
+           productPrices,
         };
-        void fetch(GOOGLE_SHEETS_STORAGE_SYNC, {
+         void fetch(APP_STORAGE_SYNC, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ snapshot }),
         }).catch(() => undefined);
       }, 1500);
       return () => window.clearTimeout(timeout);
-    }, [cloudReady, cloudSyncTick, markets, users, clients, sales, attendance, inventory, movements, assignments, closures]);
+     }, [cloudReady, cloudSyncTick, markets, users, clients, productPrices, sales, attendance, inventory, movements, assignments, closures]);
     useEffect(() => {
        const retry = () => {
          setCloudSyncTick(value => value + 1);
@@ -1285,7 +1220,15 @@ export default function App() {
       });
     }, [markets]);
     useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { writeStore('bt-sales', sales); }, [sales]); useEffect(() => { writeStore('bt-attendance', attendance); }, [attendance]); useEffect(() => { const next = ensureInventory(markets, inventory); if (next.length !== inventory.length) { setInventory(next); writeStore('bt-inventory', next); } }, [markets, inventory]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]); useEffect(() => { writeStore('bt-promoter-assignments', assignments); }, [assignments]); useEffect(() => { writeStore('bt-session-closures', closures); }, [closures]);
-   const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
+    const completeLogin = (authenticated: AppUser) => {
+      setUser(authenticated);
+      setUsers(current => {
+        const next = mergeUsersByDni(current, [authenticated]);
+        writeStore('bt-users', next);
+        return next;
+      });
+    };
+    const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
    const logoutImmediately = () => { localStorage.removeItem('bt-session'); setSessionClosePrompt(false); setPromoterSession({ marketId: '', clientId: '' }); setUser(null); };
     const requestLogout = () => {
       if (activeUser?.role === 'PROMOTOR') {
@@ -1317,5 +1260,5 @@ export default function App() {
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
-      return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : referencesReady || users.length ? <Login users={users} onLogin={setUser} notify={notify} /> : <main className="login-shell"><section className="login-panel"><div className="login-card"><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><RefreshCw /></span><div><h2>Cargando acceso</h2><p>Estamos actualizando los usuarios de la campaña.</p></div></div></div></section></main>}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+      return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : referencesReady || users.length ? <Login users={users} onLogin={completeLogin} notify={notify} /> : <main className="login-shell"><section className="login-panel"><div className="login-card"><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><RefreshCw /></span><div><h2>Cargando acceso</h2><p>Estamos conectando con el servidor.</p></div></div></div></section></main>}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }

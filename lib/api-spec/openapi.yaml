@@ -24,8 +24,124 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /app-storage:
+    get:
+      operationId: getAppStorage
+      tags: [storage]
+      summary: Read the complete operational snapshot from PostgreSQL
+      responses:
+        "200":
+          description: Current operational snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppStorageResponse"
+  /app-storage/sync:
+    post:
+      operationId: syncAppStorage
+      tags: [storage]
+      summary: Merge an offline snapshot into PostgreSQL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                snapshot:
+                  $ref: "#/components/schemas/AppSnapshot"
+              required: [snapshot]
+      responses:
+        "200":
+          description: Merged operational snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppStorageResponse"
+  /app-storage/assignments:
+    get:
+      operationId: listAssignments
+      tags: [storage]
+      summary: Read promoter assignments
+      responses:
+        "200":
+          description: Promoter assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    post:
+      operationId: saveAssignment
+      tags: [storage]
+      summary: Save one promoter assignment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Assignment saved
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /app-storage/login:
+    post:
+      operationId: appLogin
+      tags: [storage]
+      summary: Validate a campaign user against the stored password hash
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dni:
+                  type: string
+                password:
+                  type: string
+              required: [dni, password]
+      responses:
+        "200":
+          description: Authenticated campaign user
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
 components:
   schemas:
+    AppRecord:
+      type: object
+      additionalProperties: true
+    AppSnapshot:
+      type: object
+      properties:
+        markets: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        users: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        clients: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        sales: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        attendance: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        inventory: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        movements: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        assignments: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        closures: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+        productPrices: { type: array, items: { $ref: "#/components/schemas/AppRecord" } }
+      required: [markets, users, clients, sales, attendance, inventory, movements, assignments, closures, productPrices]
+    AppStorageResponse:
+      type: object
+      properties:
+        storage:
+          type: string
+        snapshot:
+          $ref: "#/components/schemas/AppSnapshot"
+      required: [storage, snapshot]
     HealthStatus:
       type: object
       properties:
