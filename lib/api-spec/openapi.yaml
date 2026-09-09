@@ -241,6 +241,58 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/degustaciones:
+    get:
+      operationId: listAdminDegustaciones
+      tags: [storage]
+      summary: List manual degustation stock entries
+      responses:
+        "200":
+          description: Degustaciones
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    post:
+      operationId: createAdminDegustacion
+      tags: [storage]
+      summary: Add panetones de degustación to a market inventory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                degustacion: { $ref: "#/components/schemas/AppRecord" }
+              required: [degustacion]
+      responses:
+        "201":
+          description: Degustación created and inventory updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/degustaciones/{source}/{id}:
+    delete:
+      operationId: deleteAdminDegustacion
+      tags: [storage]
+      summary: Permanently delete a manual degustation stock entry
+      parameters:
+        - name: source
+          in: path
+          required: true
+          schema: { type: string, enum: [movement] }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Degustación deleted and inventory reverted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
   /app-storage/admin/cleanup:
     post:
       operationId: cleanupAdminCatalogs

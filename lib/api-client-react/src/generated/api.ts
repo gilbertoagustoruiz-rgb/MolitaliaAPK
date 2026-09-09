@@ -26,9 +26,11 @@ import type {
   CleanupAdminCatalogsBody,
   CreateAdminCanjeBody,
   CreateAdminClientBody,
+  CreateAdminDegustacionBody,
   CreateAdminMarketBody,
   HealthStatus,
   ListAdminCanjes200,
+  ListAdminDegustaciones200,
   ListAssignments200,
   SaveAssignment200,
   SaveAssignmentBody,
@@ -1010,6 +1012,227 @@ export const useDeleteAdminCanje = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteAdminCanjeMutationOptions(options));
+    }
+
+export const getListAdminDegustacionesUrl = () => {
+
+
+
+
+  return `/api/app-storage/admin/degustaciones`
+}
+
+/**
+ * @summary List manual degustation stock entries
+ */
+export const listAdminDegustaciones = async ( options?: Parameters<typeof customFetch>[1]): Promise<ListAdminDegustaciones200> => {
+
+  return customFetch<ListAdminDegustaciones200>(getListAdminDegustacionesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAdminDegustacionesQueryKey = () => {
+    return [
+    `/api/app-storage/admin/degustaciones`
+    ] as const;
+    }
+
+
+export const getListAdminDegustacionesQueryOptions = <TData = Awaited<ReturnType<typeof listAdminDegustaciones>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminDegustaciones>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAdminDegustacionesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminDegustaciones>>> = ({ signal }) => listAdminDegustaciones({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAdminDegustaciones>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAdminDegustacionesQueryResult = NonNullable<Awaited<ReturnType<typeof listAdminDegustaciones>>>
+export type ListAdminDegustacionesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manual degustation stock entries
+ */
+
+export function useListAdminDegustaciones<TData = Awaited<ReturnType<typeof listAdminDegustaciones>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminDegustaciones>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAdminDegustacionesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAdminDegustacionUrl = () => {
+
+
+
+
+  return `/api/app-storage/admin/degustaciones`
+}
+
+/**
+ * @summary Add panetones de degustación to a market inventory
+ */
+export const createAdminDegustacion = async (createAdminDegustacionBody: CreateAdminDegustacionBody, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getCreateAdminDegustacionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createAdminDegustacionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateAdminDegustacionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminDegustacion>>, TError,{data: BodyType<CreateAdminDegustacionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAdminDegustacion>>, TError,{data: BodyType<CreateAdminDegustacionBody>}, TContext> => {
+
+const mutationKey = ['createAdminDegustacion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAdminDegustacion>>, {data: BodyType<CreateAdminDegustacionBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAdminDegustacion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAdminDegustacionMutationResult = NonNullable<Awaited<ReturnType<typeof createAdminDegustacion>>>
+    export type CreateAdminDegustacionMutationBody = BodyType<CreateAdminDegustacionBody>
+    export type CreateAdminDegustacionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Add panetones de degustación to a market inventory
+ */
+export const useCreateAdminDegustacion = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminDegustacion>>, TError,{data: BodyType<CreateAdminDegustacionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAdminDegustacion>>,
+        TError,
+        {data: BodyType<CreateAdminDegustacionBody>},
+        TContext
+      > => {
+      return useMutation(getCreateAdminDegustacionMutationOptions(options));
+    }
+
+export const getDeleteAdminDegustacionUrl = (source: 'movement',
+    id: string,) => {
+
+
+
+
+  return `/api/app-storage/admin/degustaciones/${source}/${id}`
+}
+
+/**
+ * @summary Permanently delete a manual degustation stock entry
+ */
+export const deleteAdminDegustacion = async (source: 'movement',
+    id: string, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getDeleteAdminDegustacionUrl(source,id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAdminDegustacionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminDegustacion>>, TError,{source: 'movement';id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAdminDegustacion>>, TError,{source: 'movement';id: string}, TContext> => {
+
+const mutationKey = ['deleteAdminDegustacion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAdminDegustacion>>, {source: 'movement';id: string}> = (props) => {
+          const {source,id} = props ?? {};
+
+          return  deleteAdminDegustacion(source,id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAdminDegustacionMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAdminDegustacion>>>
+
+    export type DeleteAdminDegustacionMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Permanently delete a manual degustation stock entry
+ */
+export const useDeleteAdminDegustacion = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminDegustacion>>, TError,{source: 'movement';id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAdminDegustacion>>,
+        TError,
+        {source: 'movement';id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteAdminDegustacionMutationOptions(options));
     }
 
 export const getCleanupAdminCatalogsUrl = () => {

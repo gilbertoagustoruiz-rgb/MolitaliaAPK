@@ -60,6 +60,12 @@ export type CreateAdminCanjeBody = {
   canje: AppRecord;
 };
 
+export type ListAdminDegustaciones200 = { [key: string]: unknown };
+
+export type CreateAdminDegustacionBody = {
+  degustacion: AppRecord;
+};
+
 export type CleanupAdminCatalogsBody = {
   confirmation: string;
 };

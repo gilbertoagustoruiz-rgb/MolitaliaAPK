@@ -112,6 +112,13 @@ function canjeSnapshot(snapshot: StorageSnapshot) {
   ].sort((first, second) => recordDate(second)?.localeCompare(recordDate(first) || "") || 0);
 }
 
+function degustacionSnapshot(snapshot: StorageSnapshot) {
+  return snapshot.movements
+    .filter((movement) => value(movement, "kind") === "AJUSTE_DEGUSTACION" && value(movement, "degustacionProductId"))
+    .map((movement) => ({ ...movement, source: "movement", degustacionId: value(movement, "id") }))
+    .sort((first, second) => recordDate(second)?.localeCompare(recordDate(first) || "") || 0);
+}
+
 async function readSnapshot(client: QueryClient = pool as unknown as QueryClient) {
   const snapshot = emptySnapshot();
   for (const name of Object.keys(collectionConfig) as CollectionName[]) {
@@ -538,6 +545,115 @@ router.delete("/app-storage/admin/canjes/:source/:id", async (req, res): Promise
     await client.query("ROLLBACK");
     req.log.error({ err: error }, "Unable to delete canje");
     res.status(500).json({ message: "No se pudo eliminar el canje." });
+  } finally {
+    client.release();
+  }
+});
+
+router.get("/app-storage/admin/degustaciones", async (_req, res): Promise<void> => {
+  try {
+    const snapshot = await readSnapshot();
+    res.json({ degustaciones: degustacionSnapshot(snapshot) });
+  } catch {
+    res.status(500).json({ message: "No se pudieron leer las degustaciones." });
+  }
+});
+
+router.post("/app-storage/admin/degustaciones", async (req, res): Promise<void> => {
+  const input = req.body?.degustacion;
+  if (!isRecord(input) || !value(input, "marketId") || !value(input, "degustacionProductId") || numeric(input, "quantity") <= 0) {
+    res.status(400).json({ message: "La degustación requiere mercado, producto y cantidad mayor a cero." });
+    return;
+  }
+  const degustacion: StoredRecord = {
+    id: value(input, "id") || `DEG-ABASTECIMIENTO-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    marketId: value(input, "marketId"),
+    kind: "AJUSTE_DEGUSTACION",
+    degustacionProductId: value(input, "degustacionProductId"),
+    degustacionProductLabel: value(input, "degustacionProductLabel") || "Panetón",
+    quantity: Math.floor(numeric(input, "quantity")),
+    actorId: value(input, "actorId") || "ADMIN",
+    actorName: value(input, "actorName") || "Analista",
+    date: value(input, "date") || new Date().toISOString(),
+    status: "PENDIENTE",
+  };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await upsertRecord(client as unknown as QueryClient, "movements", degustacion);
+    const inventoryResult = await client.query(
+      "SELECT tasting_stock, redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
+      [degustacion.marketId],
+    ) as unknown as { rows: Array<{ tasting_stock: number; redemption_stock: Record<string, number>; data: StoredRecord }> };
+    const current = inventoryResult.rows[0];
+    const redemptionStock = {
+      AVENA: Math.max(0, Number(current?.redemption_stock?.AVENA) || 0),
+      BATEA: Math.max(0, Number(current?.redemption_stock?.BATEA) || 0),
+      MANDIL: Math.max(0, Number(current?.redemption_stock?.MANDIL) || 0),
+      SPAGHETTI: Math.max(0, Number(current?.redemption_stock?.SPAGHETTI) || 0),
+    };
+    const inventoryRecord: StoredRecord = {
+      ...(current?.data || {}),
+      marketId: degustacion.marketId,
+      tastingStock: Math.max(0, Number(current?.tasting_stock) || 0) + Math.floor(numeric(degustacion, "quantity")),
+      redemptionStock,
+      updatedAt: degustacion.date,
+    };
+    await client.query(
+      `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (market_id) DO UPDATE SET tasting_stock=EXCLUDED.tasting_stock,data=EXCLUDED.data,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+      [degustacion.marketId, inventoryRecord.tastingStock, redemptionStock, inventoryRecord, degustacion.date],
+    );
+    await client.query("COMMIT");
+    res.status(201).json({ degustacion, snapshot: await readSnapshot() });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    req.log.error({ err: error }, "Unable to create degustacion");
+    res.status(500).json({ message: "No se pudo crear la degustación." });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/app-storage/admin/degustaciones/:source/:id", async (req, res): Promise<void> => {
+  const source = String(req.params.source || "");
+  const id = String(req.params.id || "").trim();
+  if (source !== "movement" || !id) {
+    res.status(400).json({ message: "El origen de la degustación no es válido." });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
+      [id],
+    ) as unknown as { rows: Array<{ market_id: string; quantity: number; data: StoredRecord }> };
+    const movement = result.rows[0];
+    if (movement && value(movement.data, "kind") === "AJUSTE_DEGUSTACION" && value(movement.data, "degustacionProductId")) {
+      const inventoryResult = await client.query(
+        "SELECT tasting_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
+        [movement.market_id],
+      ) as unknown as { rows: Array<{ tasting_stock: number; data: StoredRecord }> };
+      const current = inventoryResult.rows[0];
+      if (current) {
+        const tastingStock = Math.max(0, Number(current.tasting_stock) || 0) - Math.max(0, Number(movement.quantity) || 0);
+        const inventoryRecord = { ...(current.data || {}), tastingStock, updatedAt: new Date().toISOString() };
+        await client.query(
+          "UPDATE inventory SET tasting_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
+          [movement.market_id, tastingStock, inventoryRecord, inventoryRecord.updatedAt],
+        );
+      }
+    }
+    await client.query("DELETE FROM inventory_movements WHERE id=$1", [id]);
+    await client.query("COMMIT");
+    res.json({ deleted: id, source, snapshot: await readSnapshot() });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    req.log.error({ err: error }, "Unable to delete degustacion");
+    res.status(500).json({ message: "No se pudo eliminar la degustación." });
   } finally {
     client.release();
   }

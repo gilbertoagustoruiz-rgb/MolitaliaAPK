@@ -249,6 +249,61 @@ export const DeleteAdminCanjeResponse = zod.object({
 
 
 /**
+ * @summary List manual degustation stock entries
+ */
+export const ListAdminDegustacionesResponse = zod.record(zod.string(), zod.unknown())
+
+
+/**
+ * @summary Add panetones de degustación to a market inventory
+ */
+export const CreateAdminDegustacionBody = zod.object({
+  "degustacion": zod.record(zod.string(), zod.unknown())
+})
+
+export const CreateAdminDegustacionResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
+ * @summary Permanently delete a manual degustation stock entry
+ */
+export const DeleteAdminDegustacionParams = zod.object({
+  "source": zod.enum(['movement']),
+  "id": zod.coerce.string()
+})
+
+export const DeleteAdminDegustacionResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
  * @summary Permanently clear operational data and non-ANALISTA users while preserving ANALISTA users and product prices
  */
 export const CleanupAdminCatalogsBody = zod.object({
