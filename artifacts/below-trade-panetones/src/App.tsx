@@ -1040,6 +1040,13 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
    const applyAdminSnapshot = (snapshot: Partial<CloudSnapshot> | undefined) => {
      if (!snapshot) return;
      if (Array.isArray(snapshot.markets)) setMarkets(snapshot.markets);
+     if (Array.isArray(snapshot.users)) {
+       const localUsers = users;
+       setUsers(snapshot.users.map(cloudUser => {
+         const localUser = localUsers.find(item => item.id === cloudUser.id || item.dni === cloudUser.dni);
+         return { ...cloudUser, password: localUser?.password };
+       }));
+     }
      if (Array.isArray(snapshot.clients)) setClients(snapshot.clients);
      if (Array.isArray(snapshot.sales)) setSales(snapshot.sales);
      if (Array.isArray(snapshot.inventory)) setInventory(ensureInventory(Array.isArray(snapshot.markets) ? snapshot.markets : markets, snapshot.inventory));
@@ -1048,8 +1055,9 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
    };
    const adminRequest = async (path: string, init?: RequestInit) => {
      const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, init);
-     const payload = await response.json() as { message?: string; snapshot?: Partial<CloudSnapshot> };
+     const payload = await response.json() as { message?: string; catalogRevision?: string | null; snapshot?: Partial<CloudSnapshot> };
      if (!response.ok) throw new Error(payload.message || 'No se pudo guardar el cambio');
+     if (payload.catalogRevision) localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
      applyAdminSnapshot(payload.snapshot);
      return payload;
    };
@@ -1228,8 +1236,9 @@ export default function App() {
         try {
            const response = await fetch(APP_STORAGE_READ);
           if (!response.ok) throw new Error('Sincronización inicial no disponible');
-           const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
+           const payload = await response.json() as { catalogRevision?: string | null; snapshot?: Partial<CloudSnapshot> };
           if (cancelled || !payload.snapshot) return;
+           if (payload.catalogRevision) localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
           const snapshot = payload.snapshot;
           const localUsers = readStore<AppUser[]>('bt-users', []);
           const nextMarkets = Array.isArray(snapshot.markets) ? snapshot.markets : [];

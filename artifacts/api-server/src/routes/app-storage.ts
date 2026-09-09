@@ -281,7 +281,7 @@ async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    res.json({ storage: "replit-postgresql", snapshot: await readSnapshot() });
+    res.json({ storage: "replit-postgresql", catalogRevision, snapshot: await readSnapshot() });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read app storage");
     res.status(500).json({ message: "No se pudo leer PostgreSQL." });
