@@ -423,7 +423,7 @@ router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
 
 router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
   const input = req.body?.canje;
-  if (!isRecord(input) || !value(input, "marketId") || !value(input, "itemId") || numeric(input, "quantity") <= 0) {
+  if (!isRecord(input) || !value(input, "marketId") || (!value(input, "itemId") && !value(input, "canjeProductId")) || numeric(input, "quantity") <= 0) {
     res.status(400).json({ message: "El canje requiere mercado, producto y cantidad mayor a cero." });
     return;
   }
@@ -431,7 +431,10 @@ router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
     id: value(input, "id") || `CANJE-${Date.now()}-${randomUUID().slice(0, 8)}`,
     marketId: value(input, "marketId"),
     kind: "CANJE",
-    itemId: value(input, "itemId"),
+    itemId: value(input, "itemId") || undefined,
+    canjeProductId: value(input, "canjeProductId") || undefined,
+    canjeProductLabel: value(input, "canjeProductLabel") || undefined,
+    canjeComponents: isRecord(input.canjeComponents) ? input.canjeComponents : undefined,
     quantity: Math.floor(numeric(input, "quantity")),
     actorId: value(input, "actorId") || "ADMIN",
     actorName: value(input, "actorName") || "Analista",

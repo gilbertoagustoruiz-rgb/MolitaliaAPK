@@ -15,10 +15,11 @@ type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleL
 type Attendance = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
 type SessionClosure = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; marketId: string; clientId?: string; tastingUsed: number; leads: number; date: string; status: SyncStatus };
 type RedemptionItemId = 'AVENA' | 'BATEA' | 'MANDIL' | 'SPAGHETTI';
+type CanjeProductId = 'CANJE_AVENA_2' | 'CANJE_AVENA_1' | 'CANJE_AVENA_3_SPAGHETTI_1' | 'CANJE_AVENA_12_SPAGHETTI_3' | 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1' | 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4' | 'CANJE_AVENA_30_SPAGHETTI_10' | 'CANJE_AVENA_144_SPAGHETTI_100';
 type RedemptionStock = Record<RedemptionItemId, number>;
 type MarketInventory = { marketId: string; tastingStock: number; redemptionStock: RedemptionStock; updatedAt: string; exchangeStock?: number };
 type InventoryMovementKind = 'CANJE' | 'DEGUSTACION' | 'AJUSTE_DEGUSTACION' | 'AJUSTE_CANJES';
-type InventoryMovement = { id: string; marketId: string; kind: InventoryMovementKind; itemId?: RedemptionItemId; quantity: number; actorId: string; actorName: string; date: string; status: SyncStatus };
+type InventoryMovement = { id: string; marketId: string; kind: InventoryMovementKind; itemId?: RedemptionItemId; canjeProductId?: CanjeProductId; canjeProductLabel?: string; canjeComponents?: Partial<RedemptionStock>; quantity: number; actorId: string; actorName: string; date: string; status: SyncStatus };
 type AdminCanje = InventoryMovement & { source: 'movement' | 'sale'; canjeId: string; sale?: Sale };
 type Toast = { message: string; error?: boolean };
 type CloudSnapshot = {
@@ -54,6 +55,16 @@ const redemptionItems: { id: RedemptionItemId; label: string }[] = [
   { id: 'BATEA', label: 'Batea' },
   { id: 'MANDIL', label: 'Mandil' },
   { id: 'SPAGHETTI', label: 'Spaghetti' },
+];
+const canjeProducts: { id: CanjeProductId; label: string; components: Partial<RedemptionStock> }[] = [
+  { id: 'CANJE_AVENA_2', label: '2 UN AVENA CLÁSICA', components: { AVENA: 2 } },
+  { id: 'CANJE_AVENA_1', label: '1 UN AVENA CLÁSICA', components: { AVENA: 1 } },
+  { id: 'CANJE_AVENA_3_SPAGHETTI_1', label: '3 UN AVENA CLASICA + 1 UN SPAGUETTI', components: { AVENA: 3, SPAGHETTI: 1 } },
+  { id: 'CANJE_AVENA_12_SPAGHETTI_3', label: '12 UN AVENA CLÁSICA + 3 UN SPAGUETTI', components: { AVENA: 12, SPAGHETTI: 3 } },
+  { id: 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1', label: '24 UN AVENA CLÁSICA + 10 UN SPAGUETTI + 1 UN BATEAS', components: { AVENA: 24, SPAGHETTI: 10, BATEA: 1 } },
+  { id: 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI + 4 BATEAS', components: { AVENA: 144, SPAGHETTI: 100, BATEA: 4 } },
+  { id: 'CANJE_AVENA_30_SPAGHETTI_10', label: '30 UN AVENA CLÁSICA + 10 UN SPAGUETTI', components: { AVENA: 30, SPAGHETTI: 10 } },
+  { id: 'CANJE_AVENA_144_SPAGHETTI_100', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI', components: { AVENA: 144, SPAGHETTI: 100 } },
 ];
 function emptyRedemptionStock(): RedemptionStock {
   return { AVENA: DEFAULT_CAMPAIGN_REDEMPTION_STOCK, BATEA: DEFAULT_CAMPAIGN_REDEMPTION_STOCK, MANDIL: DEFAULT_CAMPAIGN_REDEMPTION_STOCK, SPAGHETTI: DEFAULT_CAMPAIGN_REDEMPTION_STOCK };
@@ -434,10 +445,15 @@ type MarketStockSummary = {
   redemptionUsed: RedemptionStock;
   redemptionRemaining: RedemptionStock;
 };
+function movementComponentQuantity(movement: InventoryMovement, itemId: RedemptionItemId) {
+  const components = movement.canjeComponents || canjeProducts.find(product => product.id === movement.canjeProductId)?.components;
+  if (components) return (Number(components[itemId]) || 0) * Math.max(0, Number(movement.quantity) || 0);
+  return movement.itemId === itemId ? Math.max(0, Number(movement.quantity) || 0) : 0;
+}
 function sumMovementQuantities(movements: InventoryMovement[], marketId: string, kind: InventoryMovementKind, itemId?: RedemptionItemId) {
   return movements
-    .filter(movement => movement.marketId === marketId && movement.kind === kind && (!itemId || movement.itemId === itemId))
-    .reduce((sum, movement) => sum + Math.max(0, Number(movement.quantity) || 0), 0);
+    .filter(movement => movement.marketId === marketId && movement.kind === kind && (!itemId || movementComponentQuantity(movement, itemId) > 0))
+    .reduce((sum, movement) => sum + (itemId ? movementComponentQuantity(movement, itemId) : Math.max(0, Number(movement.quantity) || 0)), 0);
 }
 function summarizeMarketStock(marketId: string, inventory: MarketInventory[], movements: InventoryMovement[]): MarketStockSummary {
   const current = inventory.find(item => item.marketId === marketId) || emptyInventory(marketId);
@@ -538,8 +554,8 @@ function aggregateSalesByBrand(sales: Sale[]) {
 }
 function parseSoles(value: string) { return Number(value.replace(',', '.')); }
 function syncStatus(): SyncStatus { return typeof navigator === 'undefined' || navigator.onLine ? 'SINCRONIZADA' : 'PENDIENTE'; }
-function movementLabel(kind: InventoryMovementKind, itemId?: RedemptionItemId) {
-  const itemSuffix = itemId ? ` · ${redemptionLabel(itemId)}` : '';
+function movementLabel(kind: InventoryMovementKind, itemId?: RedemptionItemId, canjeProductId?: CanjeProductId) {
+  const itemSuffix = canjeProductId ? ` · ${canjeProducts.find(product => product.id === canjeProductId)?.label || 'Canje'}` : itemId ? ` · ${redemptionLabel(itemId)}` : '';
   return `${kind === 'CANJE' ? 'Canje registrado' : kind === 'DEGUSTACION' ? 'Degustación declarada' : kind === 'AJUSTE_DEGUSTACION' ? 'Ajuste de degustación' : 'Ajuste de canjes'}${itemSuffix}`;
 }
 function movementAmount(movement: InventoryMovement) {
@@ -548,6 +564,9 @@ function movementAmount(movement: InventoryMovement) {
 }
 function redemptionLabel(itemId?: RedemptionItemId) {
   return redemptionItems.find(item => item.id === itemId)?.label || 'Premio';
+}
+function canjeProductLabel(canjeProductId?: CanjeProductId, fallback?: string) {
+  return canjeProducts.find(product => product.id === canjeProductId)?.label || fallback || 'Canje';
 }
 function parseBonusItems(bonus?: string): Partial<RedemptionStock> {
   if (!bonus) return {};
@@ -696,19 +715,20 @@ function NewClientModal({ markets, count, onSave, close }: { markets: { value: s
   return <Modal title="Crear cliente" detail="El código y estado se generan automáticamente." close={close}><div className="form-grid"><Field label="Nombre del cliente *"><Input value={name} onChange={setName} testId="input-new-client-name" /></Field><Field label="Celular (opcional)"><Input value={phone} onChange={setPhone} testId="input-new-client-phone" /></Field><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-client">Guardar cliente</Btn></div></Modal>;
 }
 function NewCanjeModal({ markets, user, onSave, close }: { markets: { value: string; label: string }[]; user: AppUser; onSave: (canje: InventoryMovement) => void | Promise<void>; close: () => void }) {
-  const [marketId, setMarketId] = useState(''); const [itemId, setItemId] = useState<RedemptionItemId>('AVENA'); const [quantity, setQuantity] = useState('');
-  const save = async () => { const parsed = Number(quantity); if (!marketId || !Number.isInteger(parsed) || parsed <= 0) return; await onSave({ id: `CANJE-${Date.now()}`, marketId, kind: 'CANJE', itemId, quantity: parsed, actorId: user.id, actorName: user.name, date: new Date().toISOString(), status: 'PENDIENTE' }); close(); };
-  return <Modal title="Registrar canje" detail="Ingresa manualmente un canje realizado en un mercado." close={close}><div className="form-grid"><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /><SelectField label="Producto *" value={itemId} onChange={value => setItemId(value as RedemptionItemId)} items={redemptionItems.map(item => ({ value: item.id, label: item.label }))} /><Field label="Cantidad *"><Input type="number" value={quantity} onChange={setQuantity} min={1} step={1} testId="input-new-canje-quantity" /></Field></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-canje">Guardar canje</Btn></div></Modal>;
+  const [marketId, setMarketId] = useState(''); const [canjeProductId, setCanjeProductId] = useState<CanjeProductId>('CANJE_AVENA_2'); const [quantity, setQuantity] = useState('');
+  const selectedProduct = canjeProducts.find(product => product.id === canjeProductId) || canjeProducts[0];
+  const save = async () => { const parsed = Number(quantity); if (!marketId || !Number.isInteger(parsed) || parsed <= 0) return; await onSave({ id: `CANJE-${Date.now()}`, marketId, kind: 'CANJE', canjeProductId: selectedProduct.id, canjeProductLabel: selectedProduct.label, canjeComponents: selectedProduct.components, quantity: parsed, actorId: user.id, actorName: user.name, date: new Date().toISOString(), status: 'PENDIENTE' }); close(); };
+  return <Modal title="Registrar canje" detail="Selecciona uno de los canjes establecidos y registra cuántas veces se entregó." close={close}><div className="form-grid"><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /><SelectField label="Producto *" value={canjeProductId} onChange={value => setCanjeProductId(value as CanjeProductId)} items={canjeProducts.map(product => ({ value: product.id, label: product.label }))} /><Field label="Cantidad *"><Input type="number" value={quantity} onChange={setQuantity} min={1} step={1} testId="input-new-canje-quantity" /></Field></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-canje">Guardar canje</Btn></div></Modal>;
 }
 function AdminCanjesModule({ canjes, marketMap, onCreate, onDelete, onCleanup, notify }: { canjes: AdminCanje[]; marketMap: Record<string, Market>; onCreate: () => void; onDelete: (canje: AdminCanje) => void; onCleanup: () => void; notify: (message: string, error?: boolean) => void }) {
   const exportCanjes = () => {
-    downloadCsv(`canjes-${new Date().toISOString().slice(0, 10)}.csv`, ['Fecha', 'Origen', 'Mercado', 'Producto', 'Cantidad', 'Responsable'], canjes.map(canje => [formatDate(canje.date), canje.source === 'sale' ? 'Venta' : 'Movimiento', marketMap[canje.marketId]?.name || 'Mercado', canje.itemId || canje.sale?.bonus || '—', canje.quantity, canje.actorName]));
+    downloadCsv(`canjes-${new Date().toISOString().slice(0, 10)}.csv`, ['Fecha', 'Origen', 'Mercado', 'Producto', 'Cantidad', 'Responsable'], canjes.map(canje => [formatDate(canje.date), canje.source === 'sale' ? 'Venta' : 'Movimiento', marketMap[canje.marketId]?.name || 'Mercado', canjeProductLabel(canje.canjeProductId, canje.canjeProductLabel || canje.sale?.bonus || (canje.itemId ? redemptionLabel(canje.itemId) : undefined)), canje.quantity, canje.actorName]));
     notify('Reporte de canjes descargado');
   };
   return <section className="admin-module">
     <div className="admin-intro"><div><span className="eyebrow">GESTIÓN MANUAL</span><h2>Canjes</h2><p>Registra y elimina canjes. También se muestran los canjes asociados a ventas.</p></div><div className="page-actions"><Btn variant="outline" onClick={exportCanjes}><Download /> Descargar</Btn><Btn onClick={onCreate}><Plus /> Nuevo canje</Btn></div></div>
     <div className="admin-warning"><Trash2 /><span><strong>Limpieza inicial</strong><small>Elimina todos los datos operativos y todos los usuarios excepto ANALISTA. Los precios se conservan.</small></span><Btn variant="danger" onClick={onCleanup} testId="button-cleanup-catalogs">Empezar desde cero</Btn></div>
-    <section className="panel"><div className="panel-header"><div><h2>{canjes.length} canjes registrados</h2><p>El borrado es definitivo.</p></div></div><div className="panel-body">{canjes.length ? <div className="record-list">{canjes.map(canje => <article className="record" key={`${canje.source}-${canje.canjeId}`}><span className="record-icon"><Gift /></span><div className="record-main"><strong>{canje.itemId || canje.sale?.bonus || 'Canje de venta'}</strong><small>{marketMap[canje.marketId]?.name || 'Mercado no identificado'} · {canje.quantity} unidad{canje.quantity === 1 ? '' : 'es'}</small><em>{canje.source === 'sale' ? 'Venta' : 'Movimiento'} · {canje.actorName} · {formatDate(canje.date)}</em></div><Btn variant="danger" onClick={() => onDelete(canje)} testId={`button-delete-canje-${canje.canjeId}`}><Trash2 /> Eliminar</Btn></article>)}</div> : <Empty title="Aún no hay canjes" detail="Puedes registrar un canje manualmente." />}</div></section>
+    <section className="panel"><div className="panel-header"><div><h2>{canjes.length} canjes registrados</h2><p>El borrado es definitivo.</p></div></div><div className="panel-body">{canjes.length ? <div className="record-list">{canjes.map(canje => <article className="record" key={`${canje.source}-${canje.canjeId}`}><span className="record-icon"><Gift /></span><div className="record-main"><strong>{canjeProductLabel(canje.canjeProductId, canje.canjeProductLabel || canje.sale?.bonus || (canje.itemId ? redemptionLabel(canje.itemId) : undefined))}</strong><small>{marketMap[canje.marketId]?.name || 'Mercado no identificado'} · {canje.quantity} entrega{canje.quantity === 1 ? '' : 's'}</small><em>{canje.source === 'sale' ? 'Venta' : 'Movimiento'} · {canje.actorName} · {formatDate(canje.date)}</em></div><Btn variant="danger" onClick={() => onDelete(canje)} testId={`button-delete-canje-${canje.canjeId}`}><Trash2 /> Eliminar</Btn></article>)}</div> : <Empty title="Aún no hay canjes" detail="Puedes registrar un canje manualmente." />}</div></section>
   </section>;
 }
 
@@ -737,7 +757,7 @@ function InventoryModule({ markets, inventory, movements, notify, onImportCsv, o
   };
   const exportMovements = () => {
     const today = new Date().toISOString().slice(0, 10);
-    downloadCsv(`movimientos-stock-${today}.csv`, ['Fecha', 'Mercado', 'Movimiento', 'Cantidad', 'Responsable', 'Estado'], movements.map(movement => [formatDate(movement.date), marketMap[movement.marketId]?.name || 'Mercado', movementLabel(movement.kind, movement.itemId), movementAmount(movement), movement.actorName, movement.status]));
+    downloadCsv(`movimientos-stock-${today}.csv`, ['Fecha', 'Mercado', 'Movimiento', 'Cantidad', 'Responsable', 'Estado'], movements.map(movement => [formatDate(movement.date), marketMap[movement.marketId]?.name || 'Mercado', movementLabel(movement.kind, movement.itemId, movement.canjeProductId), movementAmount(movement), movement.actorName, movement.status]));
     notify('Reporte de movimientos descargado');
   };
   const sortedMovements = [...movements].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
@@ -745,7 +765,7 @@ function InventoryModule({ markets, inventory, movements, notify, onImportCsv, o
   return <section className="inventory-module">
     <div className="inventory-overview"><div><span className="eyebrow">CONTROL DE CAMPAÑA</span><h2>Canjes y degustaciones</h2><p>Consulta las existencias importadas por mercado y revisa los consumos registrados.</p></div><div className="inventory-actions"><CsvImportButton label="Importar stock" onImport={onImportCsv} testId="button-import-inventory" /><CsvExampleButton onDownload={onDownloadExample} testId="button-example-inventory" /><Btn variant="outline" onClick={exportInventory}><Download /> Stock CSV</Btn><Btn variant="outline" onClick={exportMovements}><Download /> Movimientos CSV</Btn></div></div>
     <div className="inventory-summary"><article><span className="inventory-summary-icon"><PackageCheck /></span><div><small>STOCK TOTAL DE DEGUSTACIÓN</small><strong>{totals.tasting}</strong><p>Panetones disponibles</p></div></article><article><span className="inventory-summary-icon accent"><Gift /></span><div><small>UNIDADES DE CANJE</small><strong>{totals.redemption}</strong><p>Premios disponibles</p></div></article><article><span className="inventory-summary-icon blue"><MapPin /></span><div><small>MERCADOS CONTROLADOS</small><strong>{markets.length}</strong><p>Con saldo independiente</p></div></article></div>
-    <section className="inventory-history"><div className="panel-header"><div><h2>Movimientos recientes</h2><p>Canjes, degustaciones y ajustes hechos por el equipo.</p></div></div>{sortedMovements.length ? <div className="movement-list">{sortedMovements.map(movement => { const amount = movementAmount(movement); return <article className="movement-row" key={movement.id}><span className={`movement-icon ${amount < 0 ? 'consume' : 'adjust'}`}>{amount < 0 ? <PackageCheck /> : <Plus />}</span><div><strong>{movementLabel(movement.kind, movement.itemId)}</strong><small>{marketMap[movement.marketId]?.name || 'Mercado'} · {movement.actorName} · {formatDate(movement.date)}</small></div><span className={`movement-amount ${amount < 0 ? 'negative' : 'positive'}`}>{amount > 0 ? '+' : ''}{amount}</span><StatusPill status={movement.status} /></article>; })}</div> : <div className="inventory-empty"><PackageCheck /><h3>Aún no hay movimientos</h3><p>Los descuentos y ajustes de stock aparecerán aquí.</p></div>}</section>
+    <section className="inventory-history"><div className="panel-header"><div><h2>Movimientos recientes</h2><p>Canjes, degustaciones y ajustes hechos por el equipo.</p></div></div>{sortedMovements.length ? <div className="movement-list">{sortedMovements.map(movement => { const amount = movementAmount(movement); return <article className="movement-row" key={movement.id}><span className={`movement-icon ${amount < 0 ? 'consume' : 'adjust'}`}>{amount < 0 ? <PackageCheck /> : <Plus />}</span><div><strong>{movementLabel(movement.kind, movement.itemId, movement.canjeProductId)}</strong><small>{marketMap[movement.marketId]?.name || 'Mercado'} · {movement.actorName} · {formatDate(movement.date)}</small></div><span className={`movement-amount ${amount < 0 ? 'negative' : 'positive'}`}>{amount > 0 ? '+' : ''}{amount}</span><StatusPill status={movement.status} /></article>; })}</div> : <div className="inventory-empty"><PackageCheck /><h3>Aún no hay movimientos</h3><p>Los descuentos y ajustes de stock aparecerán aquí.</p></div>}</section>
   </section>;
 }
 
