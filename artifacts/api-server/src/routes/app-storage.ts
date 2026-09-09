@@ -104,7 +104,7 @@ function isRecord(value: unknown): value is StoredRecord {
 function canjeSnapshot(snapshot: StorageSnapshot) {
   return [
     ...snapshot.movements
-      .filter((movement) => value(movement, "kind") === "CANJE")
+      .filter((movement) => value(movement, "kind") === "CANJE" || (value(movement, "kind") === "AJUSTE_CANJES" && value(movement, "canjeProductId")))
       .map((movement) => ({ ...movement, source: "movement", canjeId: value(movement, "id") })),
     ...snapshot.sales
       .filter((sale) => value(sale, "mode") === "CANJE")
@@ -430,7 +430,7 @@ router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
   const canje: StoredRecord = {
     id: value(input, "id") || `CANJE-${Date.now()}-${randomUUID().slice(0, 8)}`,
     marketId: value(input, "marketId"),
-    kind: "CANJE",
+    kind: "AJUSTE_CANJES",
     itemId: value(input, "itemId") || undefined,
     canjeProductId: value(input, "canjeProductId") || undefined,
     canjeProductLabel: value(input, "canjeProductLabel") || undefined,
@@ -441,12 +441,47 @@ router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
     date: value(input, "date") || new Date().toISOString(),
     status: "PENDIENTE",
   };
+  const components = isRecord(canje.canjeComponents) ? canje.canjeComponents : {};
+  const client = await pool.connect();
   try {
-    await upsertRecord(pool as unknown as QueryClient, "movements", canje);
+    await client.query("BEGIN");
+    await upsertRecord(client as unknown as QueryClient, "movements", canje);
+    const inventoryResult = await client.query(
+      "SELECT tasting_stock, redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
+      [canje.marketId],
+    ) as unknown as { rows: Array<{ tasting_stock: number; redemption_stock: Record<string, number>; data: StoredRecord }> };
+    const current = inventoryResult.rows[0];
+    const redemptionStock = {
+      AVENA: Math.max(0, Number(current?.redemption_stock?.AVENA) || 0),
+      BATEA: Math.max(0, Number(current?.redemption_stock?.BATEA) || 0),
+      MANDIL: Math.max(0, Number(current?.redemption_stock?.MANDIL) || 0),
+      SPAGHETTI: Math.max(0, Number(current?.redemption_stock?.SPAGHETTI) || 0),
+    };
+    for (const itemId of Object.keys(redemptionStock)) {
+      redemptionStock[itemId as keyof typeof redemptionStock] += Math.max(0, Number(components[itemId]) || 0) * Math.floor(numeric(canje, "quantity"));
+    }
+    const inventoryRecord: StoredRecord = {
+      ...(current?.data || {}),
+      marketId: canje.marketId,
+      tastingStock: Math.max(0, Number(current?.tasting_stock) || 0),
+      redemptionStock,
+      updatedAt: canje.date,
+    };
+    await client.query(
+      `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (market_id) DO UPDATE SET redemption_stock=EXCLUDED.redemption_stock,data=EXCLUDED.data,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+      [canje.marketId, inventoryRecord.tastingStock, redemptionStock, inventoryRecord, canje.date],
+    );
+    await client.query("COMMIT");
     res.status(201).json({ canje, snapshot: await readSnapshot() });
   } catch (error) {
+    await client.query("ROLLBACK");
     req.log.error({ err: error }, "Unable to create canje");
     res.status(500).json({ message: "No se pudo crear el canje." });
+  } finally {
+    client.release();
   }
 });
 
@@ -458,12 +493,53 @@ router.delete("/app-storage/admin/canjes/:source/:id", async (req, res): Promise
     res.status(400).json({ message: "El origen del canje no es válido." });
     return;
   }
+  const client = await pool.connect();
   try {
-    await pool.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
+    await client.query("BEGIN");
+    if (source === "movement") {
+      const result = await client.query(
+        "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
+        [id],
+      ) as unknown as { rows: Array<{ market_id: string; quantity: number; data: StoredRecord }> };
+      const movement = result.rows[0];
+      const productId = movement?.data?.canjeProductId;
+      const components = isRecord(movement?.data?.canjeComponents) ? movement.data.canjeComponents : {};
+      if (movement && value(movement.data, "kind") === "AJUSTE_CANJES" && productId) {
+        const inventoryResult = await client.query(
+          "SELECT redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
+          [movement.market_id],
+        ) as unknown as { rows: Array<{ redemption_stock: Record<string, number>; data: StoredRecord }> };
+        const current = inventoryResult.rows[0];
+        const redemptionStock = {
+          AVENA: Math.max(0, Number(current?.redemption_stock?.AVENA) || 0),
+          BATEA: Math.max(0, Number(current?.redemption_stock?.BATEA) || 0),
+          MANDIL: Math.max(0, Number(current?.redemption_stock?.MANDIL) || 0),
+          SPAGHETTI: Math.max(0, Number(current?.redemption_stock?.SPAGHETTI) || 0),
+        };
+        for (const itemId of Object.keys(redemptionStock)) {
+          redemptionStock[itemId as keyof typeof redemptionStock] = Math.max(
+            0,
+            redemptionStock[itemId as keyof typeof redemptionStock] - (Math.max(0, Number(components[itemId]) || 0) * Math.max(0, Number(movement.quantity) || 0)),
+          );
+        }
+        if (current) {
+          const inventoryRecord = { ...(current.data || {}), redemptionStock, updatedAt: new Date().toISOString() };
+          await client.query(
+            "UPDATE inventory SET redemption_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
+            [movement.market_id, redemptionStock, inventoryRecord, inventoryRecord.updatedAt],
+          );
+        }
+      }
+    }
+    await client.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
+    await client.query("COMMIT");
     res.json({ deleted: id, source, snapshot: await readSnapshot() });
   } catch (error) {
+    await client.query("ROLLBACK");
     req.log.error({ err: error }, "Unable to delete canje");
     res.status(500).json({ message: "No se pudo eliminar el canje." });
+  } finally {
+    client.release();
   }
 });
 
