@@ -1467,7 +1467,7 @@ export default function App() {
     const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
    const logoutImmediately = () => { localStorage.removeItem('bt-session'); setSessionClosePrompt(false); setPromoterSession({ marketId: '', clientId: '' }); setUser(null); };
     const requestLogout = () => {
-      if (isPromoterRole(activeUser?.role)) {
+       if (activeUser && isPromoterRole(activeUser.role)) {
          const assignment = assignments.find(item => assignmentMatchesUser(item, activeUser));
          const assignedMarketIds = assignment ? assignment.marketIds : activeUser.marketId ? [activeUser.marketId] : [];
          if (!assignedMarketIds.length) {
