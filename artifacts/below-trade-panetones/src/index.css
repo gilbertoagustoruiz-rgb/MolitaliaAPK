@@ -430,6 +430,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .trade-warning { grid-column:1/-1; display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:9px; color:#ffd0a8; background:#49372f; font-size:12px; }
 .dark-actions { display:flex; justify-content:flex-end; gap:10px; padding:17px 22px; border-top:1px solid #385572; }
 .sale-layout { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:17px; }
+.sale-layout .recent { display:none; }
 .sale-form { padding:22px; border:1px solid #385572; border-radius:14px; background:#1d314a; }
 .sale-form h2 { margin:0 0 5px; font-size:21px; }
 .sale-form p { margin:0 0 20px; color:#9dafc1; font-size:12px; }
