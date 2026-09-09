@@ -6,3 +6,4 @@
 - [Limpieza sincronizada de catálogos](sync-reset-barrier.md) — una PWA puede reinsertar datos borrados desde una pestaña antigua; las limpiezas requieren purga de caché y barrera de revisión.
 - [Inventario derivado del historial](inventory-ledger.md) — si saldo y movimientos divergen, reconstruir stock desde abastecimientos y consumos evita perder degustaciones ingresadas.
 - [Canjes estacionales](seasonal-redemptions.md) — Setiembre/Octubre usan Mandil, Noviembre Batea y Diciembre elimina accesorios; el agotamiento total activa esta última alternativa.
+- [Alcance del coordinador](coordinator-scope.md) — el COORDINADOR usa asignaciones de mercados/clientes para limitar su vista de lectura.
