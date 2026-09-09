@@ -5,3 +5,4 @@
 - [Ubicación histórica de ventas](sales-location-history.md) — cada venta conserva la ubicación del mercado al registrarse; los análisis usan ese snapshot antes que el catálogo actual.
 - [Limpieza sincronizada de catálogos](sync-reset-barrier.md) — una PWA puede reinsertar datos borrados desde una pestaña antigua; las limpiezas requieren purga de caché y barrera de revisión.
 - [Inventario derivado del historial](inventory-ledger.md) — si saldo y movimientos divergen, reconstruir stock desde abastecimientos y consumos evita perder degustaciones ingresadas.
+- [Canjes estacionales](seasonal-redemptions.md) — Setiembre/Octubre usan Mandil, Noviembre Batea y Diciembre elimina accesorios; el agotamiento total activa esta última alternativa.

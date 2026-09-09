@@ -15,7 +15,7 @@ type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleL
 type Attendance = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
 type SessionClosure = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; marketId: string; clientId?: string; tastingUsed: number; leads: number; date: string; status: SyncStatus };
 type RedemptionItemId = 'AVENA' | 'BATEA' | 'MANDIL' | 'SPAGHETTI';
-type CanjeProductId = 'CANJE_AVENA_2' | 'CANJE_AVENA_1' | 'CANJE_AVENA_3_SPAGHETTI_1' | 'CANJE_AVENA_12_SPAGHETTI_3' | 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1' | 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4' | 'CANJE_AVENA_30_SPAGHETTI_10' | 'CANJE_AVENA_144_SPAGHETTI_100';
+type CanjeProductId = 'CANJE_AVENA_2' | 'CANJE_AVENA_1' | 'CANJE_AVENA_3_SPAGHETTI_1' | 'CANJE_AVENA_12_SPAGHETTI_3' | 'CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1' | 'CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4' | 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1' | 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4' | 'CANJE_AVENA_30_SPAGHETTI_10' | 'CANJE_AVENA_144_SPAGHETTI_100';
 type DegustacionProductId = 'PANETON';
 type RedemptionStock = Record<RedemptionItemId, number>;
 type MarketInventory = { marketId: string; tastingStock: number; redemptionStock: RedemptionStock; updatedAt: string; exchangeStock?: number };
@@ -64,11 +64,26 @@ const canjeProducts: { id: CanjeProductId; label: string; components: Partial<Re
   { id: 'CANJE_AVENA_1', label: '1 UN AVENA CLÁSICA', components: { AVENA: 1 } },
   { id: 'CANJE_AVENA_3_SPAGHETTI_1', label: '3 UN AVENA CLASICA + 1 UN SPAGUETTI', components: { AVENA: 3, SPAGHETTI: 1 } },
   { id: 'CANJE_AVENA_12_SPAGHETTI_3', label: '12 UN AVENA CLÁSICA + 3 UN SPAGUETTI', components: { AVENA: 12, SPAGHETTI: 3 } },
+  { id: 'CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1', label: '24 UN AVENA CLÁSICA + 10 UN SPAGUETTI + 1 UN MANDIL', components: { AVENA: 24, SPAGHETTI: 10, MANDIL: 1 } },
+  { id: 'CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI + 4 MANDILES', components: { AVENA: 144, SPAGHETTI: 100, MANDIL: 4 } },
   { id: 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1', label: '24 UN AVENA CLÁSICA + 10 UN SPAGUETTI + 1 UN BATEAS', components: { AVENA: 24, SPAGHETTI: 10, BATEA: 1 } },
   { id: 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI + 4 BATEAS', components: { AVENA: 144, SPAGHETTI: 100, BATEA: 4 } },
   { id: 'CANJE_AVENA_30_SPAGHETTI_10', label: '30 UN AVENA CLÁSICA + 10 UN SPAGUETTI', components: { AVENA: 30, SPAGHETTI: 10 } },
   { id: 'CANJE_AVENA_144_SPAGHETTI_100', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI', components: { AVENA: 144, SPAGHETTI: 100 } },
 ];
+const commonCanjeProductIds: CanjeProductId[] = ['CANJE_AVENA_2', 'CANJE_AVENA_1', 'CANJE_AVENA_3_SPAGHETTI_1', 'CANJE_AVENA_12_SPAGHETTI_3'];
+const mandilCanjeProductIds: CanjeProductId[] = [...commonCanjeProductIds, 'CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1', 'CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4'];
+const bateaCanjeProductIds: CanjeProductId[] = [...commonCanjeProductIds, 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1', 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4'];
+const noAccessoryCanjeProductIds: CanjeProductId[] = [...commonCanjeProductIds, 'CANJE_AVENA_30_SPAGHETTI_10', 'CANJE_AVENA_144_SPAGHETTI_100'];
+function activeCanjeProducts(date = new Date(), stock?: RedemptionStock) {
+  const month = date.getMonth() + 1;
+  const accessoriesExhausted = Boolean(stock && stock.MANDIL <= 0 && stock.BATEA <= 0);
+  let ids: CanjeProductId[] = [];
+  if (month === 9 || month === 10) ids = accessoriesExhausted ? noAccessoryCanjeProductIds : mandilCanjeProductIds;
+  else if (month === 11) ids = accessoriesExhausted ? noAccessoryCanjeProductIds : bateaCanjeProductIds;
+  else if (month === 12) ids = noAccessoryCanjeProductIds;
+  return ids.map(id => canjeProducts.find(product => product.id === id)).filter(Boolean) as typeof canjeProducts;
+}
 const degustacionProducts: { id: DegustacionProductId; label: string }[] = [
   { id: 'PANETON', label: 'Panetón' },
 ];
@@ -611,13 +626,20 @@ function requiredRedemptionEntries(requirements: Partial<RedemptionStock>) {
 function multiplyRedemptionRequirements(requirements: Partial<RedemptionStock>, count: number) {
   return redemptionItems.reduce((result, item) => ({ ...result, [item.id]: (requirements[item.id] || 0) * count }), {} as Partial<RedemptionStock>);
 }
-function bonusFor(mode: 'UNIDADES' | 'PLANCHAS', total: number, planchas: number) {
-  if (mode === 'UNIDADES') return total === 2 ? '1 AVENA CLÁSICA' : undefined;
-  if (planchas > 80) return '144 AVENAS + 100 SPAGHETTI + 4 MANDILES';
-  if (planchas === 10) return '24 AVENAS + 10 SPAGHETTI + 1 MANDIL';
-  if (planchas === 4) return '12 AVENAS + 3 SPAGHETTI';
-  if (planchas === 1) return '3 AVENAS + 1 SPAGHETTI';
-  return undefined;
+function bonusFor(mode: 'UNIDADES' | 'PLANCHAS', total: number, planchas: number, stock: RedemptionStock) {
+  const activeProducts = activeCanjeProducts(new Date(), stock);
+  const productId = mode === 'UNIDADES'
+    ? total === 2 ? 'CANJE_AVENA_1' : undefined
+    : planchas > 80
+      ? activeProducts.find(product => product.components.AVENA === 144)?.id
+      : planchas === 10
+        ? activeProducts.find(product => product.components.SPAGHETTI === 10 && product.components.AVENA !== 144)?.id
+        : planchas === 4
+          ? 'CANJE_AVENA_12_SPAGHETTI_3'
+          : planchas === 1
+            ? 'CANJE_AVENA_3_SPAGHETTI_1'
+            : undefined;
+  return activeProducts.find(product => product.id === productId)?.label;
 }
 
 function Logo({ compact = false }: { compact?: boolean }) {
@@ -737,11 +759,13 @@ function NewClientModal({ markets, count, onSave, close }: { markets: { value: s
   const save = async () => { if (!name.trim() || !marketId) return; await onSave({ id: `${Date.now()}`, code: `CLI-${String(count + 1).padStart(6, '0')}`, name: name.trim(), phone: phone || undefined, marketId, status: 'ACTIVO' }); close(); };
   return <Modal title="Crear cliente" detail="El código y estado se generan automáticamente." close={close}><div className="form-grid"><Field label="Nombre del cliente *"><Input value={name} onChange={setName} testId="input-new-client-name" /></Field><Field label="Celular (opcional)"><Input value={phone} onChange={setPhone} testId="input-new-client-phone" /></Field><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-client">Guardar cliente</Btn></div></Modal>;
 }
-function NewCanjeModal({ markets, user, onSave, close }: { markets: { value: string; label: string }[]; user: AppUser; onSave: (canje: InventoryMovement) => void | Promise<void>; close: () => void }) {
+function NewCanjeModal({ markets, inventory, user, onSave, close }: { markets: { value: string; label: string }[]; inventory: MarketInventory[]; user: AppUser; onSave: (canje: InventoryMovement) => void | Promise<void>; close: () => void }) {
   const [marketId, setMarketId] = useState(''); const [canjeProductId, setCanjeProductId] = useState<CanjeProductId>('CANJE_AVENA_2'); const [quantity, setQuantity] = useState('');
-  const selectedProduct = canjeProducts.find(product => product.id === canjeProductId) || canjeProducts[0];
-  const save = async () => { const parsed = Number(quantity); if (!marketId || !Number.isInteger(parsed) || parsed <= 0) return; await onSave({ id: `CANJE-${Date.now()}`, marketId, kind: 'CANJE', canjeProductId: selectedProduct.id, canjeProductLabel: selectedProduct.label, canjeComponents: selectedProduct.components, quantity: parsed, actorId: user.id, actorName: user.name, date: new Date().toISOString(), status: 'PENDIENTE' }); close(); };
-  return <Modal title="Registrar canje" detail="Selecciona uno de los canjes establecidos y registra cuántas veces se entregó." close={close}><div className="form-grid"><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /><SelectField label="Producto *" value={canjeProductId} onChange={value => setCanjeProductId(value as CanjeProductId)} items={canjeProducts.map(product => ({ value: product.id, label: product.label }))} /><Field label="Cantidad *"><Input type="number" value={quantity} onChange={setQuantity} min={1} step={1} testId="input-new-canje-quantity" /></Field></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-canje">Guardar canje</Btn></div></Modal>;
+  const marketStock = marketId ? inventory.find(item => item.marketId === marketId)?.redemptionStock || emptyRedemptionStock() : undefined;
+  const availableProducts = activeCanjeProducts(new Date(), marketStock);
+  const selectedProduct = availableProducts.find(product => product.id === canjeProductId) || availableProducts[0];
+  const save = async () => { const parsed = Number(quantity); if (!marketId || !selectedProduct || !Number.isInteger(parsed) || parsed <= 0) return; await onSave({ id: `CANJE-${Date.now()}`, marketId, kind: 'CANJE', canjeProductId: selectedProduct.id, canjeProductLabel: selectedProduct.label, canjeComponents: selectedProduct.components, quantity: parsed, actorId: user.id, actorName: user.name, date: new Date().toISOString(), status: 'PENDIENTE' }); close(); };
+  return <Modal title="Registrar canje" detail="Solo se muestran los canjes vigentes para el mes actual. Si se agota el accesorio, se activa la alternativa sin Batea ni Mandil." close={close}><div className="form-grid"><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /><SelectField label="Producto *" value={selectedProduct?.id || ''} onChange={value => setCanjeProductId(value as CanjeProductId)} items={availableProducts.map(product => ({ value: product.id, label: product.label }))} /><Field label="Cantidad *"><Input type="number" value={quantity} onChange={setQuantity} min={1} step={1} testId="input-new-canje-quantity" /></Field></div>{!availableProducts.length && <p className="modal-hint">Los canjes de campaña solo están activos entre Setiembre y Diciembre.</p>}<div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!selectedProduct} onClick={save} testId="button-create-canje">Guardar canje</Btn></div></Modal>;
 }
 function AdminCanjesModule({ canjes, marketMap, onCreate, onDelete, onCleanup, notify }: { canjes: AdminCanje[]; marketMap: Record<string, Market>; onCreate: () => void; onDelete: (canje: AdminCanje) => void; onCleanup: () => void; notify: (message: string, error?: boolean) => void }) {
   const exportCanjes = () => {
@@ -1059,7 +1083,7 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
           }
           if (type.includes('canje')) {
             const rawProduct = csvField(record, ['producto', 'canje', 'tipocanje', 'productoid']);
-            const product = canjeProducts.find(item => normalizeCsvHeader(item.id) === normalizeCsvHeader(rawProduct) || normalizeCsvHeader(item.label) === normalizeCsvHeader(rawProduct));
+            const product = activeCanjeProducts().find(item => normalizeCsvHeader(item.id) === normalizeCsvHeader(rawProduct) || normalizeCsvHeader(item.label) === normalizeCsvHeader(rawProduct));
             if (!product) { skipped += 1; continue; }
             await adminRequest('/canjes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canje: { id: `CANJE-IMPORT-${Date.now()}-${index}`, marketId, kind: 'AJUSTE_CANJES', canjeProductId: product.id, canjeProductLabel: product.label, canjeComponents: product.components, quantity, actorId: user.id, actorName: user.name, date: new Date().toISOString(), status: 'PENDIENTE' } }) });
             importedCount += 1;
@@ -1173,7 +1197,7 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
      {modal === 'user' && <NewUserModal markets={marketOptions} clients={clients} onSave={saveUser} close={() => setModal(null)} />}
      {modal === 'market' && <NewMarketModal onSave={saveMarket} close={() => setModal(null)} />}
     {modal === 'client' && <NewClientModal markets={marketOptions} count={clients.length} onSave={saveClient} close={() => setModal(null)} />}
-     {modal === 'canje' && <NewCanjeModal markets={marketOptions} user={user} onSave={saveCanje} close={() => setModal(null)} />}
+      {modal === 'canje' && <NewCanjeModal markets={marketOptions} inventory={inventory} user={user} onSave={saveCanje} close={() => setModal(null)} />}
      {modal === 'degustacion' && <NewDegustacionModal markets={marketOptions} user={user} onSave={saveDegustacion} close={() => setModal(null)} />}
   </main>;
 }
@@ -1199,7 +1223,7 @@ function PromoterApp({ user, markets, clients, assignments, productPrices, sales
         });
       }, [priceBySku]);
      useEffect(() => { setClientId(selectedClientId); setMarkClientId(selectedClientId); onSessionSelection({ marketId: selectedMarketId, clientId: selectedClientId }); }, [selectedMarketId, selectedClientId]);
-      const unitQty = Number(unitQtyInput) || 0; const planchas = Number(planchasInput) || 0; const mix = { TODINNO: Number(mixInputs.TODINNO) || 0, COSTA: Number(mixInputs.COSTA) || 0, PASQUALINO: Number(mixInputs.PASQUALINO) || 0 }; const selectedProduct = products.find(product => product.sku === sku) || products[0]; const brandUnitPrices = Object.fromEntries(Object.keys(planchaProducts).map(brand => [brand, parseSoles(brandPrices[brand as keyof typeof brandPrices])])) as Record<string, number>; const marketStock = inventory.find(item => item.marketId === selectedMarketId) || emptyInventory(selectedMarketId); const redemptionTotal = redemptionItems.reduce((sum, item) => sum + marketStock.redemptionStock[item.id], 0); const totalMix = mix.TODINNO + mix.COSTA + mix.PASQUALINO; const total = mode === 'UNIDADES' ? unitQty : totalMix; const unitPrice = parseSoles(unitPriceSoles); const saleAmount = mode === 'UNIDADES' ? unitQty * unitPrice : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (brandUnitPrices[brand] || 0), 0); const orderWeightKg = mode === 'UNIDADES' ? unitQty * selectedProduct.weightKg : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0), 0); const weightPerPlanchaKg = mode === 'PLANCHAS' && planchas > 0 ? orderWeightKg / planchas : 0; const pricesValid = mode === 'UNIDADES' ? unitPrice > 0 : Object.entries(mix).filter(([, quantity]) => quantity > 0).every(([brand]) => (brandUnitPrices[brand] || 0) > 0); const bonus = bonusFor(mode, total, planchas); const canjeCount = bonus ? redemptionCount : 0; const requiredRedemptions = multiplyRedemptionRequirements(parseBonusItems(bonus), canjeCount); const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(([itemId, quantity]) => marketStock.redemptionStock[itemId] < quantity); const exceptionNeedsComment = Boolean(bonus && canjeCount === 3 && !comment.trim()); const validMix = mode === 'UNIDADES' || (totalMix === planchas * 6 && Object.values(mix).every(value => value >= 1)); const saleFormValid = Boolean(clientId && receipt && pricesValid && Number.isFinite(saleAmount) && saleAmount > 0 && validMix && (!bonus || (exchange && !missingRedemption && !exceptionNeedsComment)) && !(mode === 'PLANCHAS' && planchas > 80));
+      const unitQty = Number(unitQtyInput) || 0; const planchas = Number(planchasInput) || 0; const mix = { TODINNO: Number(mixInputs.TODINNO) || 0, COSTA: Number(mixInputs.COSTA) || 0, PASQUALINO: Number(mixInputs.PASQUALINO) || 0 }; const selectedProduct = products.find(product => product.sku === sku) || products[0]; const brandUnitPrices = Object.fromEntries(Object.keys(planchaProducts).map(brand => [brand, parseSoles(brandPrices[brand as keyof typeof brandPrices])])) as Record<string, number>; const marketStock = inventory.find(item => item.marketId === selectedMarketId) || emptyInventory(selectedMarketId); const redemptionTotal = redemptionItems.reduce((sum, item) => sum + marketStock.redemptionStock[item.id], 0); const totalMix = mix.TODINNO + mix.COSTA + mix.PASQUALINO; const total = mode === 'UNIDADES' ? unitQty : totalMix; const unitPrice = parseSoles(unitPriceSoles); const saleAmount = mode === 'UNIDADES' ? unitQty * unitPrice : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (brandUnitPrices[brand] || 0), 0); const orderWeightKg = mode === 'UNIDADES' ? unitQty * selectedProduct.weightKg : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0), 0); const weightPerPlanchaKg = mode === 'PLANCHAS' && planchas > 0 ? orderWeightKg / planchas : 0; const pricesValid = mode === 'UNIDADES' ? unitPrice > 0 : Object.entries(mix).filter(([, quantity]) => quantity > 0).every(([brand]) => (brandUnitPrices[brand] || 0) > 0); const bonus = bonusFor(mode, total, planchas, marketStock.redemptionStock); const canjeCount = bonus ? redemptionCount : 0; const requiredRedemptions = multiplyRedemptionRequirements(parseBonusItems(bonus), canjeCount); const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(([itemId, quantity]) => marketStock.redemptionStock[itemId] < quantity); const exceptionNeedsComment = Boolean(bonus && canjeCount === 3 && !comment.trim()); const validMix = mode === 'UNIDADES' || (totalMix === planchas * 6 && Object.values(mix).every(value => value >= 1)); const saleFormValid = Boolean(clientId && receipt && pricesValid && Number.isFinite(saleAmount) && saleAmount > 0 && validMix && (!bonus || (exchange && !missingRedemption && !exceptionNeedsComment)) && !(mode === 'PLANCHAS' && planchas > 80));
     const mineSales = sales.filter(sale => sale.promoterId === user.id); const mineAttendance = attendance.filter(item => item.promoterId === user.id); const today = new Date().toISOString().slice(0, 10); const todayAttendanceFor = (id: string) => mineAttendance.filter(item => item.clientId === id && item.date.slice(0, 10) === today); const latestAttendanceFor = (id: string) => todayAttendanceFor(id).sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime())[0]; const exitedToday = (id: string) => todayAttendanceFor(id).some(item => item.type === 'SALIDA'); const sellingClients = available.filter(client => latestAttendanceFor(client.id)?.type === 'ENTRADA' && !exitedToday(client.id)); const canSellForSelectedClient = Boolean(clientId && latestAttendanceFor(clientId)?.type === 'ENTRADA' && !exitedToday(clientId)); const canConfirm = Boolean(canSellForSelectedClient && saleFormValid); const filteredSales = mineSales.filter(sale => (modeFilter === 'TODO' || sale.mode === modeFilter) && `${sale.id} ${clients.find(client => client.id === sale.clientId)?.name || ''} ${sale.bonus || ''} ${sale.comment || ''}`.toLowerCase().includes(search.toLowerCase())); const filteredAttendance = mineAttendance.filter(item => `${clients.find(client => client.id === item.clientId)?.name || ''} ${item.type}`.toLowerCase().includes(search.toLowerCase()));
   const saveSale = () => {
         if (!selectedMarket) { notify('Selecciona un mercado válido antes de registrar la venta.', true); return; }
