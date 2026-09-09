@@ -1443,9 +1443,9 @@ export default function App() {
            return;
          }
         const today = new Date().toISOString().slice(0, 10);
-        const hasAttendanceToday = attendance.some(item => item.promoterId === activeUser.id && item.type === 'ENTRADA' && item.date.slice(0, 10) === today);
+        const hasAttendanceToday = attendance.some(item => item.promoterId === activeUser.id && item.date.slice(0, 10) === today);
         if (!hasAttendanceToday) {
-          notify('Debes marcar Entrada en asistencia antes de cerrar sesión.', true);
+          logoutImmediately();
           return;
         }
         setSessionClosePrompt(true);
