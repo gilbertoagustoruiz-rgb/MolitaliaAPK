@@ -14,6 +14,16 @@ function safeFileName(value: string) {
     .slice(0, 160);
 }
 
+function safeMetadataValue(value: string, fallback: string) {
+  const decoded = decodeURIComponent(value || fallback);
+  return decoded
+    .normalize("NFKD")
+    .replace(/[^\w.\- ()]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120) || fallback;
+}
+
 router.post(
   "/evidence-photos",
   raw({ type: ["image/*", "application/octet-stream"], limit: "12mb" }),
@@ -23,6 +33,9 @@ router.post(
       const recordId = String(req.headers["x-record-id"] || "").trim();
       const evidenceType = String(req.headers["x-evidence-type"] || "").trim();
       const originalName = safeFileName(String(req.headers["x-file-name"] || ""));
+      const clientName = safeMetadataValue(String(req.headers["x-client-name"] || ""), "CLIENTE NO IDENTIFICADO");
+      const marketName = safeMetadataValue(String(req.headers["x-market-name"] || ""), "MERCADO NO IDENTIFICADO");
+      const recordType = safeMetadataValue(String(req.headers["x-record-type"] || ""), "EVIDENCIA");
       const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || []);
 
       if (!allowedTypes.has(contentType)) {
@@ -35,12 +48,13 @@ router.post(
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const fileName = `${recordId} - ${evidenceType} - ${timestamp} - ${originalName}`;
+      const fileName = `${recordType} - ${marketName} - ${clientName} - ${recordId} - ${evidenceType} - ${timestamp} - ${originalName}`;
       const boundary = `below-trade-${Date.now().toString(36)}`;
       const metadata = {
         name: fileName,
         parents: [photosFolderId],
-        appProperties: { recordId, evidenceType },
+        description: `Cliente: ${clientName}\nMercado: ${marketName}\nRegistro: ${recordType}\nCódigo: ${recordId}\nEvidencia: ${evidenceType}`,
+        appProperties: { recordId, evidenceType, clientName, marketName, recordType },
       };
       const prefix = Buffer.from(
         `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
@@ -61,6 +75,7 @@ router.post(
 
       const text = await response.text();
       if (!response.ok) {
+        req.log.warn({ driveStatus: response.status, driveResponse: text.slice(0, 500), recordId }, "Google Drive rechazó la evidencia");
         throw new Error(`Google Drive ${response.status}: ${text.slice(0, 500)}`);
       }
       const file = JSON.parse(text) as {
@@ -78,6 +93,7 @@ router.post(
         downloadUrl: file.webContentLink,
       });
     } catch (error) {
+      req.log.error({ err: error }, "No se pudo guardar la fotografía en Google Drive");
       res.status(502).json({
         message:
           error instanceof Error

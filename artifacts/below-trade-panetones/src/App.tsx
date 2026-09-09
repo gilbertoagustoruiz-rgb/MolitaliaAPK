@@ -158,6 +158,9 @@ type PendingPhotoUpload = {
   entityType: 'sale' | 'attendance';
   entityId: string;
   field: 'receiptPhoto' | 'exchangePhoto' | 'photo';
+  clientName?: string;
+  marketName?: string;
+  recordType?: string;
   fileName: string;
   mimeType: string;
   blob: Blob;
@@ -174,9 +177,10 @@ function openPhotoQueue() {
     request.onerror = () => reject(request.error);
   });
 }
-async function queuePhotoUpload(file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) {
+type PhotoUploadContext = Pick<PendingPhotoUpload, 'clientName' | 'marketName' | 'recordType'>;
+async function queuePhotoUpload(file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field'], context: PhotoUploadContext) {
   const database = await openPhotoQueue();
-  const upload: PendingPhotoUpload = { id: `${entityType}:${entityId}:${field}`, entityType, entityId, field, fileName: file.name || `${field}.jpg`, mimeType: file.type || 'image/jpeg', blob: file };
+  const upload: PendingPhotoUpload = { id: `${entityType}:${entityId}:${field}`, entityType, entityId, field, ...context, fileName: file.name || `${field}.jpg`, mimeType: file.type || 'image/jpeg', blob: file };
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(PHOTO_QUEUE_STORE, 'readwrite');
     transaction.objectStore(PHOTO_QUEUE_STORE).put(upload);
@@ -213,10 +217,16 @@ async function uploadPhoto(upload: PendingPhotoUpload) {
       'X-File-Name': encodeURIComponent(upload.fileName),
       'X-Record-Id': upload.entityId,
       'X-Evidence-Type': upload.field,
+      'X-Client-Name': encodeURIComponent(upload.clientName || 'CLIENTE NO IDENTIFICADO'),
+      'X-Market-Name': encodeURIComponent(upload.marketName || 'MERCADO NO IDENTIFICADO'),
+      'X-Record-Type': encodeURIComponent(upload.recordType || (upload.entityType === 'sale' ? 'VENTA' : 'ASISTENCIA')),
     },
     body: upload.blob,
   });
-  if (!response.ok) throw new Error('No se pudo cargar la evidencia');
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { message?: string } | null;
+    throw new Error(payload?.message || 'No se pudo cargar la evidencia');
+  }
   return response.json() as Promise<{ id: string; url: string }>;
 }
 const APP_DATA_KEYS = ['bt-session', 'bt-markets', 'bt-users', 'bt-clients', 'bt-sales', 'bt-attendance', 'bt-inventory', 'bt-inventory-movements', 'bt-session-closures', PRODUCT_PRICES_STORE_KEY, DEFAULT_STOCK_SEED_KEY];
@@ -1270,7 +1280,7 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
 function PromoterNav({ active, onChange }: { active: 'MARCACIONES' | 'VENTAS'; onChange: (value: 'MARCACIONES' | 'VENTAS') => void }) {
   return <aside className="promoter-nav"><p className="nav-label">TAREAS DIARIAS</p><button className={active === 'MARCACIONES' ? 'active' : ''} onClick={() => onChange('MARCACIONES')} data-testid="nav-marcaciones"><Clock3 /> Marcaciones</button><button className={active === 'VENTAS' ? 'active' : ''} onClick={() => onChange('VENTAS')} data-testid="nav-ventas"><ShoppingBag /> Ventas</button></aside>;
 }
-function PromoterApp({ user, markets, clients, assignments, productPrices, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection, enqueueEvidencePhoto }: { user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; productPrices: ProductPrice[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void; enqueueEvidencePhoto: (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) => void }) {
+function PromoterApp({ user, markets, clients, assignments, productPrices, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection, enqueueEvidencePhoto }: { user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; productPrices: ProductPrice[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void; enqueueEvidencePhoto: (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field'], context: PhotoUploadContext) => void }) {
      const promoterAssignment = assignments.find(assignment => assignmentMatchesUser(assignment, user)); const assignedMarketIds = promoterAssignment ? promoterAssignment.marketIds : user.marketId ? [user.marketId] : []; const selectableMarkets = markets.filter(market => market.status === 'ACTIVO' && assignedMarketIds.includes(market.id)); const [selectedMarketId, setSelectedMarketId] = useState(''); const [selectedClientId, setSelectedClientId] = useState(''); const [module, setModule] = useState<'MARCACIONES' | 'VENTAS'>('MARCACIONES'); const [view, setView] = useState<'LISTA' | 'NUEVA'>('LISTA');
      const available = clients.filter(client => client.marketId === selectedMarketId && client.status === 'ACTIVO' && (!promoterAssignment || promoterAssignment.clientIds.includes(client.id))); const selectedMarket = selectableMarkets.find(market => market.id === selectedMarketId);
        const [clientId, setClientId] = useState(''); const [mode, setMode] = useState<'UNIDADES' | 'PLANCHAS'>('UNIDADES'); const [sku, setSku] = useState(products[0].sku); const [unitQtyInput, setUnitQtyInput] = useState('1'); const [unitPriceSoles, setUnitPriceSoles] = useState(''); const [brandPrices, setBrandPrices] = useState({ TODINNO: '', COSTA: '', PASQUALINO: '' }); const [planchasInput, setPlanchasInput] = useState('1'); const [mixInputs, setMixInputs] = useState({ TODINNO: '0', COSTA: '0', PASQUALINO: '0' }); const [selectedBonusProductId, setSelectedBonusProductId] = useState<CanjeProductId | ''>(''); const [redemptionCount, setRedemptionCount] = useState(1); const [comment, setComment] = useState(''); const [receipt, setReceipt] = useState<File | null>(null); const [exchange, setExchange] = useState<File | null>(null);
@@ -1297,8 +1307,10 @@ function PromoterApp({ user, markets, clients, assignments, productPrices, sales
        if (!canConfirm) { notify(mode === 'PLANCHAS' && planchas > 80 ? 'Requiere autorización previa de Trade' : exceptionNeedsComment ? 'Para registrar 3 canjes, agrega el comentario de la excepción.' : bonus && missingRedemption ? `Stock insuficiente de ${redemptionLabel(missingRedemption[0])} para este canje` : Number.isFinite(saleAmount) && saleAmount > 0 ? 'Completa venta y evidencias' : 'Ingresa un precio unitario mayor a S/ 0.00', true); return; }
         const id = `VTA-${new Date().getFullYear()}-${String(sales.length + 1).padStart(6, '0')}`; const now = new Date().toISOString(); const sale: Sale = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId, marketId: selectedMarketId, marketRegion: selectedMarket.region || selectedMarket.department, marketDepartment: selectedMarket.department, marketProvince: selectedMarket.province, marketDistrict: selectedMarket.district, mode, units: total, amountSoles: saleAmount, weightKg: orderWeightKg, unitPrices: mode === 'UNIDADES' ? { [selectedProduct.sku]: unitPrice } : brandUnitPrices, planchas: mode === 'PLANCHAS' ? planchas : undefined, mix: mode === 'PLANCHAS' ? mix : { [selectedProduct.brand]: unitQty }, bonus, redemptionCount: canjeCount, comment: comment.trim() || undefined, receiptPhoto: `BOLETA - ${id}.jpg`, exchangePhoto: bonus ? `${bonus} - CLIENTE - ${id}.jpg` : undefined, date: now, status: syncStatus() };
       const next = [sale, ...sales]; setSales(next); writeStore('bt-sales', next);
-      if (receipt) enqueueEvidencePhoto(receipt, 'sale', id, 'receiptPhoto');
-      if (bonus && exchange) enqueueEvidencePhoto(exchange, 'sale', id, 'exchangePhoto');
+      const saleClient = clients.find(client => client.id === clientId);
+      const photoContext = { clientName: saleClient?.name || saleClient?.code || 'CLIENTE NO IDENTIFICADO', marketName: selectedMarket.name, recordType: 'VENTA' };
+      if (receipt) enqueueEvidencePhoto(receipt, 'sale', id, 'receiptPhoto', photoContext);
+      if (bonus && exchange) enqueueEvidencePhoto(exchange, 'sale', id, 'exchangePhoto', photoContext);
       if (bonus) {
         const nextInventory = inventory.map(item => item.marketId === selectedMarketId ? { ...item, redemptionStock: requiredRedemptionEntries(requiredRedemptions).reduce((nextStock, [itemId, quantity]) => ({ ...nextStock, [itemId]: nextStock[itemId] - quantity }), { ...item.redemptionStock }), updatedAt: now } : item);
        const currentMovements = readStore<InventoryMovement[]>('bt-inventory-movements', []);
@@ -1313,7 +1325,8 @@ function PromoterApp({ user, markets, clients, assignments, productPrices, sales
      if (tastingUsed > stock.tastingStock) { notify(`Solo hay ${stock.tastingStock} panetones de degustación disponibles`, true); return; }
       const now = new Date(); const id = `MAR-${now.getFullYear()}-${String(attendance.length + 1).padStart(6, '0')}`; const type = markType; const item: Attendance = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId: markClientId, marketId: selectedMarketId, type, photo: `${type} - ${available.find(client => client.id === markClientId)?.name || 'TIENDA'} - ${id}.jpg`, date: now.toISOString(), status: syncStatus() };
       const next = [item, ...attendance]; setAttendance(next); writeStore('bt-attendance', next);
-      if (markPhoto) enqueueEvidencePhoto(markPhoto, 'attendance', id, 'photo');
+      const attendanceClient = clients.find(client => client.id === markClientId);
+      if (markPhoto) enqueueEvidencePhoto(markPhoto, 'attendance', id, 'photo', { clientName: attendanceClient?.name || attendanceClient?.code || 'CLIENTE NO IDENTIFICADO', marketName: selectedMarket?.name || 'MERCADO NO IDENTIFICADO', recordType: `ASISTENCIA ${type}` });
      if (type === 'SALIDA') {
         const updatedInventory = inventory.some(entry => entry.marketId === selectedMarketId)
           ? inventory.map(entry => entry.marketId === selectedMarketId ? { ...entry, tastingStock: entry.tastingStock - tastingUsed, updatedAt: now.toISOString() } : entry)
@@ -1358,7 +1371,10 @@ export default function App() {
    clearCatalogDataOnce();
    keepAnalystUsersOnce();
      const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => reconcileInventory(readStore<MarketInventory[]>('bt-inventory', []), readStore<InventoryMovement[]>('bt-inventory-movements', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
-   const notify = (message: string, error = false) => setToast({ message, error });
+    const notify = (message: string, error = false) => setToast({ message, error });
+      const photoUploadErrorShown = useRef(false);
+      const photoContextRef = useRef({ sales, attendance, clients, markets });
+      photoContextRef.current = { sales, attendance, clients, markets };
      const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
        if (upload.entityType === 'sale') {
          setSales(current => {
@@ -1380,10 +1396,27 @@ export default function App() {
        try {
          for (const upload of await pendingPhotoUploads()) {
            try {
-             const saved = await uploadPhoto(upload);
-             applyUploadedPhoto(upload, saved.url);
+              const current = photoContextRef.current;
+              const record = upload.entityType === 'sale'
+                ? current.sales.find(item => item.id === upload.entityId)
+                : current.attendance.find(item => item.id === upload.entityId);
+              const client = record ? current.clients.find(item => item.id === record.clientId) : undefined;
+              const market = record ? current.markets.find(item => item.id === record.marketId) : undefined;
+              const enrichedUpload = {
+                ...upload,
+                clientName: upload.clientName || client?.name || client?.code,
+                marketName: upload.marketName || market?.name,
+                recordType: upload.recordType || (upload.entityType === 'sale' ? 'VENTA' : `ASISTENCIA ${record && 'type' in record ? record.type : ''}`.trim()),
+              };
+              const saved = await uploadPhoto(enrichedUpload);
+              applyUploadedPhoto(enrichedUpload, saved.url);
              await removePhotoUpload(upload.id);
-           } catch {
+              photoUploadErrorShown.current = false;
+            } catch (error) {
+              if (!photoUploadErrorShown.current) {
+                notify(error instanceof Error ? `Foto pendiente: ${error.message}` : 'Foto pendiente: no se pudo subir a Google Drive.', true);
+                photoUploadErrorShown.current = true;
+              }
              break;
            }
          }
@@ -1391,8 +1424,8 @@ export default function App() {
          photoUploadRunning.current = false;
        }
      };
-     const enqueueEvidencePhoto = (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) => {
-       void queuePhotoUpload(file, entityType, entityId, field).then(flushEvidencePhotos).catch(() => undefined);
+      const enqueueEvidencePhoto = (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field'], context: PhotoUploadContext) => {
+        void queuePhotoUpload(file, entityType, entityId, field, context).then(flushEvidencePhotos).catch(() => notify('No se pudo guardar la foto en la cola del dispositivo.', true));
      };
      useEffect(() => {
        setReferencesReady(true);
@@ -1491,8 +1524,12 @@ export default function App() {
          void flushEvidencePhotos();
        };
        void flushEvidencePhotos();
+        const interval = window.setInterval(flushEvidencePhotos, 30_000);
       window.addEventListener('online', retry);
-      return () => window.removeEventListener('online', retry);
+       return () => {
+         window.clearInterval(interval);
+         window.removeEventListener('online', retry);
+       };
     }, []);
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
