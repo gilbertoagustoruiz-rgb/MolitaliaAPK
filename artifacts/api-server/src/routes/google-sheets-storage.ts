@@ -179,6 +179,20 @@ function mergeCollection(
   return Array.from(merged.values());
 }
 
+function mergeUsersByDni(
+  current: StoredRecord[],
+  incoming: StoredRecord[],
+) {
+  const merged = new Map<string, StoredRecord>();
+  [...current, ...incoming].forEach((record) => {
+    const dni = String(record.dni ?? "").trim();
+    if (!dni) return;
+    const previous = merged.get(dni);
+    merged.set(dni, { ...previous, ...record });
+  });
+  return Array.from(merged.values());
+}
+
 function mergeSnapshots(
   current: StorageSnapshot,
   incoming: Partial<StorageSnapshot>,
@@ -191,6 +205,10 @@ function mergeSnapshots(
       collections[name].key,
     );
   });
+  merged.users = mergeUsersByDni(
+    merged.users,
+    Array.isArray(incoming.users) ? incoming.users : [],
+  );
   const clientsByCode = new Map<string, StoredRecord[]>();
   merged.clients.forEach((client) => {
     const key = String(client.code ?? client.id ?? "").trim();

@@ -20,3 +20,9 @@ Las asignaciones deben leerse y escribirse mediante una operación pequeña e in
 **Why:** Reescribir todas las pestañas para cada asignación puede agotar temporalmente Google Sheets y dejar un cambio visible solo en el navegador del Analista; el DNI permanece estable aunque cambie el ID importado.
 
 **How to apply:** Para cambios de cobertura, actualizar únicamente ASIGNACIONES, confirmar la respuesta antes de mostrar éxito y refrescar esa colección periódicamente en los dispositivos de Promotor.
+
+Las credenciales no deben depender de la instantánea central: al importar usuarios, deduplicar por DNI y conservar la clave solo desde el almacenamiento local; el login debe esperar a que termine la primera carga de usuarios.
+
+**Why:** Google Sheets intentionally stores no passwords, y las escrituras antiguas pueden dejar registros duplicados del mismo DNI; hidratar la nube sin esta regla deja al usuario sin clave o con un perfil equivocado.
+
+**How to apply:** Usar la fila de usuarios fuente como referencia, fusionar por DNI y no volver a persistir contraseñas en el snapshot central.

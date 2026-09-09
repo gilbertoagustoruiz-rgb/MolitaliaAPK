@@ -328,6 +328,20 @@ function mergeReferenceRows<T>(current: T[], incoming: T[], keyOf: (item: T) => 
   });
   return Array.from(merged.values());
 }
+function mergeUsersByDni(current: AppUser[], incoming: AppUser[]) {
+  const merged = new Map<string, AppUser>();
+  [...current, ...incoming].forEach(user => {
+    const key = user.dni.trim();
+    if (!key) return;
+    const previous = merged.get(key);
+    merged.set(key, {
+      ...previous,
+      ...user,
+      password: user.password || previous?.password,
+    });
+  });
+  return Array.from(merged.values());
+}
 function formatDate(value: string) { return new Date(value).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }); }
 function formatSoles(value: number | undefined) { return `S/ ${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function formatKilos(value: number | undefined) { return `${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`; }
@@ -1079,7 +1093,7 @@ export default function App() {
           ]);
           const importedMarkets = importedMarketsFromRecords(marketRecords);
           if (!importedMarkets.length) throw new Error('La hoja de Mercados no contiene registros válidos');
-          const importedUsers = userRecords.map((record, index) => importedUserFromRecord(record, index, importedMarkets)).filter((item): item is AppUser => Boolean(item));
+           const importedUsers = mergeUsersByDni([], userRecords.map((record, index) => importedUserFromRecord(record, index, importedMarkets)).filter((item): item is AppUser => Boolean(item)));
           const importedClients = importedClientsFromRecords(clientRecords, importedMarkets);
           const importedPrices = priceRecords.map(importedPriceFromRecord).filter((item): item is ProductPrice => Boolean(item));
           if (cancelled) return;
@@ -1098,7 +1112,7 @@ export default function App() {
             return next;
           });
           setUsers(current => {
-            const next = mergeReferenceRows(current, importedUsers, item => item.id);
+             const next = mergeUsersByDni(current, importedUsers);
             writeStore('bt-users', next);
             return next;
           });
@@ -1171,10 +1185,10 @@ export default function App() {
           const snapshot = payload.snapshot;
           const localUsers = readStore<AppUser[]>('bt-users', []);
           const nextMarkets = Array.isArray(snapshot.markets) ? snapshot.markets : [];
-          const nextUsers = (Array.isArray(snapshot.users) ? snapshot.users : []).map(cloudUser => {
-            const localUser = localUsers.find(item => item.id === cloudUser.id || item.dni === cloudUser.dni);
-            return { ...cloudUser, password: localUser?.password };
-          });
+           const nextUsers = mergeUsersByDni([], (Array.isArray(snapshot.users) ? snapshot.users : []).map(cloudUser => {
+             const localUser = localUsers.find(item => item.id === cloudUser.id || item.dni === cloudUser.dni);
+             return { ...cloudUser, password: localUser?.password };
+           }));
           const nextClients = Array.isArray(snapshot.clients) ? snapshot.clients : [];
           const nextSales = (Array.isArray(snapshot.sales) ? snapshot.sales : []).map(sale => enrichSaleMarketLocation(sale, nextMarkets));
           const nextAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
@@ -1303,5 +1317,5 @@ export default function App() {
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
-     return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : <Login users={users} onLogin={setUser} notify={notify} />}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+      return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : referencesReady || users.length ? <Login users={users} onLogin={setUser} notify={notify} /> : <main className="login-shell"><section className="login-panel"><div className="login-card"><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><RefreshCw /></span><div><h2>Cargando acceso</h2><p>Estamos actualizando los usuarios de la campaña.</p></div></div></div></section></main>}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }
