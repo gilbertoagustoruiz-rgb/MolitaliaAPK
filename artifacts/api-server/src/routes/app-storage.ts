@@ -246,8 +246,10 @@ async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision
       clients: [],
       inventory: [],
       assignments: [],
-      movements: Array.isArray(incoming.movements) ? incoming.movements.filter((movement) => value(movement, "kind") !== "CANJE") : incoming.movements,
-      sales: Array.isArray(incoming.sales) ? incoming.sales.filter((sale) => value(sale, "mode") !== "CANJE") : incoming.sales,
+      movements: [],
+      sales: [],
+      attendance: [],
+      closures: [],
     }
     : incoming;
   const client = await pool.connect();
@@ -469,15 +471,17 @@ router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM sales WHERE mode='CANJE'");
-    await client.query("DELETE FROM inventory_movements WHERE kind='CANJE'");
+    await client.query("DELETE FROM sales");
+    await client.query("DELETE FROM attendance");
+    await client.query("DELETE FROM session_closures");
+    await client.query("DELETE FROM inventory_movements");
     await client.query("DELETE FROM clients");
     await client.query("DELETE FROM inventory");
     await client.query("DELETE FROM markets");
     await client.query("DELETE FROM assignments");
     await client.query("COMMIT");
     catalogRevision = randomUUID();
-    res.json({ deleted: ["markets", "clients", "inventory", "assignments", "canje_movements", "canje_sales"], catalogRevision, snapshot: await readSnapshot() });
+    res.json({ deleted: ["markets", "clients", "sales", "attendance", "session_closures", "inventory", "inventory_movements", "assignments"], catalogRevision, snapshot: await readSnapshot() });
   } catch (error) {
     await client.query("ROLLBACK");
     req.log.error({ err: error }, "Unable to clean catalogs");

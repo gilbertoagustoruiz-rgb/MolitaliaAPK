@@ -1021,7 +1021,7 @@ export const getCleanupAdminCatalogsUrl = () => {
 }
 
 /**
- * @summary Permanently clear markets, clients, inventory, assignments and canjes
+ * @summary Permanently clear all operational campaign data while preserving users and product prices
  */
 export const cleanupAdminCatalogs = async (cleanupAdminCatalogsBody: CleanupAdminCatalogsBody, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
 
@@ -1070,7 +1070,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CleanupAdminCatalogsMutationError = ErrorType<unknown>
 
     /**
- * @summary Permanently clear markets, clients, inventory, assignments and canjes
+ * @summary Permanently clear all operational campaign data while preserving users and product prices
  */
 export const useCleanupAdminCatalogs = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cleanupAdminCatalogs>>, TError,{data: BodyType<CleanupAdminCatalogsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}

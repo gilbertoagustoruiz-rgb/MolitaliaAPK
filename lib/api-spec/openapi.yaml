@@ -245,7 +245,7 @@ paths:
     post:
       operationId: cleanupAdminCatalogs
       tags: [storage]
-      summary: Permanently clear markets, clients, inventory, assignments and canjes
+      summary: Permanently clear all operational campaign data while preserving users and product prices
       requestBody:
         required: true
         content:

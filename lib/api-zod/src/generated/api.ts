@@ -249,7 +249,7 @@ export const DeleteAdminCanjeResponse = zod.object({
 
 
 /**
- * @summary Permanently clear markets, clients, inventory, assignments and canjes
+ * @summary Permanently clear all operational campaign data while preserving users and product prices
  */
 export const CleanupAdminCatalogsBody = zod.object({
   "confirmation": zod.string()
