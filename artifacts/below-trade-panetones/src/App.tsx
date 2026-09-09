@@ -192,6 +192,7 @@ const APP_DATA_KEYS = ['bt-session', 'bt-markets', 'bt-users', 'bt-clients', 'bt
 const TEST_DATA_CLEARED_KEY = 'bt-test-data-cleared-v1';
 const CATALOG_DATA_CLEARED_KEY = 'bt-operational-data-cleared-v2';
 const CATALOG_REVISION_STORE_KEY = 'bt-catalog-revision';
+const USERS_CLEARED_KEY = 'bt-users-cleared-v1';
 function clearTestDataOnce() {
   if (typeof localStorage === 'undefined' || localStorage.getItem(TEST_DATA_CLEARED_KEY)) return;
   APP_DATA_KEYS.forEach(key => localStorage.removeItem(key));
@@ -209,6 +210,12 @@ function clearCatalogDataOnce() {
   localStorage.removeItem('bt-session-closures');
   localStorage.removeItem(DEFAULT_STOCK_SEED_KEY);
   localStorage.setItem(CATALOG_DATA_CLEARED_KEY, 'true');
+}
+function keepAnalystUsersOnce() {
+  if (typeof localStorage === 'undefined' || localStorage.getItem(USERS_CLEARED_KEY)) return;
+  const localUsers = readStore<AppUser[]>('bt-users', []);
+  writeStore('bt-users', localUsers.filter(user => user.role === 'ANALISTA'));
+  localStorage.setItem(USERS_CLEARED_KEY, 'true');
 }
 function csvValue(value: unknown) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
 function downloadCsv(filename: string, headers: string[], rows: unknown[][]) {
@@ -700,7 +707,7 @@ function AdminCanjesModule({ canjes, marketMap, onCreate, onDelete, onCleanup, n
   };
   return <section className="admin-module">
     <div className="admin-intro"><div><span className="eyebrow">GESTIÓN MANUAL</span><h2>Canjes</h2><p>Registra y elimina canjes. También se muestran los canjes asociados a ventas.</p></div><div className="page-actions"><Btn variant="outline" onClick={exportCanjes}><Download /> Descargar</Btn><Btn onClick={onCreate}><Plus /> Nuevo canje</Btn></div></div>
-    <div className="admin-warning"><Trash2 /><span><strong>Limpieza inicial</strong><small>Elimina todos los datos operativos: mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones y cierres. Usuarios y precios se conservan.</small></span><Btn variant="danger" onClick={onCleanup} testId="button-cleanup-catalogs">Empezar desde cero</Btn></div>
+    <div className="admin-warning"><Trash2 /><span><strong>Limpieza inicial</strong><small>Elimina todos los datos operativos y todos los usuarios excepto ANALISTA. Los precios se conservan.</small></span><Btn variant="danger" onClick={onCleanup} testId="button-cleanup-catalogs">Empezar desde cero</Btn></div>
     <section className="panel"><div className="panel-header"><div><h2>{canjes.length} canjes registrados</h2><p>El borrado es definitivo.</p></div></div><div className="panel-body">{canjes.length ? <div className="record-list">{canjes.map(canje => <article className="record" key={`${canje.source}-${canje.canjeId}`}><span className="record-icon"><Gift /></span><div className="record-main"><strong>{canje.itemId || canje.sale?.bonus || 'Canje de venta'}</strong><small>{marketMap[canje.marketId]?.name || 'Mercado no identificado'} · {canje.quantity} unidad{canje.quantity === 1 ? '' : 'es'}</small><em>{canje.source === 'sale' ? 'Venta' : 'Movimiento'} · {canje.actorName} · {formatDate(canje.date)}</em></div><Btn variant="danger" onClick={() => onDelete(canje)} testId={`button-delete-canje-${canje.canjeId}`}><Trash2 /> Eliminar</Btn></article>)}</div> : <Empty title="Aún no hay canjes" detail="Puedes registrar un canje manualmente." />}</div></section>
   </section>;
 }
@@ -1014,7 +1021,7 @@ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setCl
    const deleteClient = async (client: Client) => { if (!window.confirm(`¿Eliminar definitivamente al cliente ${client.name}?`)) return; try { await adminRequest(`/clients/${encodeURIComponent(client.id)}`, { method: 'DELETE' }); notify(`Cliente eliminado: ${client.name}`); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar el cliente', true); } };
    const saveCanje = async (canje: InventoryMovement) => { try { await adminRequest('/canjes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canje }) }); notify('Canje registrado'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo crear el canje', true); } };
    const deleteCanje = async (canje: AdminCanje) => { if (!window.confirm('¿Eliminar definitivamente este canje?')) return; try { await adminRequest(`/canjes/${canje.source}/${encodeURIComponent(canje.canjeId)}`, { method: 'DELETE' }); notify('Canje eliminado'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar el canje', true); } };
-   const cleanupCatalogs = async () => { if (!window.confirm('Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones y cierres. Los usuarios y precios se conservarán. ¿Empezar desde cero?')) return; try { await adminRequest('/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'LIMPIAR_MERCADOS_CLIENTES_CANJES' }) }); localStorage.removeItem(DEFAULT_STOCK_SEED_KEY); notify('Todos los datos operativos fueron eliminados. Usuarios y precios se conservaron.'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo limpiar la información', true); } };
+   const cleanupCatalogs = async () => { if (!window.confirm('Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones, cierres y usuarios que no sean ANALISTA. Los precios y el usuario ANALISTA se conservarán. ¿Empezar desde cero?')) return; try { await adminRequest('/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'LIMPIAR_MERCADOS_CLIENTES_CANJES' }) }); localStorage.removeItem(DEFAULT_STOCK_SEED_KEY); notify('Datos operativos y usuarios no ANALISTA eliminados.'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo limpiar la información', true); } };
   const filteredClients = clients.filter(client => `${client.name} ${client.code} ${marketMap[client.marketId]?.name || ''}`.toLowerCase().includes(query.toLowerCase()));
    const adminCanjes: AdminCanje[] = [
      ...movements.filter(movement => movement.kind === 'CANJE').map(movement => ({ ...movement, source: 'movement' as const, canjeId: movement.id })),
@@ -1129,6 +1136,7 @@ function ClientApp({ user, clients, sales, markets }: { user: AppUser; clients: 
 export default function App() {
    clearTestDataOnce();
    clearCatalogDataOnce();
+   keepAnalystUsersOnce();
      const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
    const notify = (message: string, error = false) => setToast({ message, error });
      const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {

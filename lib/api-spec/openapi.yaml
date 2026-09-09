@@ -245,7 +245,7 @@ paths:
     post:
       operationId: cleanupAdminCatalogs
       tags: [storage]
-      summary: Permanently clear all operational campaign data while preserving users and product prices
+      summary: Permanently clear operational data and non-ANALISTA users while preserving ANALISTA users and product prices
       requestBody:
         required: true
         content:

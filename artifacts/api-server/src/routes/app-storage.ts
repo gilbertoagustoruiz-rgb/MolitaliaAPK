@@ -250,6 +250,7 @@ async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision
       sales: [],
       attendance: [],
       closures: [],
+      users: Array.isArray(incoming.users) ? incoming.users.filter((user) => value(user, "role") === "ANALISTA") : incoming.users,
     }
     : incoming;
   const client = await pool.connect();
@@ -479,9 +480,10 @@ router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
     await client.query("DELETE FROM inventory");
     await client.query("DELETE FROM markets");
     await client.query("DELETE FROM assignments");
+    await client.query("DELETE FROM users WHERE role <> 'ANALISTA'");
     await client.query("COMMIT");
     catalogRevision = randomUUID();
-    res.json({ deleted: ["markets", "clients", "sales", "attendance", "session_closures", "inventory", "inventory_movements", "assignments"], catalogRevision, snapshot: await readSnapshot() });
+    res.json({ deleted: ["markets", "clients", "sales", "attendance", "session_closures", "inventory", "inventory_movements", "assignments", "non_analyst_users"], catalogRevision, snapshot: await readSnapshot() });
   } catch (error) {
     await client.query("ROLLBACK");
     req.log.error({ err: error }, "Unable to clean catalogs");
