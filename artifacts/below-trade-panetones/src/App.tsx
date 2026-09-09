@@ -43,6 +43,7 @@ const CLIENTS_SHEET_ID = '1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA';
 const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
 const PRICES_SHEET_ID = '1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8';
 const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
+const APP_STORAGE_READ = '/api/app-storage';
 const APP_STORAGE_SYNC = '/api/app-storage/sync';
 const APP_STORAGE_ASSIGNMENTS = '/api/app-storage/assignments';
 const APP_STORAGE_LOGIN = '/api/app-storage/login';
@@ -1225,15 +1226,10 @@ export default function App() {
       let cancelled = false;
       const hydrateCloudStorage = async () => {
         try {
-           const response = await fetch(APP_STORAGE_SYNC, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ snapshot: cloudSnapshotFromStores() }),
-          });
+           const response = await fetch(APP_STORAGE_READ);
           if (!response.ok) throw new Error('Sincronización inicial no disponible');
-           const payload = await response.json() as { snapshot?: Partial<CloudSnapshot>; catalogRevision?: string | null };
+           const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
           if (cancelled || !payload.snapshot) return;
-           if (payload.catalogRevision) localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
           const snapshot = payload.snapshot;
           const localUsers = readStore<AppUser[]>('bt-users', []);
           const nextMarkets = Array.isArray(snapshot.markets) ? snapshot.markets : [];
