@@ -50,8 +50,8 @@ const APP_STORAGE_LOGIN = '/api/app-storage/login';
 const APP_STORAGE_ADMIN = '/api/app-storage/admin';
 const GOOGLE_DRIVE_PHOTO_UPLOAD = '/api/evidence-photos';
 const PRODUCT_PRICES_STORE_KEY = 'bt-product-prices';
-const DEFAULT_CAMPAIGN_TASTING_STOCK = 20;
-const DEFAULT_CAMPAIGN_REDEMPTION_STOCK = 10;
+const DEFAULT_CAMPAIGN_TASTING_STOCK = 0;
+const DEFAULT_CAMPAIGN_REDEMPTION_STOCK = 0;
 const DEFAULT_STOCK_SEED_KEY = 'bt-inventory-defaults-v1';
 const redemptionItems: { id: RedemptionItemId; label: string }[] = [
   { id: 'AVENA', label: 'Avena' },
@@ -78,25 +78,14 @@ function emptyRedemptionStock(): RedemptionStock {
 function emptyInventory(marketId: string): MarketInventory {
   return { marketId, tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK, redemptionStock: emptyRedemptionStock(), updatedAt: new Date().toISOString() };
 }
-function ensureInventory(markets: Market[], stored: MarketInventory[]) {
+function normalizeInventory(stored: MarketInventory[]) {
   const byMarket = new Map(stored.map(item => [item.marketId, item]));
-  const next: MarketInventory[] = Array.from(byMarket.values()).map(existing => {
+  return Array.from(byMarket.values()).map(existing => {
     const legacyStock = Math.max(0, Math.floor(Number(existing.exchangeStock) || 0));
     const source = existing.redemptionStock || emptyRedemptionStock();
     const redemptionStock = redemptionItems.reduce((result, item) => ({ ...result, [item.id]: Math.max(0, Math.floor(Number(source[item.id]) || 0)) }), {} as RedemptionStock);
     return { ...existing, tastingStock: Math.max(0, Math.floor(Number(existing.tastingStock) || 0)), redemptionStock, exchangeStock: legacyStock, updatedAt: existing.updatedAt || new Date().toISOString() };
   });
-  markets.forEach(market => {
-    if (!byMarket.has(market.id)) next.push(emptyInventory(market.id));
-  });
-  return next;
-}
-function initializeCampaignInventory(markets: Market[], stored: MarketInventory[]) {
-  const normalized = ensureInventory(markets, stored);
-  if (readStore<boolean>(DEFAULT_STOCK_SEED_KEY, false)) return normalized;
-  const seeded = normalized.map(item => ({ ...item, tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK, redemptionStock: emptyRedemptionStock(), updatedAt: new Date().toISOString() }));
-  writeStore('bt-inventory', seeded); writeStore(DEFAULT_STOCK_SEED_KEY, true);
-  return seeded;
 }
 const products = [
   { sku: '801177', brand: 'TODINNO', name: 'Panetón Todinno 900 g + Todinnito 85 g', weightKg: 0.9 },
@@ -970,11 +959,14 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
       const response = await fetch(MARKETS_SHEET); if (!response.ok) throw new Error('No se pudo conectar');
       const rows = parseCsvText(await response.text()); if (rows.length < 2) throw new Error('La hoja no contiene encabezados y filas de mercados'); const headers = rows[0].map(normalizeCsvHeader); const column = (aliases: string[], fallback: number) => aliases.map(normalizeCsvHeader).map(alias => headers.indexOf(alias)).find(index => index >= 0) ?? fallback; const idIndex = column(['idmerc', 'id', 'codigo'], 0); const departmentIndex = column(['departamento'], 1); const provinceIndex = column(['provincia', 'ciudad'], 2); const districtIndex = column(['distrito'], 3); const nameIndex = column(['nombredelmercado', 'mercado', 'nombre'], 4); const statusIndex = column(['estado', 'status'], 5); const regionIndex = column(['region'], 6); const lookupDepartmentIndex = headers.lastIndexOf('departamento'); const lookupRegionIndex = headers.lastIndexOf('region'); const hasRegionLookup = lookupDepartmentIndex >= 0 && lookupRegionIndex >= 0 && (lookupDepartmentIndex !== departmentIndex || lookupRegionIndex !== regionIndex); const regionLookup = new Map<string, string>(); if (hasRegionLookup) rows.slice(1).forEach(cells => { const lookupDepartment = (cells[lookupDepartmentIndex] || '').trim(); const lookupRegion = (cells[lookupRegionIndex] || '').trim(); if (lookupDepartment && lookupRegion && normalizeCsvHeader(lookupDepartment) !== 'departamento') regionLookup.set(normalizeCsvHeader(lookupDepartment), lookupRegion.toUpperCase()); }); const aliases = new Map<string, string>(); const imported: Market[] = rows.slice(1).map((cells, index) => { const rawName = (cells[nameIndex] || '').trim(); if (!rawName) return null; const sourceId = (cells[idIndex] || `SHEET-${index + 1}`).trim(); const department = (cells[departmentIndex] || 'LIMA').trim().toUpperCase(); const province = (cells[provinceIndex] || 'LIMA').trim().toUpperCase(); const district = (cells[districtIndex] || 'LIMA').trim().toUpperCase(); const name = rawName.toUpperCase(); const rawRegion = (cells[regionIndex] || '').trim(); const normalizedRegion = normalizeCsvHeader(rawRegion); const region = rawRegion && !['activo', 'inactivo', 'region'].includes(normalizedRegion) ? rawRegion.toUpperCase() : regionLookup.get(normalizeCsvHeader(department)) || department; const existing = markets.find(market => market.id === sourceId || market.id === `SHEET-${index + 1}` || (market.name === name && market.district === district && market.province === province)); if (existing && existing.id !== sourceId) aliases.set(existing.id, sourceId); return { id: sourceId, department, region, province, district, name, status: csvStatus(cells[statusIndex] || 'ACTIVO') }; }).filter(Boolean) as Market[];
       if (!imported.length) throw new Error('La hoja no contiene mercados');
-      const remapMarketId = (marketId?: string) => marketId ? aliases.get(marketId) || marketId : marketId;
-      const nextUsers = users.map(item => ({ ...item, marketId: remapMarketId(item.marketId) })); const nextClients = clients.map(item => ({ ...item, marketId: remapMarketId(item.marketId) || item.marketId })); const nextInventory = inventory.map(item => ({ ...item, marketId: remapMarketId(item.marketId) || item.marketId })); const nextMovements = movements.map(item => ({ ...item, marketId: remapMarketId(item.marketId) || item.marketId }));
-       const importedIds = new Set(imported.map(market => market.id)); const referencedIds = new Set([...nextUsers.map(item => item.marketId), ...nextClients.map(item => item.marketId), ...nextInventory.map(item => item.marketId)].filter(Boolean) as string[]);
-      const preservedAssignments = markets.filter(market => referencedIds.has(market.id) && !importedIds.has(market.id));
-       const nextMarkets = [...imported, ...preservedAssignments]; setMarkets(nextMarkets); setUsers(nextUsers); setClients(nextClients); setInventory(nextInventory); setMovements(nextMovements); writeStore('bt-markets', nextMarkets); writeStore('bt-users', nextUsers); writeStore('bt-clients', nextClients); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); await persistImportedSnapshot({ markets: nextMarkets, users: nextUsers, clients: nextClients, inventory: nextInventory, movements: nextMovements }); notify(`${imported.length} mercados actualizados y guardados`);
+       const nextMarkets = [...markets];
+       imported.forEach(importedMarket => {
+         const aliasedId = Array.from(aliases.entries()).find(([, sourceId]) => sourceId === importedMarket.id)?.[0];
+         const index = nextMarkets.findIndex(market => market.id === importedMarket.id || market.id === aliasedId);
+         if (index >= 0) nextMarkets[index] = { ...nextMarkets[index], ...importedMarket, id: nextMarkets[index].id };
+         else nextMarkets.push(importedMarket);
+       });
+       setMarkets(nextMarkets); writeStore('bt-markets', nextMarkets); await persistImportedSnapshot({ markets: nextMarkets }); notify(`${imported.length} mercados actualizados y guardados sin borrar información operativa`);
     } catch { notify('No se pudo importar la hoja. Los mercados locales siguen disponibles.', true); } finally { setSyncing(false); }
   };
   const mergeImportedUsers = async (records: Record<string, string>[]) => {
@@ -1069,7 +1061,7 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
      }
      if (Array.isArray(snapshot.clients)) setClients(snapshot.clients);
      if (Array.isArray(snapshot.sales)) setSales(snapshot.sales);
-     if (Array.isArray(snapshot.inventory)) setInventory(ensureInventory(Array.isArray(snapshot.markets) ? snapshot.markets : markets, snapshot.inventory));
+     if (Array.isArray(snapshot.inventory)) setInventory(normalizeInventory(snapshot.inventory));
      if (Array.isArray(snapshot.movements)) setMovements(snapshot.movements);
      if (Array.isArray(snapshot.assignments)) setAssignments(snapshot.assignments);
    };
@@ -1209,7 +1201,7 @@ export default function App() {
    clearTestDataOnce();
    clearCatalogDataOnce();
    keepAnalystUsersOnce();
-     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => initializeCampaignInventory(readStore<Market[]>('bt-markets', []), readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
+     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => normalizeInventory(readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
    const notify = (message: string, error = false) => setToast({ message, error });
      const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
        if (upload.entityType === 'sale') {
@@ -1269,7 +1261,7 @@ export default function App() {
           const nextClients = Array.isArray(snapshot.clients) ? snapshot.clients : [];
           const nextSales = (Array.isArray(snapshot.sales) ? snapshot.sales : []).map(sale => enrichSaleMarketLocation(sale, nextMarkets));
           const nextAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
-          const nextInventory = ensureInventory(nextMarkets, Array.isArray(snapshot.inventory) ? snapshot.inventory : []);
+           const nextInventory = normalizeInventory(Array.isArray(snapshot.inventory) ? snapshot.inventory : []);
           const nextMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
           const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
           const nextClosures = Array.isArray(snapshot.closures) ? snapshot.closures : [];
@@ -1364,7 +1356,7 @@ export default function App() {
         return next;
       });
     }, [markets]);
-    useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { writeStore('bt-sales', sales); }, [sales]); useEffect(() => { writeStore('bt-attendance', attendance); }, [attendance]); useEffect(() => { const next = ensureInventory(markets, inventory); if (next.length !== inventory.length) { setInventory(next); writeStore('bt-inventory', next); } }, [markets, inventory]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]); useEffect(() => { writeStore('bt-promoter-assignments', assignments); }, [assignments]); useEffect(() => { writeStore('bt-session-closures', closures); }, [closures]);
+    useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { writeStore('bt-sales', sales); }, [sales]); useEffect(() => { writeStore('bt-attendance', attendance); }, [attendance]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]); useEffect(() => { writeStore('bt-promoter-assignments', assignments); }, [assignments]); useEffect(() => { writeStore('bt-session-closures', closures); }, [closures]);
     const completeLogin = (authenticated: AppUser) => {
       setUser(authenticated);
       setUsers(current => {
@@ -1404,6 +1396,6 @@ export default function App() {
       const nextClosures = [closure, ...closures]; setClosures(nextClosures); writeStore('bt-session-closures', nextClosures);
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
-   const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? (logoutMarketId ? DEFAULT_CAMPAIGN_TASTING_STOCK : 0);
+   const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? 0;
       return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} setSales={setSales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : referencesReady || users.length ? <Login users={users} onLogin={completeLogin} notify={notify} /> : <main className="login-shell"><section className="login-panel"><div className="login-card"><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><RefreshCw /></span><div><h2>Cargando acceso</h2><p>Estamos conectando con el servidor.</p></div></div></div></section></main>}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }

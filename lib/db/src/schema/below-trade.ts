@@ -13,6 +13,12 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
 
+export const appMetadataTable = pgTable("app_metadata", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  ...timestamps,
+});
+
 export const marketsTable = pgTable("markets", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),

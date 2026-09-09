@@ -5,11 +5,10 @@ import { Router, type IRouter } from "express";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
-let catalogRevision: string | null = null;
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
-  query: (text: string, values?: unknown[]) => Promise<{ rows: Array<{ data: StoredRecord }> }>;
+  query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
 };
 type CollectionName =
   | "markets"
@@ -99,6 +98,11 @@ function publicUser(record: StoredRecord) {
 
 function isRecord(value: unknown): value is StoredRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+async function readCatalogRevision(client: QueryClient = pool as unknown as QueryClient) {
+  const result = await client.query("SELECT value FROM app_metadata WHERE key=$1", ["catalog_revision"]);
+  return value(result.rows[0] || {}, "value") || null;
 }
 
 function canjeSnapshot(snapshot: StorageSnapshot) {
@@ -245,6 +249,7 @@ async function upsertRecord(
 }
 
 async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision?: string | null) {
+  const catalogRevision = await readCatalogRevision();
   const catalogIsAuthorized = !catalogRevision || incomingRevision === catalogRevision;
   const guardedIncoming: Partial<StorageSnapshot> = catalogRevision && !catalogIsAuthorized
     ? {
@@ -281,7 +286,7 @@ async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    res.json({ storage: "replit-postgresql", catalogRevision, snapshot: await readSnapshot() });
+    res.json({ storage: "replit-postgresql", catalogRevision: await readCatalogRevision(), snapshot: await readSnapshot() });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read app storage");
     res.status(500).json({ message: "No se pudo leer PostgreSQL." });
@@ -297,7 +302,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
     }
     const incomingRevision = typeof req.body?.catalogRevision === "string" ? req.body.catalogRevision : null;
     const snapshot = await syncSnapshot(incoming as Partial<StorageSnapshot>, incomingRevision);
-    res.json({ storage: "replit-postgresql", syncedAt: new Date().toISOString(), catalogRevision, snapshot });
+    res.json({ storage: "replit-postgresql", syncedAt: new Date().toISOString(), catalogRevision: await readCatalogRevision(), snapshot });
   } catch (error) {
     req.log.error({ err: error }, "Unable to sync app storage");
     res.status(500).json({ message: "No se pudo sincronizar PostgreSQL." });
@@ -321,7 +326,7 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
       res.status(400).json({ message: "La asignación requiere promoterId." });
       return;
     }
-    await syncSnapshot({ assignments: [assignment] }, catalogRevision);
+    await syncSnapshot({ assignments: [assignment] }, await readCatalogRevision());
     const { assignments } = await readSnapshot();
     res.json({ storage: "replit-postgresql", assignment, assignments });
   } catch (error) {
@@ -676,8 +681,13 @@ router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
     await client.query("DELETE FROM markets");
     await client.query("DELETE FROM assignments");
     await client.query("DELETE FROM users WHERE role <> 'ANALISTA'");
+    const catalogRevision = randomUUID();
+    await client.query(
+      `INSERT INTO app_metadata (key,value) VALUES ($1,$2)
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+      ["catalog_revision", catalogRevision],
+    );
     await client.query("COMMIT");
-    catalogRevision = randomUUID();
     res.json({ deleted: ["markets", "clients", "sales", "attendance", "session_closures", "inventory", "inventory_movements", "assignments", "non_analyst_users"], catalogRevision, snapshot: await readSnapshot() });
   } catch (error) {
     await client.query("ROLLBACK");
