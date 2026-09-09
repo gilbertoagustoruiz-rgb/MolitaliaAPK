@@ -445,6 +445,34 @@ function movementComponentQuantity(movement: InventoryMovement, itemId: Redempti
   if (components) return (Number(components[itemId]) || 0) * Math.max(0, Number(movement.quantity) || 0);
   return movement.itemId === itemId ? Math.max(0, Number(movement.quantity) || 0) : 0;
 }
+function signedMovementComponentQuantity(movement: InventoryMovement, itemId: RedemptionItemId) {
+  const components = movement.canjeComponents || canjeProducts.find(product => product.id === movement.canjeProductId)?.components;
+  if (components) return (Number(components[itemId]) || 0) * (Number(movement.quantity) || 0);
+  return movement.itemId === itemId ? Number(movement.quantity) || 0 : 0;
+}
+function reconcileInventory(stored: MarketInventory[], movements: InventoryMovement[]) {
+  const normalized = normalizeInventory(stored);
+  const marketIds = new Set([
+    ...normalized.map(item => item.marketId),
+    ...movements.filter(movement => ['AJUSTE_DEGUSTACION', 'DEGUSTACION', 'AJUSTE_CANJES', 'CANJE'].includes(movement.kind)).map(movement => movement.marketId),
+  ]);
+  return Array.from(marketIds).map(marketId => {
+    const current = normalized.find(item => item.marketId === marketId) || emptyInventory(marketId);
+    const marketMovements = movements.filter(movement => movement.marketId === marketId);
+    const tastingMovements = marketMovements.filter(movement => movement.kind === 'AJUSTE_DEGUSTACION' || movement.kind === 'DEGUSTACION');
+    const tastingStock = tastingMovements.length
+      ? Math.max(0, tastingMovements.reduce((total, movement) => total + (movement.kind === 'AJUSTE_DEGUSTACION' ? Number(movement.quantity) || 0 : -Math.max(0, Number(movement.quantity) || 0)), 0))
+      : current.tastingStock;
+    const redemptionStock = redemptionItems.reduce((result, item) => {
+      const itemMovements = marketMovements.filter(movement => (movement.kind === 'AJUSTE_CANJES' || movement.kind === 'CANJE') && (movement.itemId === item.id || signedMovementComponentQuantity(movement, item.id) !== 0));
+      const stock = itemMovements.length
+        ? Math.max(0, itemMovements.reduce((total, movement) => total + (movement.kind === 'AJUSTE_CANJES' ? signedMovementComponentQuantity(movement, item.id) : -movementComponentQuantity(movement, item.id)), 0))
+        : current.redemptionStock[item.id];
+      return { ...result, [item.id]: stock };
+    }, {} as RedemptionStock);
+    return { ...current, tastingStock, redemptionStock };
+  });
+}
 function sumMovementQuantities(movements: InventoryMovement[], marketId: string, kind: InventoryMovementKind, itemId?: RedemptionItemId) {
   return movements
     .filter(movement => movement.marketId === marketId && movement.kind === kind && (!itemId || movementComponentQuantity(movement, itemId) > 0))
@@ -741,7 +769,7 @@ function AdminDegustacionesModule({ degustaciones, marketMap, onCreate, onDelete
 }
 
 function SessionCloseModal({ available, onConfirm, close }: { available: number; onConfirm: (tastingUsed: number, leads: number) => void; close: () => void }) {
-  const [quantity, setQuantity] = useState(''); const [leads, setLeads] = useState('');
+  const [quantity, setQuantity] = useState('0'); const [leads, setLeads] = useState('0');
   const parsedQuantity = quantity === '' ? NaN : Number(quantity); const parsedLeads = leads === '' ? NaN : Number(leads);
   const valid = Number.isInteger(parsedQuantity) && parsedQuantity >= 0 && parsedQuantity <= available && Number.isInteger(parsedLeads) && parsedLeads >= 0;
   return <Modal title="Cierra tu jornada" detail="Antes de salir, registra tu degustación y los posibles Leads de hoy." close={close}>
@@ -771,8 +799,9 @@ function InventoryModule({ markets, inventory, movements, notify, onImportCsv, o
   const sortedMovements = [...movements].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
   const levelClass = (value: number) => value === 0 ? 'empty' : value <= 5 ? 'low' : 'available';
   return <section className="inventory-module">
-    <div className="inventory-overview"><div><span className="eyebrow">CONTROL DE CAMPAÑA</span><h2>Canjes y degustaciones</h2><p>Consulta las existencias por mercado y revisa los consumos registrados.</p></div></div>
+    <div className="inventory-overview"><div><span className="eyebrow">CONTROL DE CAMPAÑA</span><h2>Canjes y degustaciones</h2><p>Consulta las existencias por mercado y revisa los consumos registrados.</p></div><div className="page-actions"><CsvImportButton label="Importar" onImport={onImportCsv} testId="button-import-inventory" /><CsvExampleButton onDownload={onDownloadExample} testId="button-example-inventory" /><Btn variant="outline" onClick={exportInventory}><Download /> Exportar inventario</Btn><Btn variant="outline" onClick={exportMovements}><Download /> Exportar movimientos</Btn></div></div>
     <div className="inventory-summary"><article><span className="inventory-summary-icon"><PackageCheck /></span><div><small>STOCK TOTAL DE DEGUSTACIÓN</small><strong>{totals.tasting}</strong><p>Panetones disponibles</p></div></article><article><span className="inventory-summary-icon accent"><Gift /></span><div><small>UNIDADES DE CANJE</small><strong>{totals.redemption}</strong><p>Premios disponibles</p></div></article><article><span className="inventory-summary-icon blue"><MapPin /></span><div><small>MERCADOS CONTROLADOS</small><strong>{markets.length}</strong><p>Con saldo independiente</p></div></article></div>
+    <section className="panel"><div className="panel-header"><div><h2>Inventario por mercado</h2><p>Las degustaciones y los componentes de canje aparecen después de registrar o importar un abastecimiento.</p></div></div><div className="panel-body summary-table-wrap">{inventory.length ? <div className="stock-reconciliation-table inventory-stock-table"><div className="stock-reconciliation-row header"><span>Mercado</span><span>Degustación</span>{redemptionItems.map(item => <span key={item.id}>{item.label}</span>)}</div>{inventory.map(stock => <div className="stock-reconciliation-row" key={stock.marketId}><div><strong>{marketMap[stock.marketId]?.name || 'Mercado no identificado'}</strong><small>{marketMap[stock.marketId]?.district || stock.marketId}</small></div><b className={`stock-level ${levelClass(stock.tastingStock)}`}>{stock.tastingStock}<small>panetones</small></b>{redemptionItems.map(item => <span className={`stock-level ${levelClass(stock.redemptionStock[item.id])}`} key={item.id}>{stock.redemptionStock[item.id]}<small>unidades</small></span>)}</div>)}</div> : <Empty title="Aún no hay inventario" detail="Registra una degustación, un canje o importa el archivo masivo." />}</div></section>
     <section className="inventory-history"><div className="panel-header"><div><h2>Movimientos recientes</h2><p>Canjes, degustaciones y ajustes hechos por el equipo.</p></div></div>{sortedMovements.length ? <div className="movement-list">{sortedMovements.map(movement => { const amount = movementAmount(movement); return <article className="movement-row" key={movement.id}><span className={`movement-icon ${amount < 0 ? 'consume' : 'adjust'}`}>{amount < 0 ? <PackageCheck /> : <Plus />}</span><div><strong>{movementLabel(movement.kind, movement.itemId, movement.canjeProductId)}</strong><small>{marketMap[movement.marketId]?.name || 'Mercado'} · {movement.actorName} · {formatDate(movement.date)}</small></div><span className={`movement-amount ${amount < 0 ? 'negative' : 'positive'}`}>{amount > 0 ? '+' : ''}{amount}</span><StatusPill status={movement.status} /></article>; })}</div> : <div className="inventory-empty"><PackageCheck /><h3>Aún no hay movimientos</h3><p>Los descuentos y ajustes de stock aparecerán aquí.</p></div>}</section>
   </section>;
 }
@@ -924,7 +953,7 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
   </div>;
 }
 
- function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setClients, sales, setSales, attendance, inventory, movements, assignments, setAssignments, setInventory, setMovements, notify }: { user: AppUser; markets: Market[]; setMarkets: (value: Market[]) => void; users: AppUser[]; setUsers: (value: AppUser[]) => void; clients: Client[]; setClients: (value: Client[]) => void; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; inventory: MarketInventory[]; movements: InventoryMovement[]; assignments: PromoterAssignment[]; setAssignments: (value: PromoterAssignment[]) => void; setInventory: (value: MarketInventory[]) => void; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void }) {
+ function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setClients, sales, setSales, attendance, setAttendance, inventory, movements, assignments, setAssignments, setInventory, setMovements, closures, setClosures, notify }: { user: AppUser; markets: Market[]; setMarkets: (value: Market[]) => void; users: AppUser[]; setUsers: (value: AppUser[]) => void; clients: Client[]; setClients: (value: Client[]) => void; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; movements: InventoryMovement[]; assignments: PromoterAssignment[]; setAssignments: (value: PromoterAssignment[]) => void; setInventory: (value: MarketInventory[]) => void; setMovements: (value: InventoryMovement[]) => void; closures: SessionClosure[]; setClosures: (value: SessionClosure[]) => void; notify: (message: string, error?: boolean) => void }) {
   const [tab, setTab] = useState('inicio'); const [query, setQuery] = useState(''); const [modal, setModal] = useState<'user' | 'client' | 'market' | 'canje' | 'degustacion' | null>(null); const [syncing, setSyncing] = useState(false);
    const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const marketAssignmentSummary = useMemo(() => Object.fromEntries(markets.map(market => [market.id, { clients: clients.filter(client => client.marketId === market.id && client.status === 'ACTIVO').length, promoters: users.filter(current => { if (current.role !== 'PROMOTOR' || current.status !== 'ACTIVO') return false; const assignment = assignments.find(item => assignmentMatchesUser(item, current)); return assignment ? assignment.marketIds.includes(market.id) : current.marketId === market.id; }).length }])), [markets, clients, users, assignments]); const today = new Date().toISOString().slice(0, 10);
   const marketOptions = activeMarkets.map(market => ({ value: market.id, label: `${market.name} · ${market.region || market.department} · ${market.district}` }));
@@ -1014,7 +1043,35 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
   const importInventory = async (file: File) => {
     setSyncing(true);
     try {
-      const records = parseCsvRecords(await file.text()); const imported: { marketId: string; stock: MarketInventory }[] = []; let skipped = 0; const importId = Date.now();
+      const records = parseCsvRecords(await file.text());
+      const movementRecords = records.filter(record => csvField(record, ['tipo', 'tipomovimiento', 'movimiento']));
+      if (movementRecords.length) {
+        let importedCount = 0; let skipped = 0;
+        for (const [index, record] of movementRecords.entries()) {
+          const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'mercado', 'market']), markets);
+          const type = normalizeCsvHeader(csvField(record, ['tipo', 'tipomovimiento', 'movimiento']));
+          const quantity = Number(csvField(record, ['cantidad', 'unidades', 'stock']).replace(',', '.'));
+          if (!marketId || !Number.isInteger(quantity) || quantity <= 0) { skipped += 1; continue; }
+          if (type.includes('degust')) {
+            await adminRequest('/degustaciones', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ degustacion: { id: `DEG-IMPORT-${Date.now()}-${index}`, marketId, kind: 'AJUSTE_DEGUSTACION', degustacionProductId: 'PANETON', degustacionProductLabel: 'Panetón', quantity, actorId: user.id, actorName: user.name, date: new Date().toISOString(), status: 'PENDIENTE' } }) });
+            importedCount += 1;
+            continue;
+          }
+          if (type.includes('canje')) {
+            const rawProduct = csvField(record, ['producto', 'canje', 'tipocanje', 'productoid']);
+            const product = canjeProducts.find(item => normalizeCsvHeader(item.id) === normalizeCsvHeader(rawProduct) || normalizeCsvHeader(item.label) === normalizeCsvHeader(rawProduct));
+            if (!product) { skipped += 1; continue; }
+            await adminRequest('/canjes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canje: { id: `CANJE-IMPORT-${Date.now()}-${index}`, marketId, kind: 'AJUSTE_CANJES', canjeProductId: product.id, canjeProductLabel: product.label, canjeComponents: product.components, quantity, actorId: user.id, actorName: user.name, date: new Date().toISOString(), status: 'PENDIENTE' } }) });
+            importedCount += 1;
+            continue;
+          }
+          skipped += 1;
+        }
+        if (!importedCount) throw new Error('No se encontraron filas válidas. Usa Tipo DEGUSTACION o CANJE y un producto válido.');
+        notify(`${importedCount} abastecimientos masivos importados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
+        return;
+      }
+      const imported: { marketId: string; stock: MarketInventory }[] = []; let skipped = 0; const importId = Date.now();
       records.forEach(record => {
         const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'mercado', 'market']), markets);
         if (!marketId) { skipped += 1; return; }
@@ -1028,10 +1085,14 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
         const current = nextInventory.find(item => item.marketId === marketId) || emptyInventory(marketId); const index = nextInventory.findIndex(item => item.marketId === marketId);
         if (index >= 0) nextInventory[index] = stock; else nextInventory.push(stock);
         const date = stock.updatedAt; const addMovement = (kind: InventoryMovementKind, quantity: number, itemId?: RedemptionItemId) => { if (quantity !== 0) newMovements.unshift({ id: `IMP-${importId}-${rowIndex}-${itemId || kind}`, marketId, kind, itemId, quantity, actorId: user.id, actorName: user.name, date, status: syncStatus() }); };
-        addMovement('AJUSTE_DEGUSTACION', stock.tastingStock - current.tastingStock);
-        redemptionItems.forEach(item => addMovement('AJUSTE_CANJES', stock.redemptionStock[item.id] - current.redemptionStock[item.id], item.id));
+        const hasTastingLedger = movements.some(movement => movement.marketId === marketId && (movement.kind === 'AJUSTE_DEGUSTACION' || movement.kind === 'DEGUSTACION'));
+        addMovement('AJUSTE_DEGUSTACION', stock.tastingStock - (hasTastingLedger ? current.tastingStock : 0));
+        redemptionItems.forEach(item => {
+          const hasItemLedger = movements.some(movement => movement.marketId === marketId && (movement.kind === 'AJUSTE_CANJES' || movement.kind === 'CANJE') && (movement.itemId === item.id || signedMovementComponentQuantity(movement, item.id) !== 0));
+          addMovement('AJUSTE_CANJES', stock.redemptionStock[item.id] - (hasItemLedger ? current.redemptionStock[item.id] : 0), item.id);
+        });
       });
-      setInventory(nextInventory); setMovements(newMovements); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', newMovements); notify(`${imported.length} stocks importados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
+      setInventory(nextInventory); setMovements(newMovements); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', newMovements); await persistImportedSnapshot({ inventory: nextInventory, movements: newMovements }); notify(`${imported.length} stocks de canjes y degustación importados y guardados${skipped ? ` · ${skipped} filas omitidas` : ''}`);
     } catch (error) { notify(`No se pudo importar stock: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
   };
   const downloadUsersExample = () => {
@@ -1046,24 +1107,30 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
   };
   const downloadInventoryExample = () => {
     const market = activeMarkets[0] || markets[0];
-    downloadCsv('ejemplo-canjes-degustacion.csv', ['Mercado', 'Stock degustación', 'Stock Avena', 'Stock Batea', 'Stock Mandil', 'Stock Spaghetti'], [[market?.name || 'MERCADO MODELO', 20, 50, 10, 15, 40]]);
+    downloadCsv('ejemplo-importacion-canjes-degustaciones.csv', ['Mercado', 'Tipo', 'Producto', 'Cantidad'], [
+      [market?.name || 'MERCADO MODELO', 'DEGUSTACION', 'PANETON', 20],
+      [market?.name || 'MERCADO MODELO', 'CANJE', 'CANJE_AVENA_2', 10],
+    ]);
     notify('Ejemplo de canjes y degustación descargado');
   };
    const applyAdminSnapshot = (snapshot: Partial<CloudSnapshot> | undefined) => {
      if (!snapshot) return;
-     if (Array.isArray(snapshot.markets)) setMarkets(snapshot.markets);
+      if (Array.isArray(snapshot.markets)) { setMarkets(snapshot.markets); writeStore('bt-markets', snapshot.markets); }
      if (Array.isArray(snapshot.users)) {
        const localUsers = users;
-       setUsers(snapshot.users.map(cloudUser => {
+        const nextUsers = snapshot.users.map(cloudUser => {
          const localUser = localUsers.find(item => item.id === cloudUser.id || item.dni === cloudUser.dni);
          return { ...cloudUser, password: localUser?.password };
-       }));
+        });
+        setUsers(nextUsers); writeStore('bt-users', nextUsers);
      }
-     if (Array.isArray(snapshot.clients)) setClients(snapshot.clients);
-     if (Array.isArray(snapshot.sales)) setSales(snapshot.sales);
-     if (Array.isArray(snapshot.inventory)) setInventory(normalizeInventory(snapshot.inventory));
-     if (Array.isArray(snapshot.movements)) setMovements(snapshot.movements);
-     if (Array.isArray(snapshot.assignments)) setAssignments(snapshot.assignments);
+      if (Array.isArray(snapshot.clients)) { setClients(snapshot.clients); writeStore('bt-clients', snapshot.clients); }
+      if (Array.isArray(snapshot.sales)) { setSales(snapshot.sales); writeStore('bt-sales', snapshot.sales); }
+      if (Array.isArray(snapshot.attendance)) { setAttendance(snapshot.attendance); writeStore('bt-attendance', snapshot.attendance); }
+      if (Array.isArray(snapshot.inventory)) { const nextInventory = reconcileInventory(snapshot.inventory, Array.isArray(snapshot.movements) ? snapshot.movements : movements); setInventory(nextInventory); writeStore('bt-inventory', nextInventory); }
+      if (Array.isArray(snapshot.movements)) { setMovements(snapshot.movements); writeStore('bt-inventory-movements', snapshot.movements); }
+      if (Array.isArray(snapshot.assignments)) { setAssignments(snapshot.assignments); writeStore('bt-promoter-assignments', snapshot.assignments); }
+      if (Array.isArray(snapshot.closures)) { setClosures(snapshot.closures); writeStore('bt-session-closures', snapshot.closures); }
    };
    const adminRequest = async (path: string, init?: RequestInit) => {
      const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, init);
@@ -1082,7 +1149,7 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
    const saveDegustacion = async (degustacion: InventoryMovement) => { try { await adminRequest('/degustaciones', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ degustacion }) }); notify('Degustación registrada e inventario actualizado'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo crear la degustación', true); } };
    const deleteCanje = async (canje: AdminCanje) => { if (!window.confirm('¿Eliminar definitivamente este canje?')) return; try { await adminRequest(`/canjes/${canje.source}/${encodeURIComponent(canje.canjeId)}`, { method: 'DELETE' }); notify('Canje eliminado'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar el canje', true); } };
    const deleteDegustacion = async (degustacion: AdminDegustacion) => { if (!window.confirm('¿Eliminar definitivamente esta degustación? El stock se revertirá.')) return; try { await adminRequest(`/degustaciones/${degustacion.source}/${encodeURIComponent(degustacion.degustacionId)}`, { method: 'DELETE' }); notify('Degustación eliminada e inventario revertido'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar la degustación', true); } };
-   const cleanupCatalogs = async () => { if (!window.confirm('Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones, cierres y usuarios que no sean ANALISTA. Los precios y el usuario ANALISTA se conservarán. ¿Empezar desde cero?')) return; try { await adminRequest('/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'LIMPIAR_MERCADOS_CLIENTES_CANJES' }) }); localStorage.removeItem(DEFAULT_STOCK_SEED_KEY); notify('Datos operativos y usuarios no ANALISTA eliminados.'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo limpiar la información', true); } };
+     const cleanupCatalogs = async () => { if (!window.confirm('Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones, cierres y usuarios que no sean ANALISTA. Los precios y el usuario ANALISTA se conservarán. ¿Empezar desde cero?')) return; try { await adminRequest('/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'LIMPIAR_MERCADOS_CLIENTES_CANJES' }) }); localStorage.removeItem(DEFAULT_STOCK_SEED_KEY); notify('Marcaciones, inventario y demás datos operativos eliminados.'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo limpiar la información', true); } };
   const filteredClients = clients.filter(client => `${client.name} ${client.code} ${marketMap[client.marketId]?.name || ''}`.toLowerCase().includes(query.toLowerCase()));
    const adminCanjes: AdminCanje[] = [
      ...movements.filter(movement => movement.kind === 'CANJE' || (movement.kind === 'AJUSTE_CANJES' && movement.canjeProductId)).map(movement => ({ ...movement, source: 'movement' as const, canjeId: movement.id })),
@@ -1201,7 +1268,7 @@ export default function App() {
    clearTestDataOnce();
    clearCatalogDataOnce();
    keepAnalystUsersOnce();
-     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => normalizeInventory(readStore<MarketInventory[]>('bt-inventory', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
+     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => readStore('bt-attendance', [])); const [inventory, setInventory] = useState<MarketInventory[]>(() => reconcileInventory(readStore<MarketInventory[]>('bt-inventory', []), readStore<InventoryMovement[]>('bt-inventory-movements', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [sessionClosePrompt, setSessionClosePrompt] = useState(false); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
    const notify = (message: string, error = false) => setToast({ message, error });
      const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
        if (upload.entityType === 'sale') {
@@ -1261,8 +1328,8 @@ export default function App() {
           const nextClients = Array.isArray(snapshot.clients) ? snapshot.clients : [];
           const nextSales = (Array.isArray(snapshot.sales) ? snapshot.sales : []).map(sale => enrichSaleMarketLocation(sale, nextMarkets));
           const nextAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
-           const nextInventory = normalizeInventory(Array.isArray(snapshot.inventory) ? snapshot.inventory : []);
           const nextMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
+           const nextInventory = reconcileInventory(Array.isArray(snapshot.inventory) ? snapshot.inventory : [], nextMovements);
           const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
           const nextClosures = Array.isArray(snapshot.closures) ? snapshot.closures : [];
            const nextProductPrices = Array.isArray(snapshot.productPrices) ? snapshot.productPrices : productPrices;
@@ -1390,12 +1457,12 @@ export default function App() {
      if (!activeUser) return;
      const marketId = promoterSession.marketId || activeUser.marketId || ''; const clientId = promoterSession.clientId || undefined; const stock = inventory.find(item => item.marketId === marketId) || emptyInventory(marketId);
      if (tastingUsed > stock.tastingStock) { notify(`Solo hay ${stock.tastingStock} panetones de degustación disponibles`, true); return; }
-     const now = new Date().toISOString(); const updatedInventory = marketId ? (inventory.some(item => item.marketId === marketId) ? inventory.map(item => item.marketId === marketId ? { ...item, tastingStock: item.tastingStock - tastingUsed, updatedAt: now } : item) : [...inventory, { ...stock, tastingStock: stock.tastingStock - tastingUsed, updatedAt: now }]) : inventory;
+      const now = new Date().toISOString(); const updatedInventory = tastingUsed > 0 && marketId ? inventory.map(item => item.marketId === marketId ? { ...item, tastingStock: item.tastingStock - tastingUsed, updatedAt: now } : item) : inventory;
      const nextMovements = tastingUsed > 0 && marketId ? [{ id: `DEG-CIERRE-${activeUser.id}-${Date.now()}`, marketId, kind: 'DEGUSTACION' as const, quantity: tastingUsed, actorId: activeUser.id, actorName: activeUser.name, date: now, status: syncStatus() }, ...movements] : movements;
       const closure: SessionClosure = { id: `CIERRE-${new Date().getFullYear()}-${String(closures.length + 1).padStart(6, '0')}`, promoterId: activeUser.id, promoterRole: activeUser.role, promoterRoleLabel: activeUser.roleLabel || activeUser.role, marketId, clientId, tastingUsed, leads, date: now, status: syncStatus() };
       const nextClosures = [closure, ...closures]; setClosures(nextClosures); writeStore('bt-session-closures', nextClosures);
      setInventory(updatedInventory); setMovements(nextMovements); writeStore('bt-inventory', updatedInventory); writeStore('bt-inventory-movements', nextMovements); logoutImmediately();
    };
    const logoutMarketId = promoterSession.marketId || activeUser?.marketId || ''; const logoutStock = inventory.find(item => item.marketId === logoutMarketId)?.tastingStock ?? 0;
-      return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} setSales={setSales} attendance={attendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : referencesReady || users.length ? <Login users={users} onLogin={completeLogin} notify={notify} /> : <main className="login-shell"><section className="login-panel"><div className="login-card"><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><RefreshCw /></span><div><h2>Cargando acceso</h2><p>Estamos conectando con el servidor.</p></div></div></div></section></main>}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+       return <>{activeUser ? <><Shell user={activeUser} logout={requestLogout}>{activeUser.role === 'PROMOTOR' ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} closures={closures} setClosures={setClosures} notify={notify} />}</Shell>{sessionClosePrompt && activeUser.role === 'PROMOTOR' && <SessionCloseModal available={logoutStock} onConfirm={completePromoterLogout} close={() => setSessionClosePrompt(false)} />}</> : referencesReady || users.length ? <Login users={users} onLogin={completeLogin} notify={notify} /> : <main className="login-shell"><section className="login-panel"><div className="login-card"><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><RefreshCw /></span><div><h2>Cargando acceso</h2><p>Estamos conectando con el servidor.</p></div></div></div></section></main>}<ToastView toast={toast} clear={() => setToast(null)} /></>;
 }

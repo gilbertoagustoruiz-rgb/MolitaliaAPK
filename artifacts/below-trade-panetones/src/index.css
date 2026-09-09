@@ -175,6 +175,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .stock-reconciliation-row > b { color:hsl(153 43% 26%); font:700 12px var(--font-mono); }
 .stock-reconciliation-row small { margin-top:4px; color:hsl(var(--muted)); font-size:10px; line-height:1.35; }
 .stock-reconciliation-row > b small { color:hsl(var(--muted)); font:400 10px var(--font-sans); }
+.inventory-stock-table .stock-reconciliation-row { grid-template-columns:minmax(170px,1.35fr) repeat(5,minmax(112px,1fr)); }
+.inventory-stock-table .stock-level { justify-self:start; }
+.inventory-stock-table .stock-level small { display:inline; margin:0 0 0 5px; }
 .promoter-ranking { display:flex; flex-direction:column; }
 .promoter-ranking-row { display:grid; grid-template-columns:32px minmax(0,1fr) auto; align-items:center; gap:12px; min-height:62px; border-bottom:1px solid hsl(var(--line)); }
 .promoter-ranking-row:last-child { border-bottom:0; }
