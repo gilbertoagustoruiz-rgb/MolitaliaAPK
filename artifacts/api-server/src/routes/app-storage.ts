@@ -163,14 +163,23 @@ async function upsertRecord(
   } else if (name === "users") {
     const password = value(source, "password");
     const passwordHash = password ? await hashPassword(password) : null;
+    const existingByDni = await client.query("SELECT id FROM users WHERE dni=$1 LIMIT 1", [key]);
+    let userId = value(source, "id") || key;
+    if (existingByDni.rows[0]?.id) {
+      userId = String(existingByDni.rows[0].id);
+    } else {
+      const existingById = await client.query("SELECT id FROM users WHERE id=$1 LIMIT 1", [userId]);
+      if (existingById.rows[0]?.id) userId = `USR-${key}`;
+    }
+    const userData = { ...normalized, id: userId };
     await client.query(
       `INSERT INTO users (id,dni,name,role,status,password_hash,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (dni) DO UPDATE SET id=EXCLUDED.id,name=EXCLUDED.name,role=EXCLUDED.role,status=EXCLUDED.status,
+       ON CONFLICT (dni) DO UPDATE SET name=EXCLUDED.name,role=EXCLUDED.role,status=EXCLUDED.status,
        password_hash=COALESCE(EXCLUDED.password_hash,users.password_hash),data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
-      [value(source, "id") || key, key, value(source, "name"), value(source, "role"),
-        value(source, "status") || "ACTIVO", passwordHash, normalized, updated],
+      [userId, key, value(source, "name"), value(source, "role"),
+        value(source, "status") || "ACTIVO", passwordHash, userData, updated],
     );
   } else if (name === "clients") {
     await client.query(

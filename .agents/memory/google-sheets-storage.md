@@ -26,3 +26,9 @@ Las credenciales de campaña deben deduplicarse por DNI y validarse en el servid
 **Why:** El acceso entre dispositivos no puede depender de una clave guardada solamente en un navegador, y guardar contraseñas en texto dentro de SQL sería inseguro.
 
 **How to apply:** Aceptar la clave solo en el endpoint de login o al sembrar usuarios, convertirla a hash con sal y devolver únicamente el perfil público.
+
+La sincronización de usuarios debe resolver primero por DNI y tratar el ID de la hoja como una referencia externa; si ese ID ya pertenece a otro usuario, debe generarse un ID interno seguro sin cambiar el ID del usuario existente.
+
+**Why:** Google Sheets puede reutilizar IDs pequeños como `1`, `2` o `3`, mientras PostgreSQL conserva esos IDs para usuarios históricos distintos. Insertar directamente el ID de la hoja provoca un conflicto de clave primaria antes de que opere el `ON CONFLICT` por DNI.
+
+**How to apply:** En el `upsert` de usuarios, conservar el ID encontrado por DNI, detectar colisiones del ID externo y generar una alternativa prefijada solo para el nuevo registro.
