@@ -1,10 +1,11 @@
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
 import { Router, type IRouter } from "express";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
+let catalogRevision: string | null = null;
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -94,6 +95,21 @@ async function verifyPassword(password: string, stored: string) {
 function publicUser(record: StoredRecord) {
   const { password: _password, ...safe } = record;
   return safe;
+}
+
+function isRecord(value: unknown): value is StoredRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function canjeSnapshot(snapshot: StorageSnapshot) {
+  return [
+    ...snapshot.movements
+      .filter((movement) => value(movement, "kind") === "CANJE")
+      .map((movement) => ({ ...movement, source: "movement", canjeId: value(movement, "id") })),
+    ...snapshot.sales
+      .filter((sale) => value(sale, "mode") === "CANJE")
+      .map((sale) => ({ ...sale, source: "sale", canjeId: value(sale, "id") })),
+  ].sort((first, second) => recordDate(second)?.localeCompare(recordDate(first) || "") || 0);
 }
 
 async function readSnapshot(client: QueryClient = pool as unknown as QueryClient) {
@@ -221,12 +237,24 @@ async function upsertRecord(
   }
 }
 
-async function syncSnapshot(incoming: Partial<StorageSnapshot>) {
+async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision?: string | null) {
+  const catalogIsAuthorized = !catalogRevision || incomingRevision === catalogRevision;
+  const guardedIncoming: Partial<StorageSnapshot> = catalogRevision && !catalogIsAuthorized
+    ? {
+      ...incoming,
+      markets: [],
+      clients: [],
+      inventory: [],
+      assignments: [],
+      movements: Array.isArray(incoming.movements) ? incoming.movements.filter((movement) => value(movement, "kind") !== "CANJE") : incoming.movements,
+      sales: Array.isArray(incoming.sales) ? incoming.sales.filter((sale) => value(sale, "mode") !== "CANJE") : incoming.sales,
+    }
+    : incoming;
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
-      const records = Array.isArray(incoming[name]) ? incoming[name] : [];
+      const records = Array.isArray(guardedIncoming[name]) ? guardedIncoming[name] : [];
       for (const record of records) {
         if (record && typeof record === "object") await upsertRecord(client as unknown as QueryClient, name, record);
       }
@@ -257,8 +285,9 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       res.status(400).json({ message: "El snapshot es obligatorio." });
       return;
     }
-    const snapshot = await syncSnapshot(incoming as Partial<StorageSnapshot>);
-    res.json({ storage: "replit-postgresql", syncedAt: new Date().toISOString(), snapshot });
+    const incomingRevision = typeof req.body?.catalogRevision === "string" ? req.body.catalogRevision : null;
+    const snapshot = await syncSnapshot(incoming as Partial<StorageSnapshot>, incomingRevision);
+    res.json({ storage: "replit-postgresql", syncedAt: new Date().toISOString(), catalogRevision, snapshot });
   } catch (error) {
     req.log.error({ err: error }, "Unable to sync app storage");
     res.status(500).json({ message: "No se pudo sincronizar PostgreSQL." });
@@ -282,12 +311,179 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
       res.status(400).json({ message: "La asignación requiere promoterId." });
       return;
     }
-    await syncSnapshot({ assignments: [assignment] });
+    await syncSnapshot({ assignments: [assignment] }, catalogRevision);
     const { assignments } = await readSnapshot();
     res.json({ storage: "replit-postgresql", assignment, assignments });
   } catch (error) {
     req.log.error({ err: error }, "Unable to save assignment");
     res.status(500).json({ message: "No se pudo guardar la asignación." });
+  }
+});
+
+router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
+  const input = req.body?.market;
+  if (!isRecord(input) || !value(input, "name") || !value(input, "department") || !value(input, "province") || !value(input, "district")) {
+    res.status(400).json({ message: "El mercado requiere nombre, departamento, provincia y distrito." });
+    return;
+  }
+  const market: StoredRecord = {
+    id: value(input, "id") || `MKT-${randomUUID()}`,
+    name: value(input, "name").toUpperCase(),
+    region: value(input, "region").toUpperCase() || value(input, "department").toUpperCase(),
+    department: value(input, "department").toUpperCase(),
+    province: value(input, "province").toUpperCase(),
+    district: value(input, "district").toUpperCase(),
+    status: "ACTIVO",
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    await upsertRecord(pool as unknown as QueryClient, "markets", market);
+    res.status(201).json({ market, snapshot: await readSnapshot() });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to create market");
+    res.status(500).json({ message: "No se pudo crear el mercado." });
+  }
+});
+
+router.delete("/app-storage/admin/markets/:id", async (req, res): Promise<void> => {
+  const id = String(req.params.id || "").trim();
+  if (!id) {
+    res.status(400).json({ message: "El mercado es obligatorio." });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM clients WHERE market_id=$1", [id]);
+    await client.query("DELETE FROM inventory WHERE market_id=$1", [id]);
+    await client.query("DELETE FROM inventory_movements WHERE market_id=$1", [id]);
+    await client.query("DELETE FROM markets WHERE id=$1", [id]);
+    await client.query("COMMIT");
+    res.json({ deleted: id, snapshot: await readSnapshot() });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    req.log.error({ err: error }, "Unable to delete market");
+    res.status(500).json({ message: "No se pudo eliminar el mercado." });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
+  const input = req.body?.client;
+  if (!isRecord(input) || !value(input, "name") || !value(input, "marketId")) {
+    res.status(400).json({ message: "El cliente requiere nombre y mercado." });
+    return;
+  }
+  const id = value(input, "id") || randomUUID();
+  const clientRecord: StoredRecord = {
+    id,
+    code: value(input, "code") || `CLI-${id.slice(0, 8).toUpperCase()}`,
+    name: value(input, "name"),
+    phone: value(input, "phone") || undefined,
+    marketId: value(input, "marketId"),
+    status: "ACTIVO",
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    await upsertRecord(pool as unknown as QueryClient, "clients", clientRecord);
+    res.status(201).json({ client: clientRecord, snapshot: await readSnapshot() });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to create client");
+    res.status(500).json({ message: "No se pudo crear el cliente." });
+  }
+});
+
+router.delete("/app-storage/admin/clients/:id", async (req, res): Promise<void> => {
+  const id = String(req.params.id || "").trim();
+  if (!id) {
+    res.status(400).json({ message: "El cliente es obligatorio." });
+    return;
+  }
+  try {
+    await pool.query("DELETE FROM clients WHERE id=$1", [id]);
+    res.json({ deleted: id, snapshot: await readSnapshot() });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to delete client");
+    res.status(500).json({ message: "No se pudo eliminar el cliente." });
+  }
+});
+
+router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
+  try {
+    const snapshot = await readSnapshot();
+    res.json({ canjes: canjeSnapshot(snapshot) });
+  } catch {
+    res.status(500).json({ message: "No se pudieron leer los canjes." });
+  }
+});
+
+router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
+  const input = req.body?.canje;
+  if (!isRecord(input) || !value(input, "marketId") || !value(input, "itemId") || numeric(input, "quantity") <= 0) {
+    res.status(400).json({ message: "El canje requiere mercado, producto y cantidad mayor a cero." });
+    return;
+  }
+  const canje: StoredRecord = {
+    id: value(input, "id") || `CANJE-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    marketId: value(input, "marketId"),
+    kind: "CANJE",
+    itemId: value(input, "itemId"),
+    quantity: Math.floor(numeric(input, "quantity")),
+    actorId: value(input, "actorId") || "ADMIN",
+    actorName: value(input, "actorName") || "Analista",
+    date: value(input, "date") || new Date().toISOString(),
+    status: "PENDIENTE",
+  };
+  try {
+    await upsertRecord(pool as unknown as QueryClient, "movements", canje);
+    res.status(201).json({ canje, snapshot: await readSnapshot() });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to create canje");
+    res.status(500).json({ message: "No se pudo crear el canje." });
+  }
+});
+
+router.delete("/app-storage/admin/canjes/:source/:id", async (req, res): Promise<void> => {
+  const source = String(req.params.source || "");
+  const id = String(req.params.id || "").trim();
+  const table = source === "movement" ? "inventory_movements" : source === "sale" ? "sales" : null;
+  if (!table || !id) {
+    res.status(400).json({ message: "El origen del canje no es válido." });
+    return;
+  }
+  try {
+    await pool.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
+    res.json({ deleted: id, source, snapshot: await readSnapshot() });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to delete canje");
+    res.status(500).json({ message: "No se pudo eliminar el canje." });
+  }
+});
+
+router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
+  if (req.body?.confirmation !== "LIMPIAR_MERCADOS_CLIENTES_CANJES") {
+    res.status(400).json({ message: "Confirmación inválida." });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM sales WHERE mode='CANJE'");
+    await client.query("DELETE FROM inventory_movements WHERE kind='CANJE'");
+    await client.query("DELETE FROM clients");
+    await client.query("DELETE FROM inventory");
+    await client.query("DELETE FROM markets");
+    await client.query("DELETE FROM assignments");
+    await client.query("COMMIT");
+    catalogRevision = randomUUID();
+    res.json({ deleted: ["markets", "clients", "inventory", "assignments", "canje_movements", "canje_sales"], catalogRevision, snapshot: await readSnapshot() });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    req.log.error({ err: error }, "Unable to clean catalogs");
+    res.status(500).json({ message: "No se pudo limpiar la información." });
+  } finally {
+    client.release();
   }
 });
 

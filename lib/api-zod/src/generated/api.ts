@@ -97,3 +97,178 @@ export const AppLoginBody = zod.object({
 export const AppLoginResponse = zod.record(zod.string(), zod.unknown())
 
 
+/**
+ * @summary Create a market manually
+ */
+export const CreateAdminMarketBody = zod.object({
+  "market": zod.record(zod.string(), zod.unknown())
+})
+
+export const CreateAdminMarketResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
+ * @summary Permanently delete a market and its clients
+ */
+export const DeleteAdminMarketParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteAdminMarketResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
+ * @summary Create a client manually
+ */
+export const CreateAdminClientBody = zod.object({
+  "client": zod.record(zod.string(), zod.unknown())
+})
+
+export const CreateAdminClientResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
+ * @summary Permanently delete a client
+ */
+export const DeleteAdminClientParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteAdminClientResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
+ * @summary List inventory and sale canjes
+ */
+export const ListAdminCanjesResponse = zod.record(zod.string(), zod.unknown())
+
+
+/**
+ * @summary Create an inventory canje manually
+ */
+export const CreateAdminCanjeBody = zod.object({
+  "canje": zod.record(zod.string(), zod.unknown())
+})
+
+export const CreateAdminCanjeResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
+ * @summary Permanently delete a movement or sale canje
+ */
+export const DeleteAdminCanjeParams = zod.object({
+  "source": zod.enum(['movement', 'sale']),
+  "id": zod.coerce.string()
+})
+
+export const DeleteAdminCanjeResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+
+/**
+ * @summary Permanently clear markets, clients, inventory, assignments and canjes
+ */
+export const CleanupAdminCatalogsBody = zod.object({
+  "confirmation": zod.string()
+})
+
+export const CleanupAdminCatalogsResponse = zod.object({
+  "storage": zod.string(),
+  "snapshot": zod.object({
+  "markets": zod.array(zod.record(zod.string(), zod.unknown())),
+  "users": zod.array(zod.record(zod.string(), zod.unknown())),
+  "clients": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sales": zod.array(zod.record(zod.string(), zod.unknown())),
+  "attendance": zod.array(zod.record(zod.string(), zod.unknown())),
+  "inventory": zod.array(zod.record(zod.string(), zod.unknown())),
+  "movements": zod.array(zod.record(zod.string(), zod.unknown())),
+  "assignments": zod.array(zod.record(zod.string(), zod.unknown())),
+  "closures": zod.array(zod.record(zod.string(), zod.unknown())),
+  "productPrices": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+})
+
+

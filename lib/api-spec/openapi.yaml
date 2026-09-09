@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: storage
+    description: Operational PostgreSQL storage
 paths:
   /healthz:
     get:
@@ -115,6 +117,150 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /app-storage/admin/markets:
+    post:
+      operationId: createAdminMarket
+      tags: [storage]
+      summary: Create a market manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                market: { $ref: "#/components/schemas/AppRecord" }
+              required: [market]
+      responses:
+        "201":
+          description: Market created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/markets/{id}:
+    delete:
+      operationId: deleteAdminMarket
+      tags: [storage]
+      summary: Permanently delete a market and its clients
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Market deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/clients:
+    post:
+      operationId: createAdminClient
+      tags: [storage]
+      summary: Create a client manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                client: { $ref: "#/components/schemas/AppRecord" }
+              required: [client]
+      responses:
+        "201":
+          description: Client created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/clients/{id}:
+    delete:
+      operationId: deleteAdminClient
+      tags: [storage]
+      summary: Permanently delete a client
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Client deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/canjes:
+    get:
+      operationId: listAdminCanjes
+      tags: [storage]
+      summary: List inventory and sale canjes
+      responses:
+        "200":
+          description: Canjes
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    post:
+      operationId: createAdminCanje
+      tags: [storage]
+      summary: Create an inventory canje manually
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                canje: { $ref: "#/components/schemas/AppRecord" }
+              required: [canje]
+      responses:
+        "201":
+          description: Canje created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/canjes/{source}/{id}:
+    delete:
+      operationId: deleteAdminCanje
+      tags: [storage]
+      summary: Permanently delete a movement or sale canje
+      parameters:
+        - name: source
+          in: path
+          required: true
+          schema: { type: string, enum: [movement, sale] }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Canje deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
+  /app-storage/admin/cleanup:
+    post:
+      operationId: cleanupAdminCatalogs
+      tags: [storage]
+      summary: Permanently clear markets, clients, inventory, assignments and canjes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirmation: { type: string }
+              required: [confirmation]
+      responses:
+        "200":
+          description: Selected operational data deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppStorageResponse" }
 components:
   schemas:
     AppRecord:

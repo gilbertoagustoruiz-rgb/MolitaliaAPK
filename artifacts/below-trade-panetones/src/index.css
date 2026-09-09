@@ -308,6 +308,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .assignment-table-row strong, .assignment-table-row small { display:block; }
 .assignment-table-row small { margin-top:3px; color:hsl(var(--muted)); font-size:10px; }
 .assignment-unassigned { color:hsl(var(--orange-deep)); }
+.admin-module { display:flex; flex-direction:column; gap:18px; }
+.admin-intro { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; }
+.admin-intro h2 { margin:7px 0 5px; font-size:clamp(26px, 3vw, 39px); letter-spacing:-.06em; }
+.admin-intro p { margin:0; color:hsl(var(--muted)); }
+.admin-warning { display:flex; align-items:center; gap:12px; padding:13px 15px; border:1px solid hsl(2 68% 82%); border-radius:12px; background:hsl(2 80% 97%); color:hsl(var(--red)); }
+.admin-warning > svg { flex:none; width:20px; }
+.admin-warning > span { min-width:0; flex:1; }
+.admin-warning strong, .admin-warning small { display:block; }
+.admin-warning small { margin-top:3px; color:hsl(var(--muted)); font-size:11px; }
+.admin-module .record { gap:12px; }
+.admin-module .record .btn, .record .btn { flex:none; }
 .modal-backdrop { position:fixed; inset:0; z-index:40; display:grid; place-items:center; padding:20px; background:hsla(218 41% 12% / .56); }
 .modal { width:min(540px,100%); max-height:calc(100dvh - 40px); overflow:auto; padding:26px; border-radius:18px; background:hsl(var(--surface)); box-shadow:0 25px 80px hsla(218 41% 12% / .32); }
 .modal-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:22px; }

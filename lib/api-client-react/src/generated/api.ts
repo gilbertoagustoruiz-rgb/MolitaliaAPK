@@ -23,7 +23,12 @@ import type {
   AppLogin200,
   AppLoginBody,
   AppStorageResponse,
+  CleanupAdminCatalogsBody,
+  CreateAdminCanjeBody,
+  CreateAdminClientBody,
+  CreateAdminMarketBody,
   HealthStatus,
+  ListAdminCanjes200,
   ListAssignments200,
   SaveAssignment200,
   SaveAssignmentBody,
@@ -500,5 +505,581 @@ export const useAppLogin = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getAppLoginMutationOptions(options));
+    }
+
+export const getCreateAdminMarketUrl = () => {
+
+
+
+
+  return `/api/app-storage/admin/markets`
+}
+
+/**
+ * @summary Create a market manually
+ */
+export const createAdminMarket = async (createAdminMarketBody: CreateAdminMarketBody, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getCreateAdminMarketUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createAdminMarketBody)
+  }
+);}
+
+
+
+
+
+export const getCreateAdminMarketMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminMarket>>, TError,{data: BodyType<CreateAdminMarketBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAdminMarket>>, TError,{data: BodyType<CreateAdminMarketBody>}, TContext> => {
+
+const mutationKey = ['createAdminMarket'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAdminMarket>>, {data: BodyType<CreateAdminMarketBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAdminMarket(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAdminMarketMutationResult = NonNullable<Awaited<ReturnType<typeof createAdminMarket>>>
+    export type CreateAdminMarketMutationBody = BodyType<CreateAdminMarketBody>
+    export type CreateAdminMarketMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a market manually
+ */
+export const useCreateAdminMarket = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminMarket>>, TError,{data: BodyType<CreateAdminMarketBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAdminMarket>>,
+        TError,
+        {data: BodyType<CreateAdminMarketBody>},
+        TContext
+      > => {
+      return useMutation(getCreateAdminMarketMutationOptions(options));
+    }
+
+export const getDeleteAdminMarketUrl = (id: string,) => {
+
+
+
+
+  return `/api/app-storage/admin/markets/${id}`
+}
+
+/**
+ * @summary Permanently delete a market and its clients
+ */
+export const deleteAdminMarket = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getDeleteAdminMarketUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAdminMarketMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminMarket>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAdminMarket>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['deleteAdminMarket'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAdminMarket>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteAdminMarket(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAdminMarketMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAdminMarket>>>
+
+    export type DeleteAdminMarketMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Permanently delete a market and its clients
+ */
+export const useDeleteAdminMarket = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminMarket>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAdminMarket>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteAdminMarketMutationOptions(options));
+    }
+
+export const getCreateAdminClientUrl = () => {
+
+
+
+
+  return `/api/app-storage/admin/clients`
+}
+
+/**
+ * @summary Create a client manually
+ */
+export const createAdminClient = async (createAdminClientBody: CreateAdminClientBody, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getCreateAdminClientUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createAdminClientBody)
+  }
+);}
+
+
+
+
+
+export const getCreateAdminClientMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminClient>>, TError,{data: BodyType<CreateAdminClientBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAdminClient>>, TError,{data: BodyType<CreateAdminClientBody>}, TContext> => {
+
+const mutationKey = ['createAdminClient'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAdminClient>>, {data: BodyType<CreateAdminClientBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAdminClient(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAdminClientMutationResult = NonNullable<Awaited<ReturnType<typeof createAdminClient>>>
+    export type CreateAdminClientMutationBody = BodyType<CreateAdminClientBody>
+    export type CreateAdminClientMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a client manually
+ */
+export const useCreateAdminClient = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminClient>>, TError,{data: BodyType<CreateAdminClientBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAdminClient>>,
+        TError,
+        {data: BodyType<CreateAdminClientBody>},
+        TContext
+      > => {
+      return useMutation(getCreateAdminClientMutationOptions(options));
+    }
+
+export const getDeleteAdminClientUrl = (id: string,) => {
+
+
+
+
+  return `/api/app-storage/admin/clients/${id}`
+}
+
+/**
+ * @summary Permanently delete a client
+ */
+export const deleteAdminClient = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getDeleteAdminClientUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAdminClientMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminClient>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAdminClient>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['deleteAdminClient'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAdminClient>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteAdminClient(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAdminClientMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAdminClient>>>
+
+    export type DeleteAdminClientMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Permanently delete a client
+ */
+export const useDeleteAdminClient = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminClient>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAdminClient>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteAdminClientMutationOptions(options));
+    }
+
+export const getListAdminCanjesUrl = () => {
+
+
+
+
+  return `/api/app-storage/admin/canjes`
+}
+
+/**
+ * @summary List inventory and sale canjes
+ */
+export const listAdminCanjes = async ( options?: Parameters<typeof customFetch>[1]): Promise<ListAdminCanjes200> => {
+
+  return customFetch<ListAdminCanjes200>(getListAdminCanjesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAdminCanjesQueryKey = () => {
+    return [
+    `/api/app-storage/admin/canjes`
+    ] as const;
+    }
+
+
+export const getListAdminCanjesQueryOptions = <TData = Awaited<ReturnType<typeof listAdminCanjes>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminCanjes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAdminCanjesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminCanjes>>> = ({ signal }) => listAdminCanjes({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAdminCanjes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAdminCanjesQueryResult = NonNullable<Awaited<ReturnType<typeof listAdminCanjes>>>
+export type ListAdminCanjesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List inventory and sale canjes
+ */
+
+export function useListAdminCanjes<TData = Awaited<ReturnType<typeof listAdminCanjes>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminCanjes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAdminCanjesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAdminCanjeUrl = () => {
+
+
+
+
+  return `/api/app-storage/admin/canjes`
+}
+
+/**
+ * @summary Create an inventory canje manually
+ */
+export const createAdminCanje = async (createAdminCanjeBody: CreateAdminCanjeBody, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getCreateAdminCanjeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createAdminCanjeBody)
+  }
+);}
+
+
+
+
+
+export const getCreateAdminCanjeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminCanje>>, TError,{data: BodyType<CreateAdminCanjeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAdminCanje>>, TError,{data: BodyType<CreateAdminCanjeBody>}, TContext> => {
+
+const mutationKey = ['createAdminCanje'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAdminCanje>>, {data: BodyType<CreateAdminCanjeBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAdminCanje(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAdminCanjeMutationResult = NonNullable<Awaited<ReturnType<typeof createAdminCanje>>>
+    export type CreateAdminCanjeMutationBody = BodyType<CreateAdminCanjeBody>
+    export type CreateAdminCanjeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create an inventory canje manually
+ */
+export const useCreateAdminCanje = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAdminCanje>>, TError,{data: BodyType<CreateAdminCanjeBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAdminCanje>>,
+        TError,
+        {data: BodyType<CreateAdminCanjeBody>},
+        TContext
+      > => {
+      return useMutation(getCreateAdminCanjeMutationOptions(options));
+    }
+
+export const getDeleteAdminCanjeUrl = (source: 'movement' | 'sale',
+    id: string,) => {
+
+
+
+
+  return `/api/app-storage/admin/canjes/${source}/${id}`
+}
+
+/**
+ * @summary Permanently delete a movement or sale canje
+ */
+export const deleteAdminCanje = async (source: 'movement' | 'sale',
+    id: string, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getDeleteAdminCanjeUrl(source,id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAdminCanjeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminCanje>>, TError,{source: 'movement' | 'sale';id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAdminCanje>>, TError,{source: 'movement' | 'sale';id: string}, TContext> => {
+
+const mutationKey = ['deleteAdminCanje'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAdminCanje>>, {source: 'movement' | 'sale';id: string}> = (props) => {
+          const {source,id} = props ?? {};
+
+          return  deleteAdminCanje(source,id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAdminCanjeMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAdminCanje>>>
+
+    export type DeleteAdminCanjeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Permanently delete a movement or sale canje
+ */
+export const useDeleteAdminCanje = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAdminCanje>>, TError,{source: 'movement' | 'sale';id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAdminCanje>>,
+        TError,
+        {source: 'movement' | 'sale';id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteAdminCanjeMutationOptions(options));
+    }
+
+export const getCleanupAdminCatalogsUrl = () => {
+
+
+
+
+  return `/api/app-storage/admin/cleanup`
+}
+
+/**
+ * @summary Permanently clear markets, clients, inventory, assignments and canjes
+ */
+export const cleanupAdminCatalogs = async (cleanupAdminCatalogsBody: CleanupAdminCatalogsBody, options?: Parameters<typeof customFetch>[1]): Promise<AppStorageResponse> => {
+
+  return customFetch<AppStorageResponse>(getCleanupAdminCatalogsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(cleanupAdminCatalogsBody)
+  }
+);}
+
+
+
+
+
+export const getCleanupAdminCatalogsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cleanupAdminCatalogs>>, TError,{data: BodyType<CleanupAdminCatalogsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cleanupAdminCatalogs>>, TError,{data: BodyType<CleanupAdminCatalogsBody>}, TContext> => {
+
+const mutationKey = ['cleanupAdminCatalogs'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cleanupAdminCatalogs>>, {data: BodyType<CleanupAdminCatalogsBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  cleanupAdminCatalogs(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CleanupAdminCatalogsMutationResult = NonNullable<Awaited<ReturnType<typeof cleanupAdminCatalogs>>>
+    export type CleanupAdminCatalogsMutationBody = BodyType<CleanupAdminCatalogsBody>
+    export type CleanupAdminCatalogsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Permanently clear markets, clients, inventory, assignments and canjes
+ */
+export const useCleanupAdminCatalogs = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cleanupAdminCatalogs>>, TError,{data: BodyType<CleanupAdminCatalogsBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cleanupAdminCatalogs>>,
+        TError,
+        {data: BodyType<CleanupAdminCatalogsBody>},
+        TContext
+      > => {
+      return useMutation(getCleanupAdminCatalogsMutationOptions(options));
     }
 

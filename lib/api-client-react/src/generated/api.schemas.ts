@@ -46,3 +46,21 @@ export type AppLoginBody = {
 
 export type AppLogin200 = { [key: string]: unknown };
 
+export type CreateAdminMarketBody = {
+  market: AppRecord;
+};
+
+export type CreateAdminClientBody = {
+  client: AppRecord;
+};
+
+export type ListAdminCanjes200 = { [key: string]: unknown };
+
+export type CreateAdminCanjeBody = {
+  canje: AppRecord;
+};
+
+export type CleanupAdminCatalogsBody = {
+  confirmation: string;
+};
+
