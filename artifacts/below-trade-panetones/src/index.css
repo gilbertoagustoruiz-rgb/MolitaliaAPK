@@ -216,6 +216,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .record-main small { margin-top:3px; color:hsl(var(--muted)); font-size:12px; }
 .record-main em { margin-top:4px; color:hsl(var(--blue)); font-size:11px; font-style:normal; }
 .record-main em svg { width:12px; height:12px; vertical-align:-2px; margin-right:4px; }
+.record-photos { display:flex; flex-wrap:wrap; gap:8px; margin-top:9px; }
+.photo-thumbnail { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:64px; min-height:64px; overflow:hidden; border:1px solid hsl(var(--line)); border-radius:9px; background:hsl(42 32% 96%); color:hsl(var(--muted)); text-decoration:none; }
+.photo-thumbnail img { display:block; width:64px; height:64px; object-fit:cover; }
+.photo-thumbnail small { width:100%; padding:3px 4px; background:hsla(0 0% 100% / .9); color:hsl(var(--ink)); font-size:9px; line-height:1.1; text-align:center; }
+.photo-thumbnail.pending { justify-content:center; gap:3px; padding:6px; border-style:dashed; }
+.photo-thumbnail.pending svg { width:19px; height:19px; color:hsl(var(--orange-deep)); }
+.photo-thumbnail.pending small { padding:0; background:transparent; color:hsl(var(--muted)); }
+.photo-thumbnail:hover { border-color:hsl(var(--orange)); box-shadow:0 3px 10px hsla(20 40% 20% / .12); }
 .status { display:inline-flex; align-items:center; gap:5px; border:1px solid transparent; border-radius:30px; padding:6px 9px; font:700 10px var(--font-mono); white-space:nowrap; letter-spacing:.01em; }
 .status.active, .status.synced { color:hsl(153 43% 26%); background:hsl(153 43% 89%); border-color:hsl(153 43% 75%); }
 .status.pending { color:hsl(24 76% 31%); background:hsl(39 88% 86%); border-color:hsl(39 70% 69%); }
