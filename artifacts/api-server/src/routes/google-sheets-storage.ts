@@ -133,6 +133,27 @@ async function readSnapshot(connectors: ReplitConnectors) {
   return snapshot;
 }
 
+async function readAssignments(connectors: ReplitConnectors) {
+  await ensureSheets(connectors);
+  const sheet = collections.assignments.sheet;
+  const response = await proxyJson<{
+    values?: unknown[][];
+  }>(
+    connectors,
+    `/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(`${quoteSheet(sheet)}!A2:B`)}`,
+  );
+  return (response.values ?? []).flatMap((row) => {
+    const raw = typeof row[1] === "string" ? row[1] : "";
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? [parsed as StoredRecord] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 function mergeCollection(
   current: StoredRecord[],
   incoming: StoredRecord[],
@@ -247,6 +268,44 @@ async function writeSnapshot(
   );
 }
 
+async function writeAssignments(
+  connectors: ReplitConnectors,
+  assignments: StoredRecord[],
+) {
+  const sheet = collections.assignments.sheet;
+  await proxyJson(
+    connectors,
+    `/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ranges: [`${quoteSheet(sheet)}!A:B`] }),
+    },
+  );
+  await proxyJson(
+    connectors,
+    `/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        valueInputOption: "RAW",
+        data: [{
+          range: `${quoteSheet(sheet)}!A1`,
+          majorDimension: "ROWS",
+          values: [
+            ["ID", "JSON"],
+            ...assignments.map((record) => [
+              String(record.promoterId ?? ""),
+              JSON.stringify(record),
+            ]),
+          ],
+        }],
+      }),
+    },
+  );
+}
+
 let syncQueue: Promise<unknown> = Promise.resolve();
 function serialized<T>(operation: () => Promise<T>) {
   const result = syncQueue.then(operation, operation);
@@ -256,6 +315,58 @@ function serialized<T>(operation: () => Promise<T>) {
   );
   return result;
 }
+
+router.get("/google-sheets-storage/assignments", async (_req, res) => {
+  try {
+    const assignments = await serialized(() =>
+      readAssignments(new ReplitConnectors()),
+    );
+    res.json({ spreadsheetId, assignments });
+  } catch (error) {
+    res.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "No se pudieron leer las asignaciones.",
+    });
+  }
+});
+
+router.post("/google-sheets-storage/assignments", async (req, res) => {
+  try {
+    const assignment =
+      req.body?.assignment && typeof req.body.assignment === "object"
+        ? (req.body.assignment as StoredRecord)
+        : null;
+    const promoterId = String(assignment?.promoterId ?? "").trim();
+    if (!assignment || !promoterId) {
+      res.status(400).json({ message: "La asignación requiere promoterId." });
+      return;
+    }
+    const normalized: StoredRecord = {
+      ...assignment,
+      promoterId,
+      marketIds: Array.isArray(assignment.marketIds) ? assignment.marketIds : [],
+      clientIds: Array.isArray(assignment.clientIds) ? assignment.clientIds : [],
+      updatedAt: String(assignment.updatedAt || new Date().toISOString()),
+    };
+    const assignments = await serialized(async () => {
+      const connectors = new ReplitConnectors();
+      const current = await readAssignments(connectors);
+      const merged = mergeCollection(current, [normalized], "promoterId");
+      await writeAssignments(connectors, merged);
+      return merged;
+    });
+    res.json({ spreadsheetId, assignment: normalized, assignments });
+  } catch (error) {
+    res.status(502).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "No se pudo guardar la asignación.",
+    });
+  }
+});
 
 router.get("/google-sheets-storage", async (_req, res) => {
   try {

@@ -7,7 +7,7 @@ type Status = 'ACTIVO' | 'INACTIVO';
 type SyncStatus = 'SINCRONIZADA' | 'PENDIENTE';
 type Market = { id: string; department: string; region?: string; province: string; district: string; name: string; status: Status };
 type AppUser = { id: string; dni: string; name: string; role: Role; roleLabel?: string; marketId?: string; clientId?: string; password?: string; status: Status };
-type PromoterAssignment = { promoterId: string; marketIds: string[]; clientIds: string[]; updatedAt: string };
+type PromoterAssignment = { promoterId: string; promoterDni?: string; marketIds: string[]; clientIds: string[]; updatedAt: string };
 type AssignmentRelationship = { key: string; promoter: AppUser; marketId: string; client: Client | null };
 type Client = { id: string; code: string; name: string; phone?: string; marketId: string; status: Status };
 type ProductPrice = { sku: string; product: string; unitsPerPackage: number; unitPrice: number; totalPrice: number; updatedAt: string };
@@ -39,6 +39,7 @@ const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
 const PRICES_SHEET_ID = '1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8';
 const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
 const GOOGLE_SHEETS_STORAGE_SYNC = '/api/google-sheets-storage/sync';
+const GOOGLE_SHEETS_ASSIGNMENTS = '/api/google-sheets-storage/assignments';
 const GOOGLE_DRIVE_PHOTO_UPLOAD = '/api/evidence-photos';
 const PRODUCT_PRICES_STORE_KEY = 'bt-product-prices';
 const DEFAULT_CAMPAIGN_TASTING_STOCK = 20;
@@ -90,6 +91,18 @@ function readStore<T>(key: string, fallback: T): T {
   try { const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : fallback; } catch { return fallback; }
 }
 function writeStore(key: string, value: unknown) { localStorage.setItem(key, JSON.stringify(value)); }
+function assignmentMatchesUser(assignment: PromoterAssignment, user: AppUser) {
+  return assignment.promoterId === user.id || Boolean(assignment.promoterDni && assignment.promoterDni === user.dni);
+}
+function mergeAssignments(current: PromoterAssignment[], incoming: PromoterAssignment[]) {
+  const next = new Map(current.map(item => [item.promoterDni || item.promoterId, item]));
+  incoming.forEach(item => {
+    const key = item.promoterDni || item.promoterId;
+    const previous = next.get(key);
+    if (!previous || !previous.updatedAt || !item.updatedAt || item.updatedAt >= previous.updatedAt) next.set(key, item);
+  });
+  return Array.from(next.values());
+}
 function cloudSnapshotFromStores(): CloudSnapshot {
   const users = readStore<AppUser[]>('bt-users', []).map(({ password: _password, ...user }) => user);
   return {
@@ -672,7 +685,10 @@ function AssignmentModule({ markets, users, clients, assignments, setAssignments
   const filteredPromoters = promoters.filter(promoter => `${promoter.name} ${promoter.dni}`.toLowerCase().includes(employeeSearch.toLowerCase()));
   const filteredMarkets = activeMarkets.filter(market => `${market.name} ${market.region || ''} ${market.department} ${market.province} ${market.district}`.toLowerCase().includes(marketSearch.toLowerCase()));
   const promoterOptions = selectedPromoter && !filteredPromoters.some(promoter => promoter.id === selectedPromoter.id) ? [selectedPromoter, ...filteredPromoters] : filteredPromoters;
-  const assignmentFor = (promoterId: string) => assignments.find(assignment => assignment.promoterId === promoterId);
+  const assignmentFor = (promoterId: string) => {
+    const promoter = promoters.find(item => item.id === promoterId);
+    return promoter ? assignments.find(assignment => assignmentMatchesUser(assignment, promoter)) : undefined;
+  };
   const relationshipRows = promoters.flatMap<AssignmentRelationship>(promoter => {
     const saved = assignmentFor(promoter.id);
     const marketIds = saved ? saved.marketIds : promoter.marketId ? [promoter.marketId] : [];
@@ -700,24 +716,43 @@ function AssignmentModule({ markets, users, clients, assignments, setAssignments
     const allSelected = marketClientIds.length > 0 && marketClientIds.every(clientId => selectedClientIds.includes(clientId));
     setSelectedClientIds(allSelected ? selectedClientIds.filter(clientId => !marketClientIds.includes(clientId)) : Array.from(new Set([...selectedClientIds, ...marketClientIds])));
   };
-  const saveAssignment = () => {
+  const saveAssignment = async () => {
     if (!selectedPromoterId) { notify('Selecciona un promotor para asignar', true); return; }
     if (!selectedMarketIds.length) { notify('Selecciona al menos un mercado', true); return; }
     if (!selectedClientIds.length) { notify('Selecciona al menos un cliente', true); return; }
-     const next = [...assignments.filter(assignment => assignment.promoterId !== selectedPromoterId), { promoterId: selectedPromoterId, marketIds: selectedMarketIds, clientIds: selectedClientIds, updatedAt: new Date().toISOString() }];
+     const assignment: PromoterAssignment = { promoterId: selectedPromoterId, promoterDni: selectedPromoter?.dni, marketIds: selectedMarketIds, clientIds: selectedClientIds, updatedAt: new Date().toISOString() };
+     const next = [...assignments.filter(item => !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter)), assignment];
     setAssignments(next);
      writeStore('bt-promoter-assignments', next);
     setUsers(users.map(user => user.id === selectedPromoterId ? { ...user, marketId: selectedMarketIds[0] } : user));
-    notify(`Asignación guardada para ${selectedPromoter?.name || 'el promotor'}`);
+     try {
+       const response = await fetch(GOOGLE_SHEETS_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
+       if (!response.ok) throw new Error('No se pudo sincronizar');
+       const payload = await response.json() as { assignments?: PromoterAssignment[] };
+       if (Array.isArray(payload.assignments)) {
+         const merged = mergeAssignments(next, payload.assignments);
+         setAssignments(merged); writeStore('bt-promoter-assignments', merged);
+       }
+       notify(`Asignación sincronizada para ${selectedPromoter?.name || 'el promotor'}`);
+     } catch {
+       notify('Asignación guardada en este dispositivo, pero pendiente de sincronizar. Intenta guardar nuevamente.', true);
+     }
   };
-  const clearAssignment = () => {
+  const clearAssignment = async () => {
     if (!selectedPromoterId) { notify('Selecciona un promotor para quitar su asignación', true); return; }
-     const next = [...assignments.filter(assignment => assignment.promoterId !== selectedPromoterId), { promoterId: selectedPromoterId, marketIds: [], clientIds: [], updatedAt: new Date().toISOString() }];
+     const assignment: PromoterAssignment = { promoterId: selectedPromoterId, promoterDni: selectedPromoter?.dni, marketIds: [], clientIds: [], updatedAt: new Date().toISOString() };
+     const next = [...assignments.filter(item => !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter)), assignment];
     setAssignments(next);
      writeStore('bt-promoter-assignments', next);
     setUsers(users.map(user => user.id === selectedPromoterId ? { ...user, marketId: undefined } : user));
     setSelectedMarketIds([]); setSelectedClientIds([]);
-    notify(`Asignación retirada para ${selectedPromoter?.name || 'el promotor'}`);
+     try {
+       const response = await fetch(GOOGLE_SHEETS_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
+       if (!response.ok) throw new Error('No se pudo sincronizar');
+       notify(`Asignación retirada para ${selectedPromoter?.name || 'el promotor'}`);
+     } catch {
+       notify('La asignación se retiró localmente, pero falta sincronizar el cambio.', true);
+     }
   };
   return <section className="assignment-module">
      <div className="assignment-intro"><div><span className="eyebrow">COBERTURA DE CAMPO</span><h2>Asignar mercados y clientes</h2><p>Define exactamente qué puede visitar cada promotor. La asignación se guarda localmente y se sincroniza con la BBDD central.</p></div><div className="assignment-counter"><strong>{assignments.filter(assignment => assignment.marketIds.length > 0).length}</strong><small>promotores con asignación</small></div></div>
@@ -787,7 +822,7 @@ function SalesDashboard({ sales, markets, users, inventory, movements, onViewSal
 
 function AnalystApp({ user, markets, setMarkets, users, setUsers, clients, setClients, sales, attendance, inventory, movements, assignments, setAssignments, setInventory, setMovements, notify }: { user: AppUser; markets: Market[]; setMarkets: (value: Market[]) => void; users: AppUser[]; setUsers: (value: AppUser[]) => void; clients: Client[]; setClients: (value: Client[]) => void; sales: Sale[]; attendance: Attendance[]; inventory: MarketInventory[]; movements: InventoryMovement[]; assignments: PromoterAssignment[]; setAssignments: (value: PromoterAssignment[]) => void; setInventory: (value: MarketInventory[]) => void; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void }) {
   const [tab, setTab] = useState('inicio'); const [query, setQuery] = useState(''); const [modal, setModal] = useState<'user' | 'client' | null>(null); const [syncing, setSyncing] = useState(false);
-   const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const marketAssignmentSummary = useMemo(() => Object.fromEntries(markets.map(market => [market.id, { clients: clients.filter(client => client.marketId === market.id && client.status === 'ACTIVO').length, promoters: users.filter(current => { if (current.role !== 'PROMOTOR' || current.status !== 'ACTIVO') return false; const assignment = assignments.find(item => item.promoterId === current.id); return assignment ? assignment.marketIds.includes(market.id) : current.marketId === market.id; }).length }])), [markets, clients, users, assignments]); const today = new Date().toISOString().slice(0, 10);
+   const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const marketAssignmentSummary = useMemo(() => Object.fromEntries(markets.map(market => [market.id, { clients: clients.filter(client => client.marketId === market.id && client.status === 'ACTIVO').length, promoters: users.filter(current => { if (current.role !== 'PROMOTOR' || current.status !== 'ACTIVO') return false; const assignment = assignments.find(item => assignmentMatchesUser(item, current)); return assignment ? assignment.marketIds.includes(market.id) : current.marketId === market.id; }).length }])), [markets, clients, users, assignments]); const today = new Date().toISOString().slice(0, 10);
   const marketOptions = activeMarkets.map(market => ({ value: market.id, label: `${market.name} · ${market.region || market.department} · ${market.district}` }));
     const exportSales = () => { downloadCsv(`ventas-${today}.csv`, ['Código venta', 'Fecha', 'Promotor', 'Rol promotor', 'Cliente', 'Mercado', 'Región', 'Departamento', 'Provincia', 'Distrito', 'Tipo', 'Marca / producto', 'Unidades por marca', 'Monto unitario por marca (S/)', 'Unidades totales', 'Peso (kg)', 'Ingreso total (S/)', 'Bonificación', 'Número de canjes', 'Comentario', 'Stock degustación entregado', 'Degustación utilizada', 'Stock degustación restante', 'Canjes entregados', 'Canjes realizados', 'Stock canjes restante', 'Detalle stock canjes restante', 'Estado'], sales.map(sale => { const breakdown = saleExportBreakdown(sale); const stock = summarizeMarketStock(sale.marketId, inventory, movements); const promoter = users.find(user => user.id === sale.promoterId); const location = saleMarketLocation(sale, markets); return [sale.id, formatDate(sale.date), promoter?.name || 'PROMOTOR NO IDENTIFICADO', sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role || 'ROL NO IDENTIFICADO', clients.find(client => client.id === sale.clientId)?.name, marketMap[sale.marketId]?.name, location.region, location.department, location.province, location.district, sale.mode, breakdown.map(item => item.label).join(' | '), breakdown.map(item => item.units).join(' | '), breakdown.map(item => item.unitPrice.toFixed(2)).join(' | '), sale.units, (sale.weightKg ?? 0).toFixed(3), (sale.amountSoles ?? 0).toFixed(2), sale.bonus || 'Sin canje', sale.redemptionCount ?? (sale.bonus ? 1 : 0), sale.comment || '', stock.tastingDelivered, stock.tastingUsed, stock.tastingRemaining, sumRedemptionStock(stock.redemptionDelivered), sumRedemptionStock(stock.redemptionUsed), sumRedemptionStock(stock.redemptionRemaining), redemptionStockText(stock.redemptionRemaining), sale.status]; })); notify('Reporte de ventas con ubicación y stock por mercado descargado'); };
   const exportClients = () => { downloadCsv(`clientes-${today}.csv`, ['Código', 'Cliente', 'Celular', 'Mercado', 'Distrito', 'Estado'], clients.map(client => [client.code, client.name, client.phone || '', marketMap[client.marketId]?.name, marketMap[client.marketId]?.district, client.status])); notify('Reporte de clientes descargado'); };
@@ -911,7 +946,7 @@ function PromoterNav({ active, onChange }: { active: 'MARCACIONES' | 'VENTAS'; o
   return <aside className="promoter-nav"><p className="nav-label">TAREAS DIARIAS</p><button className={active === 'MARCACIONES' ? 'active' : ''} onClick={() => onChange('MARCACIONES')} data-testid="nav-marcaciones"><Clock3 /> Marcaciones</button><button className={active === 'VENTAS' ? 'active' : ''} onClick={() => onChange('VENTAS')} data-testid="nav-ventas"><ShoppingBag /> Ventas</button></aside>;
 }
 function PromoterApp({ user, markets, clients, assignments, productPrices, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection, enqueueEvidencePhoto }: { user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; productPrices: ProductPrice[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void; enqueueEvidencePhoto: (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field']) => void }) {
-     const promoterAssignment = assignments.find(assignment => assignment.promoterId === user.id); const assignedMarketIds = promoterAssignment ? promoterAssignment.marketIds : user.marketId ? [user.marketId] : []; const selectableMarkets = markets.filter(market => market.status === 'ACTIVO' && assignedMarketIds.includes(market.id)); const [selectedMarketId, setSelectedMarketId] = useState(''); const [selectedClientId, setSelectedClientId] = useState(''); const [module, setModule] = useState<'MARCACIONES' | 'VENTAS'>('MARCACIONES'); const [view, setView] = useState<'LISTA' | 'NUEVA'>('LISTA');
+     const promoterAssignment = assignments.find(assignment => assignmentMatchesUser(assignment, user)); const assignedMarketIds = promoterAssignment ? promoterAssignment.marketIds : user.marketId ? [user.marketId] : []; const selectableMarkets = markets.filter(market => market.status === 'ACTIVO' && assignedMarketIds.includes(market.id)); const [selectedMarketId, setSelectedMarketId] = useState(''); const [selectedClientId, setSelectedClientId] = useState(''); const [module, setModule] = useState<'MARCACIONES' | 'VENTAS'>('MARCACIONES'); const [view, setView] = useState<'LISTA' | 'NUEVA'>('LISTA');
      const available = clients.filter(client => client.marketId === selectedMarketId && client.status === 'ACTIVO' && (!promoterAssignment || promoterAssignment.clientIds.includes(client.id))); const selectedMarket = selectableMarkets.find(market => market.id === selectedMarketId);
       const [clientId, setClientId] = useState(''); const [mode, setMode] = useState<'UNIDADES' | 'PLANCHAS'>('UNIDADES'); const [sku, setSku] = useState(products[0].sku); const [unitQty, setUnitQty] = useState(1); const [unitPriceSoles, setUnitPriceSoles] = useState(''); const [brandPrices, setBrandPrices] = useState({ TODINNO: '', COSTA: '', PASQUALINO: '' }); const [planchas, setPlanchas] = useState(1); const [mix, setMix] = useState({ TODINNO: 1, COSTA: 1, PASQUALINO: 4 }); const [redemptionCount, setRedemptionCount] = useState(1); const [comment, setComment] = useState(''); const [receipt, setReceipt] = useState<File | null>(null); const [exchange, setExchange] = useState<File | null>(null);
      const [markClientId, setMarkClientId] = useState(''); const [markType, setMarkType] = useState<'ENTRADA' | 'SALIDA'>('ENTRADA'); const [markPhoto, setMarkPhoto] = useState<File | null>(null); const [search, setSearch] = useState(''); const [modeFilter, setModeFilter] = useState<'TODO' | 'UNIDADES' | 'PLANCHAS'>('TODO');
@@ -1158,6 +1193,34 @@ export default function App() {
       void hydrateCloudStorage();
       return () => { cancelled = true; };
      }, [referencesReady]);
+     useEffect(() => {
+       if (!referencesReady) return;
+       let cancelled = false;
+       const refreshAssignments = async () => {
+         if (!navigator.onLine) return;
+         try {
+           const response = await fetch(GOOGLE_SHEETS_ASSIGNMENTS);
+           if (!response.ok) throw new Error('Asignaciones no disponibles');
+           const payload = await response.json() as { assignments?: PromoterAssignment[] };
+           if (cancelled || !Array.isArray(payload.assignments)) return;
+           setAssignments(current => {
+             const next = mergeAssignments(current, payload.assignments || []);
+             writeStore('bt-promoter-assignments', next);
+             return next;
+           });
+         } catch {
+           // Se conserva la última asignación local válida.
+         }
+       };
+       void refreshAssignments();
+       const interval = window.setInterval(refreshAssignments, 15_000);
+       window.addEventListener('online', refreshAssignments);
+       return () => {
+         cancelled = true;
+         window.clearInterval(interval);
+         window.removeEventListener('online', refreshAssignments);
+       };
+     }, [referencesReady]);
     useEffect(() => {
       if (!cloudReady) return;
       const timeout = window.setTimeout(() => {
@@ -1212,7 +1275,7 @@ export default function App() {
    const logoutImmediately = () => { localStorage.removeItem('bt-session'); setSessionClosePrompt(false); setPromoterSession({ marketId: '', clientId: '' }); setUser(null); };
     const requestLogout = () => {
       if (activeUser?.role === 'PROMOTOR') {
-         const assignment = assignments.find(item => item.promoterId === activeUser.id);
+         const assignment = assignments.find(item => assignmentMatchesUser(item, activeUser));
          const assignedMarketIds = assignment ? assignment.marketIds : activeUser.marketId ? [activeUser.marketId] : [];
          if (!assignedMarketIds.length) {
            logoutImmediately();

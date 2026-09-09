@@ -14,3 +14,9 @@ En producción, la aplicación web y el API deben publicarse juntos después de 
 **Why:** La asignación puede parecer exitosa en el dispositivo del Analista, pero no llegará a otro dispositivo si la publicación no contiene la ruta central actualizada.
 
 **How to apply:** Después de modificar sincronización, validar `/api/google-sheets-storage` en producción y volver a publicar antes de probar con otro usuario.
+
+Las asignaciones deben leerse y escribirse mediante una operación pequeña e independiente, y vincularse al promotor por DNI además del ID interno.
+
+**Why:** Reescribir todas las pestañas para cada asignación puede agotar temporalmente Google Sheets y dejar un cambio visible solo en el navegador del Analista; el DNI permanece estable aunque cambie el ID importado.
+
+**How to apply:** Para cambios de cobertura, actualizar únicamente ASIGNACIONES, confirmar la respuesta antes de mostrar éxito y refrescar esa colección periódicamente en los dispositivos de Promotor.
