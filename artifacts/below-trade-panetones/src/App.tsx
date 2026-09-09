@@ -307,6 +307,23 @@ function csvField(record: Record<string, string>, aliases: string[]) {
 function csvStatus(value: string): Status {
   return normalizeCsvHeader(value) === 'inactivo' ? 'INACTIVO' : 'ACTIVO';
 }
+function importedDni(value: string) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length === 7 ? digits.padStart(8, '0') : digits;
+}
+function importedRole(value: string): Role | undefined {
+  const normalized = normalizeCsvHeader(value);
+  if (normalized.includes('promotorpermanente')) return 'PROMOTOR PERMANENTE';
+  if (normalized.includes('promotorrotativo')) return 'PROMOTOR ROTATIVO';
+  if (normalized === 'promotor' || normalized.includes('promotor')) return 'PROMOTOR';
+  if (normalized.includes('coordinador')) return 'COORDINADOR';
+  if (normalized.includes('analista')) return 'ANALISTA';
+  if (normalized.includes('supervisor')) return 'SUPERVISOR';
+  if (normalized.includes('trade')) return 'TRADE';
+  if (normalized.includes('admin')) return 'ADMIN';
+  if (normalized.includes('cliente')) return 'CLIENTE';
+  return undefined;
+}
 function csvNumber(value: string) {
   const normalized = value.replace(/[^\d,.-]/g, '').replace(',', '.');
   const parsed = Number(normalized);
@@ -330,16 +347,15 @@ function csvMarketId(value: string, markets: Market[]) {
   return markets.find(market => [market.id, market.name, market.district].some(candidate => normalizeCsvHeader(candidate) === normalized))?.id;
 }
 function importedUserFromRecord(record: Record<string, string>, index: number, markets: Market[]): AppUser | null {
-  const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']);
-  const firstName = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']);
+  const dni = importedDni(csvField(record, ['dni', 'documento', 'documentoidentidad']));
+  const firstName = csvField(record, ['nombre', 'nombrecompleto', 'nombreyapellido', 'nombres', 'usuario']);
   const lastName = csvField(record, ['apellido', 'apellidos']);
   const name = [firstName, lastName].filter(Boolean).join(' ');
   const roleLabel = csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']).trim().toUpperCase();
-  const rawRole = normalizeCsvHeader(roleLabel);
-  const roleValue = rawRole === 'promotorrotativo' ? 'PROMOTOR ROTATIVO' : rawRole === 'promotorpermanente' ? 'PROMOTOR PERMANENTE' : rawRole === 'promotor' ? 'PROMOTOR' : rawRole === 'coordinador' ? 'COORDINADOR' : rawRole === 'cliente' ? 'CLIENTE' : rawRole.toUpperCase() as Role;
+  const roleValue = importedRole(roleLabel);
   const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
   const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
-  if (!/^\d{8}$/.test(dni) || !name || [...promoterRoles, 'COORDINADOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN', 'CLIENTE'].includes(roleValue) || (isZoneManagerRole(roleValue) && marketValue && !marketId)) return null;
+  if (!/^\d{8}$/.test(dni) || !name || !roleValue || (isZoneManagerRole(roleValue) && marketValue && !marketId)) return null;
   return { id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${index + 1}`, dni, name, role: roleValue, roleLabel: roleLabel || roleValue, marketId: isZoneManagerRole(roleValue) ? marketId : undefined, clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined, password: csvField(record, ['clave', 'password', 'contrasena']) || undefined, status: csvStatus(csvField(record, ['estado', 'status'])) };
 }
 function importedMarketsFromRecords(records: Record<string, string>[]) {
@@ -1073,9 +1089,9 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
   const mergeImportedUsers = async (records: Record<string, string>[]) => {
     const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
     records.forEach((record, index) => {
-       const dni = csvField(record, ['dni', 'documento', 'documentoidentidad']); const firstName = csvField(record, ['nombre', 'nombrecompleto', 'usuario', 'nombres']); const lastName = csvField(record, ['apellido', 'apellidos']); const name = [firstName, lastName].filter(Boolean).join(' '); const roleLabel = csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']).trim().toUpperCase(); const rawRole = normalizeCsvHeader(roleLabel); const roleValue = rawRole === 'promotorrotativo' ? 'PROMOTOR ROTATIVO' : rawRole === 'promotorpermanente' ? 'PROMOTOR PERMANENTE' : rawRole === 'promotor' ? 'PROMOTOR' : rawRole === 'coordinador' ? 'COORDINADOR' : rawRole.toUpperCase() as Role; const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
+       const dni = importedDni(csvField(record, ['dni', 'documento', 'documentoidentidad'])); const firstName = csvField(record, ['nombre', 'nombrecompleto', 'nombreyapellido', 'nombres', 'usuario']); const lastName = csvField(record, ['apellido', 'apellidos']); const name = [firstName, lastName].filter(Boolean).join(' '); const roleLabel = csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']).trim().toUpperCase(); const roleValue = importedRole(roleLabel); const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
       const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
-        if (!/^\d{8}$/.test(dni) || !name || [...promoterRoles, 'COORDINADOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN', 'CLIENTE'].includes(roleValue) || (isZoneManagerRole(roleValue) && marketValue && !marketId)) { skipped += 1; return; }
+        if (!/^\d{8}$/.test(dni) || !name || !roleValue || (isZoneManagerRole(roleValue) && marketValue && !marketId)) { skipped += 1; return; }
          imported.push({ id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${importId}-${index + 1}`, dni, name, role: roleValue, roleLabel: roleLabel || roleValue, marketId: isZoneManagerRole(roleValue) ? marketId : undefined, clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined, password: csvField(record, ['clave', 'password', 'contrasena']) || undefined, status: csvStatus(csvField(record, ['estado', 'status'])) });
     });
     if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
