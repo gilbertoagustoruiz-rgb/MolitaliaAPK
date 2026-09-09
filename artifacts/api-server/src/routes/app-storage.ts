@@ -386,8 +386,9 @@ router.delete("/app-storage/admin/markets/:id", async (req, res): Promise<void> 
 
 router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
   const input = req.body?.client;
-  if (!isRecord(input) || !value(input, "name") || !value(input, "marketId")) {
-    res.status(400).json({ message: "El cliente requiere nombre y mercado." });
+  const category = isRecord(input) ? value(input, "category").toUpperCase() : "";
+  if (!isRecord(input) || !value(input, "name") || !value(input, "marketId") || !["MIXTO", "CONFETI"].includes(category)) {
+    res.status(400).json({ message: "El cliente requiere nombre, mercado y categoría MIXTO o CONFETI." });
     return;
   }
   const id = value(input, "id") || randomUUID();
@@ -396,6 +397,7 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
     code: value(input, "code") || `CLI-${id.slice(0, 8).toUpperCase()}`,
     name: value(input, "name"),
     phone: value(input, "phone") || undefined,
+    category,
     marketId: value(input, "marketId"),
     status: "ACTIVO",
     updatedAt: new Date().toISOString(),

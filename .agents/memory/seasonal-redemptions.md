@@ -7,6 +7,8 @@ Los canjes grandes usan Mandil en Setiembre y Octubre, Batea en Noviembre y ning
 
 Si Bateas y Mandiles están ambos agotados, se activa anticipadamente la configuración de Diciembre sin accesorios.
 
+En el registro de ventas por planchas, los bonos autogenerados son una excepción al calendario administrativo: 10 planchas entregan 24 Avenas + 10 Spaghetti y más de 80 planchas entregan 144 Avenas + 100 Spaghetti, ambos sin accesorios.
+
 **Why:** La mecánica de campaña cambia por mes y por disponibilidad física; mostrar todas las combinaciones a la vez permite registrar un canje que no corresponde.
 
-**How to apply:** Filtrar formularios, importaciones y bonos de venta por el mes local. Las ventas históricas deben conservar la etiqueta y los componentes con los que fueron registradas.
+**How to apply:** Filtrar formularios e importaciones administrativas por el mes local, pero aplicar las combinaciones fijas sin accesorios en los dos niveles grandes de venta por planchas. Las ventas históricas deben conservar la etiqueta y los componentes con los que fueron registradas.
