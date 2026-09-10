@@ -14,3 +14,9 @@ Cada archivo debe incluir cliente y mercado en el nombre, la descripción y las 
 **Why:** El ID operativo por sí solo no permite reconocer rápidamente la evidencia al revisar la carpeta, y un fallo silencioso puede hacer creer que la fotografía ya está respaldada.
 
 **How to apply:** Enviar cliente, mercado y tipo de registro junto al binario; incluirlos en el nombre del objeto y solo reemplazar el valor provisional por la URL después de recibir confirmación de Drive o App Storage.
+
+Los enlaces `drive.google.com/file/d/.../view` son enlaces de página, no fuentes válidas para una etiqueta de imagen; las miniaturas deben usar una URL directa de thumbnail o descarga.
+
+**Why:** Una vista de Drive puede abrirse como página en el navegador, pero una miniatura `<img>` la interpreta como contenido de imagen y falla.
+
+**How to apply:** Detectar el ID del archivo en enlaces históricos de Drive, convertirlo a `thumbnail`, y conservar el enlace original como alternativa para abrir el archivo completo.

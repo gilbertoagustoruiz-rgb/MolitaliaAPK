@@ -734,7 +734,7 @@ function PhotoThumbnail({ label, src }: { label: string; src?: string }) {
   const isAvailable = Boolean(src && /^(https?:\/\/|\/|data:image\/|blob:)/.test(src));
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => setImageFailed(false), [src]);
-  if (!isAvailable) {
+  if (!src || !isAvailable) {
     return <span className="photo-thumbnail pending" title={src ? 'Foto pendiente de sincronización' : 'Sin foto'}><Camera /><small>{label}<br />Pendiente</small></span>;
   }
   if (imageFailed) {
