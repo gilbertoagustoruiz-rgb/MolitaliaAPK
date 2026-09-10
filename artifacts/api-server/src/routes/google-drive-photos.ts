@@ -139,7 +139,7 @@ router.post(
           id: file.id,
           name: file.name,
           mimeType: file.mimeType,
-          url: file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
+          url: file.webContentLink || file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
           downloadUrl: file.webContentLink,
           storage: "google-drive",
         });

@@ -716,12 +716,31 @@ function StatusPill({ status }: { status: string }) {
   const className = status === 'PENDIENTE' ? 'pending' : status === 'INACTIVO' ? 'inactive' : status === 'SINCRONIZADA' ? 'synced' : 'active';
   return <span className={`status ${className}`} data-testid={`status-${status.toLowerCase()}`}>{status}</span>;
 }
+function driveFileId(value: string) {
+  const filePath = value.match(/drive\.google\.com\/file\/d\/([^/?]+)/i);
+  if (filePath?.[1]) return filePath[1];
+  try {
+    const id = new URL(value).searchParams.get('id');
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+function photoImageSource(value: string) {
+  const id = driveFileId(value);
+  return id ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w480` : value;
+}
 function PhotoThumbnail({ label, src }: { label: string; src?: string }) {
   const isAvailable = Boolean(src && /^(https?:\/\/|\/|data:image\/|blob:)/.test(src));
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => setImageFailed(false), [src]);
   if (!isAvailable) {
     return <span className="photo-thumbnail pending" title={src ? 'Foto pendiente de sincronización' : 'Sin foto'}><Camera /><small>{label}<br />Pendiente</small></span>;
   }
-  return <a className="photo-thumbnail" href={src} target="_blank" rel="noreferrer" title={`Abrir ${label}`}><img src={src} alt={label} loading="lazy" /><small>{label}</small></a>;
+  if (imageFailed) {
+    return <a className="photo-thumbnail pending" href={src} target="_blank" rel="noreferrer" title={`Abrir ${label} en su almacenamiento`}><Camera /><small>{label}<br />Abrir foto</small></a>;
+  }
+  return <a className="photo-thumbnail" href={src} target="_blank" rel="noreferrer" title={`Abrir ${label}`}><img src={photoImageSource(src)} alt={label} loading="lazy" onError={() => setImageFailed(true)} /><small>{label}</small></a>;
 }
 function PhotoField({ label, hint, file, setFile, disabled = false }: { label: string; hint: string; file: File | null; setFile: (file: File | null) => void; disabled?: boolean }) {
   return <label className={`photo-field ${file ? 'ready' : ''} ${disabled ? 'disabled' : ''}`} data-testid={`photo-field-${label.toLowerCase().replaceAll(' ', '-')}`}>
