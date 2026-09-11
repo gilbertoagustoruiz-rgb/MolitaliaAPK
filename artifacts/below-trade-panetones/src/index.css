@@ -370,7 +370,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .promoter-page .input::placeholder { color:#8fa3b8; }
 .sale-table, .mark-table { overflow:auto; padding:0 20px; }
 .sale-row { min-width:850px; display:grid; grid-template-columns:.75fr 1.45fr .7fr 1.3fr 1.05fr 1fr; gap:14px; align-items:center; padding:15px 0; border-bottom:1px solid #324d6a; color:#e9e7e0; font-size:12px; }
-.mark-row { min-width:720px; display:grid; grid-template-columns:1.3fr 1fr .8fr 1fr .6fr; gap:14px; align-items:center; padding:15px 0; border-bottom:1px solid #324d6a; color:#e9e7e0; font-size:12px; }
+.mark-row { min-width:860px; display:grid; grid-template-columns:1.25fr 1fr 1fr .75fr 1fr .6fr; gap:14px; align-items:center; padding:15px 0; border-bottom:1px solid #324d6a; color:#e9e7e0; font-size:12px; }
 .sale-row.header, .mark-row.header { color:#9dafc1; font:10px var(--font-mono); text-transform:uppercase; letter-spacing:.1em; }
 .sale-row:last-child, .mark-row:last-child { border-bottom:0; }
 .sale-row strong, .sale-row small, .mark-row strong, .mark-row small { display:block; }
