@@ -435,6 +435,127 @@ router.delete("/app-storage/admin/clients/:id", async (req, res): Promise<void> 
   }
 });
 
+router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
+  const id = String(req.params.id || "").trim();
+  const input = req.body?.sale;
+  const amountSoles = isRecord(input) ? Number(input.amountSoles) : Number.NaN;
+  if (!id || !isRecord(input) || !value(input, "clientId") || !Number.isFinite(amountSoles) || amountSoles <= 0) {
+    res.status(400).json({ message: "La venta requiere cliente e importe mayor a cero." });
+    return;
+  }
+  try {
+    const existing = await pool.query(
+      "SELECT data FROM sales WHERE id=$1 LIMIT 1",
+      [id],
+    ) as unknown as { rows: Array<{ data: StoredRecord }> };
+    if (!existing.rows[0]) {
+      res.status(404).json({ message: "La venta no existe." });
+      return;
+    }
+    const updatedAt = new Date().toISOString();
+    const sale = {
+      ...existing.rows[0].data,
+      id,
+      clientId: value(input, "clientId"),
+      amountSoles,
+      comment: value(input, "comment") || undefined,
+      status: "SINCRONIZADA",
+      updatedAt,
+    };
+    await pool.query(
+      `UPDATE sales
+       SET client_id=$2,amount_soles=$3,status='SINCRONIZADA',data=$4,record_updated_at=$5,updated_at=now()
+       WHERE id=$1`,
+      [id, sale.clientId, amountSoles, sale, updatedAt],
+    );
+    res.json({ sale, snapshot: await readSnapshot() });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to update sale");
+    res.status(500).json({ message: "No se pudo editar la venta." });
+  }
+});
+
+router.delete("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
+  const id = String(req.params.id || "").trim();
+  if (!id) {
+    res.status(400).json({ message: "La venta es obligatoria." });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const saleResult = await client.query(
+      "SELECT id FROM sales WHERE id=$1 FOR UPDATE",
+      [id],
+    );
+    if (!saleResult.rows[0]) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ message: "La venta no existe." });
+      return;
+    }
+    const movementPrefix = `CAN-${id}-`;
+    const movementResult = await client.query(
+      `SELECT market_id,item_id,quantity,data
+       FROM inventory_movements
+       WHERE kind='CANJE' AND left(id,length($1))=$1
+       FOR UPDATE`,
+      [movementPrefix],
+    ) as unknown as {
+      rows: Array<{ market_id: string; item_id: string | null; quantity: number; data: StoredRecord }>;
+    };
+    const movementsByMarket = new Map<string, typeof movementResult.rows>();
+    for (const movement of movementResult.rows) {
+      const current = movementsByMarket.get(movement.market_id) || [];
+      current.push(movement);
+      movementsByMarket.set(movement.market_id, current);
+    }
+    for (const [marketId, saleMovements] of movementsByMarket) {
+      const inventoryResult = await client.query(
+        "SELECT redemption_stock,data FROM inventory WHERE market_id=$1 FOR UPDATE",
+        [marketId],
+      ) as unknown as { rows: Array<{ redemption_stock: Record<string, number>; data: StoredRecord }> };
+      const current = inventoryResult.rows[0];
+      if (!current) continue;
+      const redemptionStock = { ...(current.redemption_stock || {}) };
+      for (const movement of saleMovements) {
+        const source = isRecord(movement.data) ? movement.data : {};
+        const components = isRecord(source.canjeComponents) ? source.canjeComponents : null;
+        if (components) {
+          for (const [itemId, componentQuantity] of Object.entries(components)) {
+            redemptionStock[itemId] = Math.max(0, Number(redemptionStock[itemId]) || 0)
+              + Math.max(0, Number(componentQuantity) || 0) * Math.max(0, Number(movement.quantity) || 0);
+          }
+        } else {
+          const itemId = movement.item_id || value(source, "itemId");
+          if (itemId) {
+            redemptionStock[itemId] = Math.max(0, Number(redemptionStock[itemId]) || 0)
+              + Math.max(0, Number(movement.quantity) || 0);
+          }
+        }
+      }
+      const updatedAt = new Date().toISOString();
+      const inventoryData = { ...(current.data || {}), redemptionStock, updatedAt };
+      await client.query(
+        "UPDATE inventory SET redemption_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
+        [marketId, redemptionStock, inventoryData, updatedAt],
+      );
+    }
+    await client.query(
+      "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
+      [movementPrefix],
+    );
+    await client.query("DELETE FROM sales WHERE id=$1", [id]);
+    await client.query("COMMIT");
+    res.json({ deleted: id, restoredCanjeMovements: movementResult.rows.length, snapshot: await readSnapshot() });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    req.log.error({ err: error }, "Unable to delete sale");
+    res.status(500).json({ message: "No se pudo eliminar la venta." });
+  } finally {
+    client.release();
+  }
+});
+
 router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
   try {
     const snapshot = await readSnapshot();

@@ -217,6 +217,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .record-main em { margin-top:4px; color:hsl(var(--blue)); font-size:11px; font-style:normal; }
 .record-main em svg { width:12px; height:12px; vertical-align:-2px; margin-right:4px; }
 .record-photos { display:flex; flex-wrap:wrap; gap:8px; margin-top:9px; }
+.sale-admin-actions { display:flex; flex-direction:column; align-items:stretch; gap:7px; min-width:112px; }
+.sale-admin-actions .status { align-self:flex-end; }
+.sale-admin-actions .btn { justify-content:center; padding:8px 10px; }
 .photo-thumbnail { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:64px; min-height:64px; overflow:hidden; border:1px solid hsl(var(--line)); border-radius:9px; background:hsl(42 32% 96%); color:hsl(var(--muted)); text-decoration:none; }
 .photo-thumbnail img { display:block; width:64px; height:64px; object-fit:cover; }
 .photo-thumbnail small { width:100%; padding:3px 4px; background:hsla(0 0% 100% / .9); color:hsl(var(--ink)); font-size:9px; line-height:1.1; text-align:center; }
@@ -609,6 +612,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
   .stat strong { font-size:22px; }
   .stat p { font-size:10px; }
   .panel-header, .panel-body { padding:17px; }
+  .sale-admin-record { grid-template-columns:40px minmax(0,1fr); padding:14px 0; }
+  .sale-admin-actions { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; padding-left:53px; }
+  .sale-admin-actions .status { grid-column:1/-1; justify-self:start; }
    .download-grid, .check-list, .form-grid, .dark-form-body, .evidence-grid, .brand-prices { grid-template-columns:1fr; }
   .download-card { grid-template-columns:35px minmax(0,1fr); }
   .download-card .btn { grid-column:1/-1; width:100%; }
