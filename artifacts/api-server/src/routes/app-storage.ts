@@ -100,6 +100,16 @@ function isRecord(value: unknown): value is StoredRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+async function lockInventoryLedger(client: QueryClient) {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended('inventory_ledger',0))");
+}
+
+async function lockAndValidateCatalogRevision(client: QueryClient, incomingRevision: string | null) {
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('catalog_revision',0))");
+  const currentRevision = await readCatalogRevision(client);
+  return !currentRevision || incomingRevision === currentRevision;
+}
+
 async function readCatalogRevision(client: QueryClient = pool as unknown as QueryClient) {
   const result = await client.query("SELECT value FROM app_metadata WHERE key=$1", ["catalog_revision"]);
   return value(result.rows[0] || {}, "value") || null;
@@ -133,6 +143,83 @@ async function readSnapshot(client: QueryClient = pool as unknown as QueryClient
     );
   }
   return snapshot;
+}
+
+function saleIdFromCanjeMovement(record: StoredRecord) {
+  const id = value(record, "id");
+  const match = id.match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);
+  return match?.[1] || null;
+}
+
+function movementItemQuantity(record: StoredRecord, itemId: string) {
+  const quantity = numeric(record, "quantity");
+  const components = isRecord(record.canjeComponents) ? record.canjeComponents : null;
+  if (components) return (Number(components[itemId]) || 0) * quantity;
+  return value(record, "itemId") === itemId ? quantity : 0;
+}
+
+async function reconcileInventoryFromMovements(client: QueryClient) {
+  const movementResult = await client.query(
+    `SELECT market_id,kind,item_id,quantity,data
+     FROM inventory_movements
+     WHERE kind IN ('AJUSTE_DEGUSTACION','DEGUSTACION','AJUSTE_CANJES','CANJE')
+     ORDER BY created_at`,
+  );
+  const inventoryResult = await client.query(
+    "SELECT market_id,tasting_stock,redemption_stock,data FROM inventory",
+  );
+  const inventoryByMarket = new Map(inventoryResult.rows.map((row) => [String(row.market_id), row]));
+  const movementsByMarket = new Map<string, StoredRecord[]>();
+  for (const row of movementResult.rows) {
+    const marketId = String(row.market_id);
+    const source = isRecord(row.data) ? row.data : {};
+    const movement = {
+      ...source,
+      marketId,
+      kind: String(row.kind),
+      itemId: row.item_id == null ? value(source, "itemId") : String(row.item_id),
+      quantity: Number(row.quantity) || 0,
+    };
+    const current = movementsByMarket.get(marketId) || [];
+    current.push(movement);
+    movementsByMarket.set(marketId, current);
+  }
+  const itemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
+  for (const [marketId, movements] of movementsByMarket) {
+    const current = inventoryByMarket.get(marketId);
+    const currentData = isRecord(current?.data) ? current.data : {};
+    const currentRedemption = isRecord(current?.redemption_stock) ? current.redemption_stock : {};
+    const tastingMovements = movements.filter((movement) =>
+      value(movement, "kind") === "AJUSTE_DEGUSTACION" || value(movement, "kind") === "DEGUSTACION");
+    const tastingStock = tastingMovements.length
+      ? Math.max(0, tastingMovements.reduce((total, movement) =>
+        total + (value(movement, "kind") === "AJUSTE_DEGUSTACION"
+          ? numeric(movement, "quantity")
+          : -Math.max(0, numeric(movement, "quantity"))), 0))
+      : Math.max(0, Number(current?.tasting_stock) || 0);
+    const redemptionStock = Object.fromEntries(itemIds.map((itemId) => {
+      const itemMovements = movements.filter((movement) =>
+        (value(movement, "kind") === "AJUSTE_CANJES" || value(movement, "kind") === "CANJE")
+        && movementItemQuantity(movement, itemId) !== 0);
+      const quantity = itemMovements.length
+        ? Math.max(0, itemMovements.reduce((total, movement) =>
+          total + (value(movement, "kind") === "AJUSTE_CANJES"
+            ? movementItemQuantity(movement, itemId)
+            : -Math.max(0, movementItemQuantity(movement, itemId))), 0))
+        : Math.max(0, Number(currentRedemption[itemId]) || 0);
+      return [itemId, quantity];
+    }));
+    const updatedAt = new Date().toISOString();
+    const inventoryData = { ...currentData, marketId, tastingStock, redemptionStock, updatedAt };
+    await client.query(
+      `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (market_id) DO UPDATE SET tasting_stock=EXCLUDED.tasting_stock,
+       redemption_stock=EXCLUDED.redemption_stock,data=EXCLUDED.data,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+      [marketId, tastingStock, redemptionStock, inventoryData, updatedAt],
+    );
+  }
 }
 
 async function upsertRecord(
@@ -258,31 +345,56 @@ async function upsertRecord(
 }
 
 async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision?: string | null) {
-  const catalogRevision = await readCatalogRevision();
-  const catalogIsAuthorized = !catalogRevision || incomingRevision === catalogRevision;
-  const guardedIncoming: Partial<StorageSnapshot> = catalogRevision && !catalogIsAuthorized
-    ? {
-      ...incoming,
-      markets: [],
-      clients: [],
-      inventory: [],
-      assignments: [],
-      movements: [],
-      sales: [],
-      attendance: [],
-      closures: [],
-      users: Array.isArray(incoming.users) ? incoming.users.filter((user) => value(user, "role") === "ANALISTA") : incoming.users,
-    }
-    : incoming;
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('catalog_revision',0))");
+    const catalogRevision = await readCatalogRevision(client as unknown as QueryClient);
+    const catalogIsAuthorized = !catalogRevision || incomingRevision === catalogRevision;
+    const guardedIncoming: Partial<StorageSnapshot> = catalogRevision && !catalogIsAuthorized
+      ? {
+        ...incoming,
+        markets: [],
+        clients: [],
+        inventory: [],
+        assignments: [],
+        movements: [],
+        sales: [],
+        attendance: [],
+        closures: [],
+        users: Array.isArray(incoming.users) ? incoming.users.filter((user) => value(user, "role") === "ANALISTA") : incoming.users,
+      }
+      : incoming;
+    const saleIdsToLock = new Set<string>();
+    for (const sale of Array.isArray(guardedIncoming.sales) ? guardedIncoming.sales : []) {
+      const saleId = value(sale, "id");
+      if (saleId) saleIdsToLock.add(saleId);
+    }
+    for (const movement of Array.isArray(guardedIncoming.movements) ? guardedIncoming.movements : []) {
+      const saleId = saleIdFromCanjeMovement(movement);
+      if (saleId) saleIdsToLock.add(saleId);
+    }
+    for (const saleId of [...saleIdsToLock].sort()) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`sale:${saleId}`]);
+    }
+    await lockInventoryLedger(client as unknown as QueryClient);
+    const deletedSalesResult = await client.query(
+      "SELECT record_id FROM app_storage_tombstones WHERE collection='sales'",
+    );
+    const deletedSaleIds = new Set(deletedSalesResult.rows.map((row) => String(row.record_id)));
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
+      if (name === "inventory") continue;
       const records = Array.isArray(guardedIncoming[name]) ? guardedIncoming[name] : [];
       for (const record of records) {
+        if (name === "sales" && record && typeof record === "object" && deletedSaleIds.has(value(record, "id"))) continue;
+        if (name === "movements" && record && typeof record === "object") {
+          const saleId = saleIdFromCanjeMovement(record);
+          if (saleId && deletedSaleIds.has(saleId)) continue;
+        }
         if (record && typeof record === "object") await upsertRecord(client as unknown as QueryClient, name, record);
       }
     }
+    await reconcileInventoryFromMovements(client as unknown as QueryClient);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -378,6 +490,7 @@ router.delete("/app-storage/admin/markets/:id", async (req, res): Promise<void> 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockInventoryLedger(client as unknown as QueryClient);
     await client.query("DELETE FROM clients WHERE market_id=$1", [id]);
     await client.query("DELETE FROM inventory WHERE market_id=$1", [id]);
     await client.query("DELETE FROM inventory_movements WHERE market_id=$1", [id]);
@@ -484,15 +597,22 @@ router.delete("/app-storage/admin/sales/:id", async (req, res): Promise<void> =>
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const revisionIsCurrent = await lockAndValidateCatalogRevision(
+      client as unknown as QueryClient,
+      req.get("x-catalog-revision") || null,
+    );
+    if (!revisionIsCurrent) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ message: "La información cambió. Actualiza la aplicación antes de eliminar nuevamente." });
+      return;
+    }
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`sale:${id}`]);
+    await lockInventoryLedger(client as unknown as QueryClient);
     const saleResult = await client.query(
       "SELECT id FROM sales WHERE id=$1 FOR UPDATE",
       [id],
     );
-    if (!saleResult.rows[0]) {
-      await client.query("ROLLBACK");
-      res.status(404).json({ message: "La venta no existe." });
-      return;
-    }
+    const saleExisted = Boolean(saleResult.rows[0]);
     const movementPrefix = `CAN-${id}-`;
     const movementResult = await client.query(
       `SELECT market_id,item_id,quantity,data
@@ -544,9 +664,15 @@ router.delete("/app-storage/admin/sales/:id", async (req, res): Promise<void> =>
       "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
       [movementPrefix],
     );
+    await client.query(
+      `INSERT INTO app_storage_tombstones (collection,record_id,deleted_at)
+       VALUES ('sales',$1,now())
+       ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now(),updated_at=now()`,
+      [id],
+    );
     await client.query("DELETE FROM sales WHERE id=$1", [id]);
     await client.query("COMMIT");
-    res.json({ deleted: id, restoredCanjeMovements: movementResult.rows.length, snapshot: await readSnapshot() });
+    res.json({ deleted: id, saleExisted, restoredCanjeMovements: movementResult.rows.length, snapshot: await readSnapshot() });
   } catch (error) {
     await client.query("ROLLBACK");
     req.log.error({ err: error }, "Unable to delete sale");
@@ -589,6 +715,7 @@ router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockInventoryLedger(client as unknown as QueryClient);
     await upsertRecord(client as unknown as QueryClient, "movements", canje);
     const inventoryResult = await client.query(
       "SELECT tasting_stock, redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
@@ -640,6 +767,19 @@ router.delete("/app-storage/admin/canjes/:source/:id", async (req, res): Promise
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    if (source === "sale") {
+      const revisionIsCurrent = await lockAndValidateCatalogRevision(
+        client as unknown as QueryClient,
+        req.get("x-catalog-revision") || null,
+      );
+      if (!revisionIsCurrent) {
+        await client.query("ROLLBACK");
+        res.status(409).json({ message: "La información cambió. Actualiza la aplicación antes de eliminar nuevamente." });
+        return;
+      }
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`sale:${id}`]);
+    }
+    await lockInventoryLedger(client as unknown as QueryClient);
     if (source === "movement") {
       const result = await client.query(
         "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
@@ -674,6 +814,14 @@ router.delete("/app-storage/admin/canjes/:source/:id", async (req, res): Promise
           );
         }
       }
+    }
+    if (source === "sale") {
+      await client.query(
+        `INSERT INTO app_storage_tombstones (collection,record_id,deleted_at)
+         VALUES ('sales',$1,now())
+         ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now(),updated_at=now()`,
+        [id],
+      );
     }
     await client.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
     await client.query("COMMIT");
@@ -717,6 +865,7 @@ router.post("/app-storage/admin/degustaciones", async (req, res): Promise<void> 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockInventoryLedger(client as unknown as QueryClient);
     await upsertRecord(client as unknown as QueryClient, "movements", degustacion);
     const inventoryResult = await client.query(
       "SELECT tasting_stock, redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
@@ -764,6 +913,7 @@ router.delete("/app-storage/admin/degustaciones/:source/:id", async (req, res): 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await lockInventoryLedger(client as unknown as QueryClient);
     const result = await client.query(
       "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
       [id],
@@ -804,7 +954,10 @@ router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('catalog_revision',0))");
+    await lockInventoryLedger(client as unknown as QueryClient);
     await client.query("DELETE FROM sales");
+    await client.query("DELETE FROM app_storage_tombstones");
     await client.query("DELETE FROM attendance");
     await client.query("DELETE FROM session_closures");
     await client.query("DELETE FROM inventory_movements");

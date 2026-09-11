@@ -1277,7 +1277,10 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
       if (Array.isArray(snapshot.closures)) { setClosures(snapshot.closures); writeStore('bt-session-closures', snapshot.closures); }
    };
    const adminRequest = async (path: string, init?: RequestInit) => {
-     const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, init);
+      const headers = new Headers(init?.headers);
+      const catalogRevision = localStorage.getItem(CATALOG_REVISION_STORE_KEY);
+      if (catalogRevision) headers.set('X-Catalog-Revision', catalogRevision);
+      const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, { ...init, headers });
      const payload = await response.json() as { message?: string; catalogRevision?: string | null; snapshot?: Partial<CloudSnapshot> };
      if (!response.ok) throw new Error(payload.message || 'No se pudo guardar el cambio');
      if (payload.catalogRevision) localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);

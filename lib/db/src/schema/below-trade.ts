@@ -19,6 +19,15 @@ export const appMetadataTable = pgTable("app_metadata", {
   ...timestamps,
 });
 
+export const appStorageTombstonesTable = pgTable("app_storage_tombstones", {
+  collection: text("collection").notNull(),
+  recordId: text("record_id").notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull().defaultNow(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("app_storage_tombstones_collection_record_unique").on(table.collection, table.recordId),
+]);
+
 export const marketsTable = pgTable("markets", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
