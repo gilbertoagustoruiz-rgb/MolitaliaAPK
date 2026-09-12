@@ -20,7 +20,7 @@ type AssignmentRelationship = { key: string; promoter: AppUser; marketId: string
 type ClientCategory = 'MIXTO' | 'CONFETI';
 type Client = { id: string; code: string; name: string; phone?: string; category?: ClientCategory; marketId: string; status: Status };
 type ProductPrice = { sku: string; product: string; unitsPerPackage: number; unitPrice: number; totalPrice: number; updatedAt: string };
-type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; marketRegion?: string; marketDepartment?: string; marketProvince?: string; marketDistrict?: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; status: SyncStatus };
+type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; marketRegion?: string; marketDepartment?: string; marketProvince?: string; marketDistrict?: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; updatedAt?: string; status: SyncStatus };
 type Attendance = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
 type SessionClosure = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; marketId: string; clientId?: string; tastingUsed: number; leads: number; date: string; status: SyncStatus };
 type RedemptionItemId = 'AVENA' | 'BATEA' | 'MANDIL' | 'SPAGHETTI';
@@ -135,6 +135,23 @@ function mergeAssignments(current: PromoterAssignment[], incoming: PromoterAssig
     const key = item.promoterDni || item.promoterId;
     const previous = next.get(key);
     if (!previous || !previous.updatedAt || !item.updatedAt || item.updatedAt >= previous.updatedAt) next.set(key, item);
+  });
+  return Array.from(next.values());
+}
+function saleFreshness(sale: Sale) {
+  return sale.updatedAt || sale.date || '';
+}
+function mergeSales(local: Sale[], incoming: Sale[]) {
+  const next = new Map(incoming.map(sale => [sale.id, sale]));
+  local.forEach(localSale => {
+    const cloudSale = next.get(localSale.id);
+    if (!cloudSale) {
+      // Solo se conserva lo que todavía no fue confirmado por el servidor.
+      // Una venta sincronizada ausente del snapshot debe reflejar una eliminación real.
+      if (localSale.status === 'PENDIENTE') next.set(localSale.id, localSale);
+      return;
+    }
+    if (saleFreshness(localSale) > saleFreshness(cloudSale)) next.set(localSale.id, localSale);
   });
   return Array.from(next.values());
 }
@@ -1263,7 +1280,7 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
     ]);
     notify('Ejemplo de canjes y degustación descargado');
   };
-   const applyAdminSnapshot = (snapshot: Partial<CloudSnapshot> | undefined) => {
+    const applyAdminSnapshot = (snapshot: Partial<CloudSnapshot> | undefined, removedSaleId?: string) => {
      if (!snapshot) return;
       if (Array.isArray(snapshot.markets)) { setMarkets(snapshot.markets); writeStore('bt-markets', snapshot.markets); }
      if (Array.isArray(snapshot.users)) {
@@ -1275,7 +1292,11 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
         setUsers(nextUsers); writeStore('bt-users', nextUsers);
      }
       if (Array.isArray(snapshot.clients)) { setClients(snapshot.clients); writeStore('bt-clients', snapshot.clients); }
-      if (Array.isArray(snapshot.sales)) { setSales(snapshot.sales); writeStore('bt-sales', snapshot.sales); }
+       if (Array.isArray(snapshot.sales)) {
+         const nextSales = mergeSales(sales, snapshot.sales).filter(sale => sale.id !== removedSaleId);
+         setSales(nextSales);
+         writeStore('bt-sales', nextSales);
+       }
       if (Array.isArray(snapshot.attendance)) { setAttendance(snapshot.attendance); writeStore('bt-attendance', snapshot.attendance); }
       if (Array.isArray(snapshot.inventory)) { const nextInventory = reconcileInventory(snapshot.inventory, Array.isArray(snapshot.movements) ? snapshot.movements : movements); setInventory(nextInventory); writeStore('bt-inventory', nextInventory); }
       if (Array.isArray(snapshot.movements)) { setMovements(snapshot.movements); writeStore('bt-inventory-movements', snapshot.movements); }
@@ -1290,7 +1311,11 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
      const payload = await response.json() as { message?: string; catalogRevision?: string | null; snapshot?: Partial<CloudSnapshot> };
      if (!response.ok) throw new Error(payload.message || 'No se pudo guardar el cambio');
      if (payload.catalogRevision) localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
-     applyAdminSnapshot(payload.snapshot);
+      const saleDeletePrefix = '/sales/';
+      const removedSaleId = init?.method === 'DELETE' && path.startsWith(saleDeletePrefix)
+        ? decodeURIComponent(path.slice(saleDeletePrefix.length))
+        : undefined;
+      applyAdminSnapshot(payload.snapshot, removedSaleId);
      return payload;
    };
    const saveUser = (newUser: AppUser) => { const next = [...users, newUser]; setUsers(next); writeStore('bt-users', next); setModal(null); notify('Usuario creado con clave temporal'); };
@@ -1362,7 +1387,7 @@ function PromoterApp({ user, markets, clients, assignments, productPrices, sales
        if (!canSellForSelectedClient) { notify(exitedToday(clientId) ? 'Este cliente quedó cerrado por hoy después de registrar la salida. Podrás vender nuevamente mañana.' : 'Debes registrar una entrada activa en este cliente antes de registrar una venta.', true); return; }
        if (!pricesValid) { notify(mode === 'UNIDADES' ? 'Ingresa un precio unitario mayor a S/ 0.00.' : 'Ingresa el precio unitario de cada marca utilizada.', true); return; }
        if (!canConfirm) { notify(mode === 'PLANCHAS' && planchas > 80 ? 'Requiere autorización previa de Trade' : exceptionNeedsComment ? 'Para registrar 3 canjes, agrega el comentario de la excepción.' : bonus && missingRedemption ? `Stock insuficiente de ${redemptionLabel(missingRedemption[0])} para este canje` : Number.isFinite(saleAmount) && saleAmount > 0 ? 'Completa venta y evidencias' : 'Ingresa un precio unitario mayor a S/ 0.00', true); return; }
-        const id = `VTA-${new Date().getFullYear()}-${String(sales.length + 1).padStart(6, '0')}`; const now = new Date().toISOString(); const sale: Sale = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId, marketId: selectedMarketId, marketRegion: selectedMarket.region || selectedMarket.department, marketDepartment: selectedMarket.department, marketProvince: selectedMarket.province, marketDistrict: selectedMarket.district, mode, units: total, amountSoles: saleAmount, weightKg: orderWeightKg, unitPrices: mode === 'UNIDADES' ? { [selectedProduct.sku]: unitPrice } : brandUnitPrices, planchas: mode === 'PLANCHAS' ? planchas : undefined, mix: mode === 'PLANCHAS' ? mix : { [selectedProduct.brand]: unitQty }, bonus, redemptionCount: canjeCount, comment: comment.trim() || undefined, receiptPhoto: `BOLETA - ${id}.jpg`, exchangePhoto: bonus ? `${bonus} - CLIENTE - ${id}.jpg` : undefined, date: now, status: syncStatus() };
+        const id = `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`; const now = new Date().toISOString(); const sale: Sale = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId, marketId: selectedMarketId, marketRegion: selectedMarket.region || selectedMarket.department, marketDepartment: selectedMarket.department, marketProvince: selectedMarket.province, marketDistrict: selectedMarket.district, mode, units: total, amountSoles: saleAmount, weightKg: orderWeightKg, unitPrices: mode === 'UNIDADES' ? { [selectedProduct.sku]: unitPrice } : brandUnitPrices, planchas: mode === 'PLANCHAS' ? planchas : undefined, mix: mode === 'PLANCHAS' ? mix : { [selectedProduct.brand]: unitQty }, bonus, redemptionCount: canjeCount, comment: comment.trim() || undefined, receiptPhoto: `BOLETA - ${id}.jpg`, exchangePhoto: bonus ? `${bonus} - CLIENTE - ${id}.jpg` : undefined, date: now, updatedAt: now, status: 'PENDIENTE' };
       const next = [sale, ...sales]; setSales(next); writeStore('bt-sales', next);
       const saleClient = clients.find(client => client.id === clientId);
       const photoContext = { clientName: saleClient?.name || saleClient?.code || 'CLIENTE NO IDENTIFICADO', marketName: selectedMarket.name, recordType: 'VENTA' };
@@ -1505,14 +1530,16 @@ export default function App() {
              return { ...cloudUser, password: localUser?.password };
            }));
           const nextClients = Array.isArray(snapshot.clients) ? snapshot.clients : [];
-          const nextSales = (Array.isArray(snapshot.sales) ? snapshot.sales : []).map(sale => enrichSaleMarketLocation(sale, nextMarkets));
+        const cloudSales = Array.isArray(snapshot.sales) ? snapshot.sales : [];
+        const localSales = readStore<Sale[]>('bt-sales', []);
+        const nextSales = mergeSales(localSales, cloudSales).map(sale => enrichSaleMarketLocation(sale, nextMarkets));
           const nextAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
           const nextMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
            const nextInventory = reconcileInventory(Array.isArray(snapshot.inventory) ? snapshot.inventory : [], nextMovements);
           const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
           const nextClosures = Array.isArray(snapshot.closures) ? snapshot.closures : [];
            const nextProductPrices = Array.isArray(snapshot.productPrices) ? snapshot.productPrices : productPrices;
-          setMarkets(nextMarkets); setUsers(nextUsers); setClients(nextClients); setSales(nextSales); setAttendance(nextAttendance); setInventory(nextInventory); setMovements(nextMovements); setAssignments(nextAssignments); setClosures(nextClosures);
+        setMarkets(nextMarkets); setUsers(nextUsers); setClients(nextClients); setSales(nextSales); setAttendance(nextAttendance); setInventory(nextInventory); setMovements(nextMovements); setAssignments(nextAssignments); setClosures(nextClosures);
            setProductPrices(nextProductPrices);
            writeStore('bt-markets', nextMarkets); writeStore('bt-users', nextUsers); writeStore('bt-clients', nextClients); writeStore('bt-sales', nextSales); writeStore('bt-attendance', nextAttendance); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); writeStore('bt-promoter-assignments', nextAssignments); writeStore('bt-session-closures', nextClosures); writeStore(PRODUCT_PRICES_STORE_KEY, nextProductPrices);
         } catch {
@@ -1567,11 +1594,21 @@ export default function App() {
           closures,
            productPrices,
         };
-         void fetch(APP_STORAGE_SYNC, {
+          void fetch(APP_STORAGE_SYNC, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
            body: JSON.stringify({ snapshot, catalogRevision: localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined }),
-        }).catch(() => undefined);
+         }).then(async response => {
+           if (!response.ok) return;
+           const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
+           if (!Array.isArray(payload.snapshot?.sales)) return;
+           setSales(current => {
+             const nextSales = mergeSales(current, payload.snapshot?.sales || []);
+             if (JSON.stringify(nextSales) === JSON.stringify(current)) return current;
+             writeStore('bt-sales', nextSales);
+             return nextSales;
+           });
+         }).catch(() => undefined);
       }, 1500);
       return () => window.clearTimeout(timeout);
      }, [cloudReady, cloudSyncTick, markets, users, clients, productPrices, sales, attendance, inventory, movements, assignments, closures]);
