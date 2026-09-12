@@ -2,9 +2,15 @@ import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
 import { Router, type IRouter } from "express";
+import { backupSnapshot } from "./google-sheets-storage";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
+const googleSheetsBackupPendingKey = "google_sheets_backup_pending";
+const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
+const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
+let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
+let googleSheetsBackupRunning = false;
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -144,6 +150,94 @@ async function readSnapshot(client: QueryClient = pool as unknown as QueryClient
   }
   return snapshot;
 }
+
+async function setBackupMetadata(key: string, valueToStore: string | null) {
+  if (valueToStore === null) {
+    await pool.query("DELETE FROM app_metadata WHERE key=$1", [key]);
+    return;
+  }
+  await pool.query(
+    `INSERT INTO app_metadata (key,value)
+     VALUES ($1,$2)
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
+    [key, valueToStore],
+  );
+}
+
+function scheduleGoogleSheetsBackup(delayMs = 250) {
+  if (googleSheetsBackupTimer) return;
+  googleSheetsBackupTimer = setTimeout(() => {
+    googleSheetsBackupTimer = null;
+    void runGoogleSheetsBackup();
+  }, delayMs);
+  googleSheetsBackupTimer.unref();
+}
+
+async function requestGoogleSheetsBackup(reason: string) {
+  try {
+    await setBackupMetadata(
+      googleSheetsBackupPendingKey,
+      JSON.stringify({ requestedAt: new Date().toISOString(), reason }),
+    );
+    scheduleGoogleSheetsBackup();
+  } catch (error) {
+    console.error("Unable to queue Google Sheets backup", error);
+    scheduleGoogleSheetsBackup(10_000);
+  }
+}
+
+async function runGoogleSheetsBackup() {
+  if (googleSheetsBackupRunning) return;
+  googleSheetsBackupRunning = true;
+  const client = await pool.connect();
+  let locked = false;
+  try {
+    const lockResult = await client.query(
+      "SELECT pg_try_advisory_lock(hashtextextended('google_sheets_backup',0)) AS locked",
+    );
+    locked = Boolean(lockResult.rows[0]?.locked);
+    if (!locked) return;
+
+    const pending = await client.query(
+      "SELECT value FROM app_metadata WHERE key=$1 LIMIT 1",
+      [googleSheetsBackupPendingKey],
+    );
+    if (!pending.rows[0]) return;
+
+    const snapshot = await readSnapshot(client as unknown as QueryClient);
+    await backupSnapshot(snapshot);
+    await setBackupMetadata(googleSheetsBackupLastSuccessKey, new Date().toISOString());
+    await setBackupMetadata(googleSheetsBackupLastErrorKey, null);
+    await setBackupMetadata(googleSheetsBackupPendingKey, null);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error desconocido";
+    console.error("Google Sheets backup failed", error);
+    await setBackupMetadata(
+      googleSheetsBackupLastErrorKey,
+      JSON.stringify({ failedAt: new Date().toISOString(), message }),
+    ).catch((metadataError) => console.error("Unable to record backup failure", metadataError));
+    scheduleGoogleSheetsBackup(60_000);
+  } finally {
+    if (locked) {
+      await client.query(
+        "SELECT pg_advisory_unlock(hashtextextended('google_sheets_backup',0))",
+      ).catch(() => undefined);
+    }
+    client.release();
+    googleSheetsBackupRunning = false;
+  }
+}
+
+router.use((req, res, next) => {
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    res.on("finish", () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        void requestGoogleSheetsBackup(`${req.method} ${req.path}`);
+      }
+    });
+  }
+  next();
+});
 
 function saleIdFromCanjeMovement(record: StoredRecord) {
   const id = value(record, "id");
@@ -405,6 +499,12 @@ async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision
   }
   return readSnapshot();
 }
+
+void requestGoogleSheetsBackup("inicio del servidor");
+const googleSheetsBackupInterval = setInterval(() => {
+  void runGoogleSheetsBackup();
+}, 60_000);
+googleSheetsBackupInterval.unref();
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
