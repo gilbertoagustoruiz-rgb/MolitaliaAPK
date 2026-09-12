@@ -7,3 +7,4 @@
 - [Inventario derivado del historial](inventory-ledger.md) — si saldo y movimientos divergen, reconstruir stock desde abastecimientos y consumos evita perder degustaciones ingresadas.
 - [Canjes estacionales](seasonal-redemptions.md) — Setiembre/Octubre usan Mandil, Noviembre Batea y Diciembre elimina accesorios; el agotamiento total activa esta última alternativa.
 - [Alcance del coordinador](coordinator-scope.md) — el COORDINADOR usa asignaciones de mercados/clientes para limitar su vista de lectura.
+- [Stock operativo por promotor](promoter-owned-stock.md) — canjes y degustación pertenecen al usuario; el mercado conserva solo ubicación e historial legado.

@@ -267,6 +267,10 @@ async function reconcileInventoryFromMovements(client: QueryClient) {
   for (const row of movementResult.rows) {
     const marketId = String(row.market_id);
     const source = isRecord(row.data) ? row.data : {};
+    // Promoter-owned stock is deducted from the user JSON record. These
+    // movements retain marketId for location history but must not mutate the
+    // legacy market inventory balance.
+    if (value(source, "promoterId")) continue;
     const movement = {
       ...source,
       marketId,
@@ -733,6 +737,10 @@ router.delete("/app-storage/admin/sales/:id", async (req, res): Promise<void> =>
       movementsByMarket.set(movement.market_id, current);
     }
     for (const [marketId, saleMovements] of movementsByMarket) {
+      const legacySaleMovements = saleMovements.filter((movement) =>
+        !value(isRecord(movement.data) ? movement.data : {}, "promoterId"),
+      );
+      if (!legacySaleMovements.length) continue;
       const inventoryResult = await client.query(
         "SELECT redemption_stock,data FROM inventory WHERE market_id=$1 FOR UPDATE",
         [marketId],
@@ -740,7 +748,7 @@ router.delete("/app-storage/admin/sales/:id", async (req, res): Promise<void> =>
       const current = inventoryResult.rows[0];
       if (!current) continue;
       const redemptionStock = { ...(current.redemption_stock || {}) };
-      for (const movement of saleMovements) {
+      for (const movement of legacySaleMovements) {
         const source = isRecord(movement.data) ? movement.data : {};
         const components = isRecord(source.canjeComponents) ? source.canjeComponents : null;
         if (components) {
