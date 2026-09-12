@@ -281,7 +281,8 @@ async function upsertRecord(
       `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (id) DO UPDATE SET receipt_photo=EXCLUDED.receipt_photo,exchange_photo=EXCLUDED.exchange_photo,
-       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at`,
       [key, value(source, "promoterId"), value(source, "clientId"), value(source, "marketId"), value(source, "mode"),
         numeric(source, "units"), numeric(source, "amountSoles"), source.weightKg == null ? null : numeric(source, "weightKg"),
         dateValue(source), "SINCRONIZADA", value(source, "receiptPhoto") || null, value(source, "exchangePhoto") || null,
@@ -552,8 +553,9 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
   const id = String(req.params.id || "").trim();
   const input = req.body?.sale;
   const amountSoles = isRecord(input) ? Number(input.amountSoles) : Number.NaN;
-  if (!id || !isRecord(input) || !value(input, "clientId") || !Number.isFinite(amountSoles) || amountSoles <= 0) {
-    res.status(400).json({ message: "La venta requiere cliente e importe mayor a cero." });
+  const saleDate = isRecord(input) ? new Date(value(input, "date")) : new Date(Number.NaN);
+  if (!id || !isRecord(input) || !value(input, "clientId") || !Number.isFinite(amountSoles) || amountSoles <= 0 || Number.isNaN(saleDate.getTime())) {
+    res.status(400).json({ message: "La venta requiere cliente, fecha válida e importe mayor a cero." });
     return;
   }
   try {
@@ -571,15 +573,16 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       id,
       clientId: value(input, "clientId"),
       amountSoles,
+      date: saleDate.toISOString(),
       comment: value(input, "comment") || undefined,
       status: "SINCRONIZADA",
       updatedAt,
     };
     await pool.query(
       `UPDATE sales
-       SET client_id=$2,amount_soles=$3,status='SINCRONIZADA',data=$4,record_updated_at=$5,updated_at=now()
+       SET client_id=$2,amount_soles=$3,sale_date=$4,status='SINCRONIZADA',data=$5,record_updated_at=$6,updated_at=now()
        WHERE id=$1`,
-      [id, sale.clientId, amountSoles, sale, updatedAt],
+      [id, sale.clientId, amountSoles, saleDate, sale, updatedAt],
     );
     res.json({ sale, snapshot: await readSnapshot() });
   } catch (error) {

@@ -825,21 +825,27 @@ function NewClientModal({ markets, count, onSave, close }: { markets: { value: s
 function SaleEditModal({ sale, clients, onSave, close }: { sale: Sale; clients: Client[]; onSave: (sale: Sale) => Promise<boolean>; close: () => void }) {
   const [clientId, setClientId] = useState(sale.clientId);
   const [amountSoles, setAmountSoles] = useState(String(sale.amountSoles));
+  const [saleDate, setSaleDate] = useState(() => {
+    const date = new Date(sale.date);
+    const offset = date.getTimezoneOffset() * 60_000;
+    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+  });
   const [comment, setComment] = useState(sale.comment || '');
   const [saving, setSaving] = useState(false);
   const marketClients = clients.filter(client => client.marketId === sale.marketId && (client.status === 'ACTIVO' || client.id === sale.clientId));
   const parsedAmount = Number(amountSoles);
+  const parsedDate = new Date(saleDate);
   const save = async () => {
-    if (!clientId || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || saving) return;
+    if (!clientId || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || Number.isNaN(parsedDate.getTime()) || saving) return;
     setSaving(true);
     try {
-      const saved = await onSave({ ...sale, clientId, amountSoles: parsedAmount, comment: comment.trim() || undefined });
+      const saved = await onSave({ ...sale, clientId, amountSoles: parsedAmount, date: parsedDate.toISOString(), comment: comment.trim() || undefined });
       if (saved) close();
     } finally {
       setSaving(false);
     }
   };
-  return <Modal title="Editar venta" detail={`${sale.id} · Se conservan productos, cantidades, canjes y evidencias.`} close={close}><div className="form-grid"><SelectField label="Cliente *" value={clientId} onChange={setClientId} items={marketClients.map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} /><Field label="Importe total (S/) *"><Input type="number" value={amountSoles} onChange={setAmountSoles} min={0.01} step={0.01} testId="input-edit-sale-amount" /></Field><Field label="Comentario" className="full-field"><textarea className="input textarea" value={comment} onChange={event => setComment(event.target.value)} maxLength={300} rows={3} data-testid="input-edit-sale-comment" /></Field></div><p className="modal-hint">Para proteger el inventario, el tipo de venta, productos, cantidades, canjes y fotos no se modifican desde esta corrección.</p><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!clientId || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || saving} onClick={save} testId="button-save-sale-edit">{saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}{saving ? 'Guardando...' : 'Guardar cambios'}</Btn></div></Modal>;
+  return <Modal title="Editar venta" detail={`${sale.id} · Se conservan productos, cantidades, canjes y evidencias.`} close={close}><div className="form-grid"><SelectField label="Cliente *" value={clientId} onChange={setClientId} items={marketClients.map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} /><Field label="Importe total (S/) *"><Input type="number" value={amountSoles} onChange={setAmountSoles} min={0.01} step={0.01} testId="input-edit-sale-amount" /></Field><Field label="Fecha y hora de venta *"><Input type="datetime-local" value={saleDate} onChange={setSaleDate} testId="input-edit-sale-date" /></Field><Field label="Comentario" className="full-field"><textarea className="input textarea" value={comment} onChange={event => setComment(event.target.value)} maxLength={300} rows={3} data-testid="input-edit-sale-comment" /></Field></div><p className="modal-hint">Para proteger el inventario, el tipo de venta, productos, cantidades, canjes y fotos no se modifican desde esta corrección.</p><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!clientId || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || Number.isNaN(parsedDate.getTime()) || saving} onClick={save} testId="button-save-sale-edit">{saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}{saving ? 'Guardando...' : 'Guardar cambios'}</Btn></div></Modal>;
 }
 function NewCanjeModal({ markets, inventory, user, onSave, close }: { markets: { value: string; label: string }[]; inventory: MarketInventory[]; user: AppUser; onSave: (canje: InventoryMovement) => void | Promise<void>; close: () => void }) {
   const [marketId, setMarketId] = useState(''); const [canjeProductId, setCanjeProductId] = useState<CanjeProductId>('CANJE_AVENA_2'); const [quantity, setQuantity] = useState('');
