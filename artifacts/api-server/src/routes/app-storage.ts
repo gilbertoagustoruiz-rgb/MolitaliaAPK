@@ -662,36 +662,123 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     res.status(400).json({ message: "La venta requiere cliente, fecha válida e importe mayor a cero." });
     return;
   }
+  const client = await pool.connect();
   try {
-    const existing = await pool.query(
-      "SELECT data FROM sales WHERE id=$1 LIMIT 1",
+    await client.query("BEGIN");
+    const revisionIsCurrent = await lockAndValidateCatalogRevision(
+      client as unknown as QueryClient,
+      req.get("x-catalog-revision") || null,
+    );
+    if (!revisionIsCurrent) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ message: "La información cambió. Actualiza la aplicación antes de editar nuevamente." });
+      return;
+    }
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`sale:${id}`]);
+    const existing = await client.query(
+      "SELECT promoter_id,market_id,data FROM sales WHERE id=$1 FOR UPDATE",
       [id],
-    ) as unknown as { rows: Array<{ data: StoredRecord }> };
+    ) as unknown as { rows: Array<{ promoter_id: string; market_id: string; data: StoredRecord }> };
     if (!existing.rows[0]) {
+      await client.query("ROLLBACK");
       res.status(404).json({ message: "La venta no existe." });
       return;
     }
+    const currentSale = existing.rows[0];
+    const promoterResult = await client.query(
+      "SELECT data FROM users WHERE id=$1 FOR UPDATE",
+      [currentSale.promoter_id],
+    ) as unknown as { rows: Array<{ data: StoredRecord }> };
+    if (!promoterResult.rows[0]) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ message: "No se encontró al promotor propietario del inventario." });
+      return;
+    }
+    const movementPrefix = `CAN-${id}-`;
+    const oldMovements = await client.query(
+      `SELECT item_id,quantity,data FROM inventory_movements
+       WHERE kind='CANJE' AND left(id,length($1))=$1 FOR UPDATE`,
+      [movementPrefix],
+    ) as unknown as { rows: Array<{ item_id: string | null; quantity: number; data: StoredRecord }> };
+    const itemIds = ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"];
+    const promoterData = promoterResult.rows[0].data || {};
+    const stockSource = isRecord(promoterData.redemptionStock) ? promoterData.redemptionStock : {};
+    const availableStock = Object.fromEntries(itemIds.map((itemId) => [itemId, Math.max(0, Number(stockSource[itemId]) || 0)]));
+    for (const movement of oldMovements.rows) {
+      const movementData = isRecord(movement.data) ? movement.data : {};
+      if (value(movementData, "promoterId") !== currentSale.promoter_id) continue;
+      const itemId = movement.item_id || value(movementData, "itemId");
+      if (itemIds.includes(itemId)) availableStock[itemId] += Math.max(0, Number(movement.quantity) || 0);
+    }
+    const requestedSource = isRecord(input.redemptionItems) ? input.redemptionItems : {};
+    const requested = Object.fromEntries(itemIds.map((itemId) => [itemId, Math.max(0, Math.floor(Number(requestedSource[itemId]) || 0))]));
+    for (const itemId of itemIds) {
+      if (requested[itemId] > availableStock[itemId]) {
+        await client.query("ROLLBACK");
+        res.status(409).json({ message: `Stock insuficiente de ${itemId} para actualizar el canje.` });
+        return;
+      }
+    }
     const updatedAt = new Date().toISOString();
     const sale = {
-      ...existing.rows[0].data,
+      ...currentSale.data,
       id,
       clientId: value(input, "clientId"),
       amountSoles,
       date: saleDate.toISOString(),
       comment: value(input, "comment") || undefined,
+      bonus: value(input, "bonus") || undefined,
+      redemptionCount: value(input, "bonus") ? Math.max(1, Math.floor(numeric(input, "redemptionCount"))) : 0,
+      redemptionItems: value(input, "bonus") ? requested : undefined,
+      receiptPhoto: value(input, "receiptPhoto"),
+      exchangePhoto: value(input, "bonus") ? value(input, "exchangePhoto") || undefined : undefined,
       status: "SINCRONIZADA",
       updatedAt,
     };
-    await pool.query(
+    await client.query(
       `UPDATE sales
-       SET client_id=$2,amount_soles=$3,sale_date=$4,status='SINCRONIZADA',data=$5,record_updated_at=$6,updated_at=now()
+       SET client_id=$2,amount_soles=$3,sale_date=$4,status='SINCRONIZADA',receipt_photo=$5,exchange_photo=$6,data=$7,record_updated_at=$8,updated_at=now()
        WHERE id=$1`,
-      [id, sale.clientId, amountSoles, saleDate, sale, updatedAt],
+      [id, sale.clientId, amountSoles, saleDate, sale.receiptPhoto || null, sale.exchangePhoto || null, sale, updatedAt],
     );
+    await client.query(
+      "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
+      [movementPrefix],
+    );
+    for (const itemId of itemIds) {
+      if (!requested[itemId]) continue;
+      const movement = {
+        id: `${movementPrefix}${itemId}`,
+        marketId: currentSale.market_id,
+        kind: "CANJE",
+        itemId,
+        quantity: requested[itemId],
+        actorId: currentSale.promoter_id,
+        actorName: value(promoterData, "name") || "Promotor",
+        promoterId: currentSale.promoter_id,
+        date: updatedAt,
+        status: "SINCRONIZADA",
+      };
+      await client.query(
+        `INSERT INTO inventory_movements (id,market_id,kind,item_id,quantity,actor_id,movement_date,status,data,record_updated_at)
+         VALUES ($1,$2,'CANJE',$3,$4,$5,$6,'SINCRONIZADA',$7,$8)`,
+        [movement.id, movement.marketId, itemId, movement.quantity, movement.actorId, updatedAt, movement, updatedAt],
+      );
+      availableStock[itemId] -= requested[itemId];
+    }
+    const nextPromoterData = { ...promoterData, redemptionStock: availableStock };
+    await client.query(
+      "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+      [currentSale.promoter_id, nextPromoterData, updatedAt],
+    );
+    await client.query("COMMIT");
     res.json({ sale, snapshot: await readSnapshot() });
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to update sale");
     res.status(500).json({ message: "No se pudo editar la venta." });
+  } finally {
+    client.release();
   }
 });
 
