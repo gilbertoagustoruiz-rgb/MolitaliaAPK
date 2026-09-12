@@ -14,11 +14,12 @@ const collections = {
   movements: { sheet: "MOVIMIENTOS_STOCK", key: "id" },
   assignments: { sheet: "ASIGNACIONES", key: "promoterId" },
   closures: { sheet: "CIERRES_JORNADA", key: "id" },
+  productPrices: { sheet: "PRECIOS", key: "sku" },
 } as const;
 
 type CollectionName = keyof typeof collections;
-type StoredRecord = Record<string, unknown>;
-type StorageSnapshot = Record<CollectionName, StoredRecord[]>;
+export type StoredRecord = Record<string, unknown>;
+export type StorageSnapshot = Record<CollectionName, StoredRecord[]>;
 
 function emptySnapshot(): StorageSnapshot {
   return {
@@ -31,6 +32,7 @@ function emptySnapshot(): StorageSnapshot {
     movements: [],
     assignments: [],
     closures: [],
+    productPrices: [],
   };
 }
 
@@ -284,6 +286,33 @@ async function writeSnapshot(
       body: JSON.stringify({ valueInputOption: "RAW", data }),
     },
   );
+}
+
+function mergeForBackup(current: StorageSnapshot, incoming: StorageSnapshot) {
+  const merged = emptySnapshot();
+  (Object.keys(collections) as CollectionName[]).forEach((name) => {
+    const records = new Map<string, StoredRecord>();
+    for (const record of current[name]) {
+      const key = String(record[collections[name].key] ?? "").trim();
+      if (key) records.set(key, record);
+    }
+    for (const record of incoming[name]) {
+      const key = String(record[collections[name].key] ?? "").trim();
+      if (key) records.set(key, record);
+    }
+    merged[name] = Array.from(records.values());
+  });
+  return merged;
+}
+
+export async function backupSnapshot(snapshot: StorageSnapshot) {
+  return serialized(async () => {
+    const connectors = new ReplitConnectors();
+    const current = await readSnapshot(connectors);
+    const merged = mergeForBackup(current, snapshot);
+    await writeSnapshot(connectors, merged);
+    return merged;
+  });
 }
 
 async function writeAssignments(

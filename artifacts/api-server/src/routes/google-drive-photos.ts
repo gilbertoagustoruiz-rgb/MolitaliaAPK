@@ -197,4 +197,34 @@ router.get("/evidence-photos/storage/:token", async (req, res) => {
   }
 });
 
+router.get("/evidence-photos/drive/:fileId", async (req, res) => {
+  const fileId = String(req.params.fileId || "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) {
+    res.status(400).json({ message: "Identificador de Drive inválido." });
+    return;
+  }
+  try {
+    const connectors = new ReplitConnectors();
+    const response = await connectors.proxy(
+      "google-drive",
+      `/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+    );
+    if (!response.ok) {
+      const detail = await response.text();
+      req.log.warn({ driveStatus: response.status, fileId, detail: detail.slice(0, 300) }, "No se pudo leer la evidencia desde Google Drive");
+      res.status(response.status === 404 ? 404 : 502).json({ message: "No se pudo recuperar la fotografía de Drive." });
+      return;
+    }
+    res.status(200);
+    res.setHeader("Content-Type", response.headers.get("content-type") || "image/jpeg");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    const contentLength = response.headers.get("content-length");
+    if (contentLength) res.setHeader("Content-Length", contentLength);
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    req.log.error({ err: error, fileId }, "No se pudo recuperar la evidencia desde Google Drive");
+    res.status(502).json({ message: "No se pudo recuperar la fotografía de Drive." });
+  }
+});
+
 export default router;

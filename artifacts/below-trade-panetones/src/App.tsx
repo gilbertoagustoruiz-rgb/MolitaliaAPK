@@ -745,7 +745,7 @@ function driveFileId(value: string) {
 }
 function photoImageSource(value: string) {
   const id = driveFileId(value);
-  return id ? `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w480` : value;
+  return id ? `/api/evidence-photos/drive/${encodeURIComponent(id)}` : value;
 }
 function PhotoThumbnail({ label, src }: { label: string; src?: string }) {
   const isAvailable = Boolean(src && /^(https?:\/\/|\/|data:image\/|blob:)/.test(src));
