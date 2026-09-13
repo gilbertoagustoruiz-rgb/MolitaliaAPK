@@ -348,7 +348,7 @@ async function upsertRecord(
   } else if (name === "users") {
     const password = value(source, "password");
     const passwordHash = password ? await hashPassword(password) : null;
-    const existingByDni = await client.query("SELECT id FROM users WHERE dni=$1 LIMIT 1", [key]);
+    const existingByDni = await client.query("SELECT id,data FROM users WHERE dni=$1 LIMIT 1", [key]);
     let userId = value(source, "id") || key;
     if (existingByDni.rows[0]?.id) {
       userId = String(existingByDni.rows[0].id);
@@ -356,15 +356,19 @@ async function upsertRecord(
       const existingById = await client.query("SELECT id FROM users WHERE id=$1 LIMIT 1", [userId]);
       if (existingById.rows[0]?.id) userId = `USR-${key}`;
     }
-    const userData = { ...normalized, id: userId };
+    const existingUserData = isRecord(existingByDni.rows[0]?.data) ? existingByDni.rows[0].data as StoredRecord : {};
+    const remainsArchived = existingUserData.sheetArchived === true && source.sheetArchived !== false;
+    const userData = remainsArchived
+      ? { ...normalized, id: userId, status: "INACTIVO", sheetArchived: true, sheetArchivedAt: existingUserData.sheetArchivedAt }
+      : { ...normalized, id: userId };
     await client.query(
       `INSERT INTO users (id,dni,name,role,status,password_hash,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (dni) DO UPDATE SET name=EXCLUDED.name,role=EXCLUDED.role,status=EXCLUDED.status,
        password_hash=COALESCE(EXCLUDED.password_hash,users.password_hash),data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
-      [userId, key, value(source, "name"), value(source, "role"),
-        value(source, "status") || "ACTIVO", passwordHash, userData, updated],
+      [userId, key, value(userData, "name"), value(userData, "role"),
+        value(userData, "status") || "ACTIVO", passwordHash, userData, updated],
     );
   } else if (name === "clients") {
     await client.query(
@@ -558,6 +562,54 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
   } catch (error) {
     req.log.error({ err: error }, "Unable to save assignment");
     res.status(500).json({ message: "No se pudo guardar la asignación." });
+  }
+});
+
+router.post("/app-storage/admin/users/sync", async (req, res): Promise<void> => {
+  const users = req.body?.users;
+  if (!Array.isArray(users) || !users.length || users.some((user) => !isRecord(user) || !/^\d{8}$/.test(value(user, "dni")))) {
+    res.status(400).json({ message: "La hoja debe contener usuarios válidos con DNI de 8 dígitos." });
+    return;
+  }
+  const dnis = users.map((user) => value(user, "dni"));
+  if (new Set(dnis).size !== dnis.length) {
+    res.status(400).json({ message: "La hoja contiene DNI repetidos. No se actualizó ningún usuario." });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const revisionIsCurrent = await lockAndValidateCatalogRevision(
+      client as unknown as QueryClient,
+      req.get("x-catalog-revision") || null,
+    );
+    if (!revisionIsCurrent) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ message: "La información cambió. Vuelve a pulsar Actualizar hoja." });
+      return;
+    }
+    for (const user of users) {
+      await upsertRecord(client as unknown as QueryClient, "users", { ...user, sheetArchived: false });
+    }
+    const archivedAt = new Date().toISOString();
+    await client.query(
+      `UPDATE users
+       SET status='INACTIVO',
+           data=data || jsonb_build_object('status','INACTIVO','sheetArchived',true,'sheetArchivedAt',$2::text),
+           record_updated_at=$2,
+           updated_at=now()
+       WHERE NOT (dni = ANY($1::text[]))`,
+      [dnis, archivedAt],
+    );
+    await client.query("COMMIT");
+    void requestGoogleSheetsBackup("sincronización autoritativa de usuarios");
+    res.json({ synced: dnis.length, snapshot: await readSnapshot() });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to synchronize authoritative users");
+    res.status(500).json({ message: "No se pudo sincronizar la hoja de Promotores." });
+  } finally {
+    client.release();
   }
 });
 
