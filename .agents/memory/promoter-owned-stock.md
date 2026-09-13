@@ -3,8 +3,8 @@ name: Stock operativo por promotor
 description: Propiedad de los saldos de canje y degustación durante la operación.
 ---
 
-Cada promotor tiene saldos independientes de Avena, Spaghetti, Batea, Mandil y Degustación. Las ventas y cierres descuentan del usuario activo; el mercado identifica dónde ocurrió el movimiento, pero no es dueño del saldo operativo.
+Cada promotor tiene saldos independientes de Avena, Spaghetti, Batea, Mandil y Degustación. La hoja de Promotores y la creación de accesos no asignan stock. Los artículos de canje se abastecen desde Canjes; las ventas y cierres descuentan del usuario activo. El mercado identifica dónde ocurrió el movimiento, pero no es dueño del saldo operativo.
 
 **Why:** Los materiales se entregan a personas concretas y un saldo compartido por mercado mezcla entregas y consumos de distintos promotores.
 
-**How to apply:** Solicitar los cinco saldos al crear o importar promotores, mostrar el saldo por usuario y mantener el inventario anterior por mercado únicamente como historial legado. No repartir automáticamente saldos antiguos entre usuarios.
+**How to apply:** Crear e importar promotores con saldo inicial cero, sin leer columnas de stock. Registrar abastecimientos personales como movimientos desde Canjes y revertir el saldo al eliminarlos. Mantener el inventario anterior por mercado únicamente como historial legado; no repartir automáticamente sus saldos.

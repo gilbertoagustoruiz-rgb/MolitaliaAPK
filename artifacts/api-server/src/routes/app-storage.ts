@@ -943,15 +943,19 @@ router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
 
 router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
   const input = req.body?.canje;
-  if (!isRecord(input) || !value(input, "marketId") || (!value(input, "itemId") && !value(input, "canjeProductId")) || numeric(input, "quantity") <= 0) {
-    res.status(400).json({ message: "El canje requiere mercado, producto y cantidad mayor a cero." });
+  const personalStock = isRecord(input) && Boolean(value(input, "promoterId"));
+  const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
+  if (!isRecord(input) || numeric(input, "quantity") <= 0 ||
+      (personalStock ? !validItemIds.has(value(input, "itemId")) : (!value(input, "marketId") || (!value(input, "itemId") && !value(input, "canjeProductId"))))) {
+    res.status(400).json({ message: "El abastecimiento requiere promotor, artículo y cantidad mayor a cero." });
     return;
   }
   const canje: StoredRecord = {
     id: value(input, "id") || `CANJE-${Date.now()}-${randomUUID().slice(0, 8)}`,
-    marketId: value(input, "marketId"),
+    marketId: value(input, "marketId") || `PERSONAL:${value(input, "promoterId")}`,
     kind: "AJUSTE_CANJES",
     itemId: value(input, "itemId") || undefined,
+    promoterId: value(input, "promoterId") || undefined,
     canjeProductId: value(input, "canjeProductId") || undefined,
     canjeProductLabel: value(input, "canjeProductLabel") || undefined,
     canjeComponents: isRecord(input.canjeComponents) ? input.canjeComponents : undefined,
@@ -966,6 +970,37 @@ router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
   try {
     await client.query("BEGIN");
     await lockInventoryLedger(client as unknown as QueryClient);
+    if (personalStock) {
+      const userResult = await client.query(
+        "SELECT data FROM users WHERE id=$1 FOR UPDATE",
+        [canje.promoterId],
+      ) as unknown as { rows: Array<{ data: StoredRecord }> };
+      const current = userResult.rows[0];
+      if (!current) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ message: "El promotor seleccionado no existe." });
+        return;
+      }
+      const currentStock = isRecord(current.data.redemptionStock) ? current.data.redemptionStock : {};
+      const redemptionStock = {
+        AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
+        BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
+        MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
+        SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
+      };
+      const itemId = value(canje, "itemId") as keyof typeof redemptionStock;
+      redemptionStock[itemId] += Math.floor(numeric(canje, "quantity"));
+      const updatedAt = value(canje, "date");
+      const userData = { ...current.data, redemptionStock, updatedAt };
+      await upsertRecord(client as unknown as QueryClient, "movements", canje);
+      await client.query(
+        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+        [canje.promoterId, userData, updatedAt],
+      );
+      await client.query("COMMIT");
+      res.status(201).json({ canje, snapshot: await readSnapshot() });
+      return;
+    }
     await upsertRecord(client as unknown as QueryClient, "movements", canje);
     const inventoryResult = await client.query(
       "SELECT tasting_stock, redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
@@ -1037,8 +1072,32 @@ router.delete("/app-storage/admin/canjes/:source/:id", async (req, res): Promise
       ) as unknown as { rows: Array<{ market_id: string; quantity: number; data: StoredRecord }> };
       const movement = result.rows[0];
       const productId = movement?.data?.canjeProductId;
+      const promoterId = value(movement?.data || {}, "promoterId");
+      const personalItemId = value(movement?.data || {}, "itemId");
       const components = isRecord(movement?.data?.canjeComponents) ? movement.data.canjeComponents : {};
-      if (movement && value(movement.data, "kind") === "AJUSTE_CANJES" && productId) {
+      if (movement && value(movement.data, "kind") === "AJUSTE_CANJES" && promoterId && personalItemId) {
+        const userResult = await client.query(
+          "SELECT data FROM users WHERE id=$1 FOR UPDATE",
+          [promoterId],
+        ) as unknown as { rows: Array<{ data: StoredRecord }> };
+        const currentUser = userResult.rows[0];
+        if (currentUser) {
+          const currentStock = isRecord(currentUser.data.redemptionStock) ? currentUser.data.redemptionStock : {};
+          const redemptionStock = {
+            AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
+            BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
+            MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
+            SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
+          };
+          const itemId = personalItemId as keyof typeof redemptionStock;
+          if (itemId in redemptionStock) redemptionStock[itemId] = Math.max(0, redemptionStock[itemId] - Math.max(0, Number(movement.quantity) || 0));
+          const updatedAt = new Date().toISOString();
+          await client.query(
+            "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+            [promoterId, { ...currentUser.data, redemptionStock, updatedAt }, updatedAt],
+          );
+        }
+      } else if (movement && value(movement.data, "kind") === "AJUSTE_CANJES" && productId) {
         const inventoryResult = await client.query(
           "SELECT redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
           [movement.market_id],
