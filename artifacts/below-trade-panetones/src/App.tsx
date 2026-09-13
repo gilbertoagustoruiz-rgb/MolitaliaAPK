@@ -341,6 +341,9 @@ function csvField(record: Record<string, string>, aliases: string[]) {
   const key = aliases.map(normalizeCsvHeader).find(alias => Object.prototype.hasOwnProperty.call(record, alias));
   return key ? record[key] : '';
 }
+function csvHasField(record: Record<string, string>, aliases: string[]) {
+  return aliases.map(normalizeCsvHeader).some(alias => Object.prototype.hasOwnProperty.call(record, alias));
+}
 function csvStatus(value: string): Status {
   return normalizeCsvHeader(value) === 'inactivo' ? 'INACTIVO' : 'ACTIVO';
 }
@@ -394,6 +397,17 @@ function importedUserFromRecord(record: Record<string, string>, index: number, m
   const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
   if (!/^\d{8}$/.test(dni) || !name || !roleValue || (isZoneManagerRole(roleValue) && marketValue && !marketId)) return null;
   const stock = (aliases: string[]) => Math.max(0, Math.floor(csvNumber(csvField(record, aliases))));
+  const tastingAliases = ['degustacion', 'stockdegustacion', 'tastingstock', 'stockpanetones'];
+  const redemptionAliases: Record<RedemptionItemId, string[]> = {
+    AVENA: ['avena', 'stockavena', 'cantidadavena'],
+    SPAGHETTI: ['spaghetti', 'spaguetti', 'stockspaghetti', 'stockspaguetti', 'cantidadspaghetti', 'cantidadspaguetti'],
+    BATEA: ['batea', 'stockbatea', 'cantidadbatea'],
+    MANDIL: ['mandil', 'stockmandil', 'cantidadmandil'],
+  };
+  const importedRedemptionStock = redemptionItems.reduce((result, item) => {
+    if (csvHasField(record, redemptionAliases[item.id])) result[item.id] = stock(redemptionAliases[item.id]);
+    return result;
+  }, {} as Partial<RedemptionStock>);
   return {
     id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${index + 1}`,
     dni, name, role: roleValue, roleLabel: roleLabel || roleValue,
@@ -401,15 +415,8 @@ function importedUserFromRecord(record: Record<string, string>, index: number, m
     clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined,
     password: csvField(record, ['clave', 'password', 'contrasena']) || undefined,
     status: csvStatus(csvField(record, ['estado', 'status'])),
-    ...(isPromoterRole(roleValue) ? {
-      tastingStock: stock(['degustacion', 'stockdegustacion', 'tastingstock', 'stockpanetones']),
-      redemptionStock: {
-        AVENA: stock(['avena', 'stockavena', 'cantidadavena']),
-        SPAGHETTI: stock(['spaghetti', 'stockspaghetti', 'cantidadspaghetti']),
-        BATEA: stock(['batea', 'stockbatea', 'cantidadbatea']),
-        MANDIL: stock(['mandil', 'stockmandil', 'cantidadmandil']),
-      },
-    } : {}),
+    ...(isPromoterRole(roleValue) && csvHasField(record, tastingAliases) ? { tastingStock: stock(tastingAliases) } : {}),
+    ...(isPromoterRole(roleValue) && Object.keys(importedRedemptionStock).length ? { redemptionStock: importedRedemptionStock as RedemptionStock } : {}),
   };
 }
 function importedMarketsFromRecords(records: Record<string, string>[]) {
@@ -1228,7 +1235,7 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
        imported.push({ ...importedUser, id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${importId}-${index + 1}` });
     });
     if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
-    const next = [...users]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.dni === item.dni); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); setUsers(next); writeStore('bt-users', next); await persistImportedSnapshot({ users: next });
+    const next = [...users]; imported.forEach(item => { const index = next.findIndex(current => current.dni === item.dni); if (index >= 0) { const current = next[index]; next[index] = { ...current, ...item, id: current.id, ...(item.redemptionStock ? { redemptionStock: { ...userRedemptionStock(current), ...item.redemptionStock } } : {}) }; } else next.push(item); }); setUsers(next); writeStore('bt-users', next); await persistImportedSnapshot({ users: next });
     return `${imported.length} usuarios importados${skipped ? ` · ${skipped} filas omitidas` : ''}`;
   };
   const importUsers = async (file: File) => {
