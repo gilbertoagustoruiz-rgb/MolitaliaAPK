@@ -1228,7 +1228,8 @@ router.delete("/app-storage/admin/degustaciones/:source/:id", async (req, res): 
       [id],
     ) as unknown as { rows: Array<{ market_id: string; quantity: number; data: StoredRecord }> };
     const movement = result.rows[0];
-    if (movement && value(movement.data, "kind") === "AJUSTE_DEGUSTACION" && value(movement.data, "degustacionProductId")) {
+    const movementKind = movement ? value(movement.data, "kind") : "";
+    if (movement && movementKind === "AJUSTE_DEGUSTACION" && value(movement.data, "degustacionProductId")) {
       const inventoryResult = await client.query(
         "SELECT tasting_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
         [movement.market_id],
@@ -1241,6 +1242,43 @@ router.delete("/app-storage/admin/degustaciones/:source/:id", async (req, res): 
           "UPDATE inventory SET tasting_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
           [movement.market_id, tastingStock, inventoryRecord, inventoryRecord.updatedAt],
         );
+      }
+    }
+    if (movement && movementKind === "DEGUSTACION") {
+      const promoterId = value(movement.data, "promoterId") || value(movement.data, "actorId");
+      if (!promoterId) {
+        await client.query("ROLLBACK");
+        res.status(409).json({ message: "No se encontró al promotor que registró la degustación." });
+        return;
+      }
+      const userResult = await client.query(
+        "SELECT data FROM users WHERE id=$1 FOR UPDATE",
+        [promoterId],
+      ) as unknown as { rows: Array<{ data: StoredRecord }> };
+      const currentUser = userResult.rows[0];
+      if (!currentUser) {
+        await client.query("ROLLBACK");
+        res.status(409).json({ message: "No se encontró al promotor propietario del stock." });
+        return;
+      }
+      const updatedAt = new Date().toISOString();
+      const tastingStock = Math.max(0, Number(currentUser.data?.tastingStock) || 0) + Math.max(0, Number(movement.quantity) || 0);
+      await client.query(
+        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+        [promoterId, { ...(currentUser.data || {}), tastingStock, updatedAt }, updatedAt],
+      );
+      const movementDate = value(movement.data, "date");
+      if (movementDate) {
+        const closureResult = await client.query(
+          "SELECT id,data FROM session_closures WHERE promoter_id=$1 AND closure_date=$2 FOR UPDATE",
+          [promoterId, movementDate],
+        ) as unknown as { rows: Array<{ id: string; data: StoredRecord }> };
+        for (const closure of closureResult.rows) {
+          await client.query(
+            "UPDATE session_closures SET tasting_used=0,data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+            [closure.id, { ...(closure.data || {}), tastingUsed: 0, updatedAt }, updatedAt],
+          );
+        }
       }
     }
     await client.query("DELETE FROM inventory_movements WHERE id=$1", [id]);

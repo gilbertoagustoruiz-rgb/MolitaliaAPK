@@ -236,6 +236,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .sale-card-footer { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-top:10px; }
 .sale-card-footer > small { font:600 10px var(--font-mono); color:hsl(var(--muted)); }
 .sale-card-footer .record-photos { margin-top:0; }
+.tasting-admin-record .sale-admin-actions { grid-template-columns:1fr; }
+.tasting-admin-record .sale-admin-actions .btn { min-width:110px; }
+.tasting-supply-heading { margin-top:28px; }
 .photo-thumbnail { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; width:64px; min-height:64px; overflow:hidden; border:1px solid hsl(var(--line)); border-radius:9px; background:hsl(42 32% 96%); color:hsl(var(--muted)); text-decoration:none; }
 .photo-thumbnail img { display:block; width:64px; height:64px; object-fit:cover; }
 .photo-thumbnail small { width:100%; padding:3px 4px; background:hsla(0 0% 100% / .9); color:hsl(var(--ink)); font-size:9px; line-height:1.1; text-align:center; }
