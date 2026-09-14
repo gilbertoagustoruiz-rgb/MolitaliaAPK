@@ -7,4 +7,4 @@ Cada promotor tiene saldos independientes de Avena, Spaghetti, Batea, Mandil y D
 
 **Why:** Los materiales se entregan a personas concretas y un saldo compartido por mercado mezcla entregas y consumos de distintos promotores.
 
-**How to apply:** Crear e importar promotores con saldo inicial cero, sin leer columnas de stock. Registrar abastecimientos personales como movimientos desde Canjes y revertir el saldo al eliminarlos. Mantener el inventario anterior por mercado únicamente como historial legado; no repartir automáticamente sus saldos.
+**How to apply:** Crear e importar promotores con saldo inicial cero, sin leer columnas de stock. Registrar abastecimientos personales como movimientos desde Canjes y revertir el saldo al eliminarlos. No crear, importar, reconstruir ni mostrar inventario histórico por mercado; el mercado solo aporta ubicación al historial operativo.
