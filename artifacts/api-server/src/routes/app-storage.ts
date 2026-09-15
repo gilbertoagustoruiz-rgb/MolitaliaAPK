@@ -11,6 +11,10 @@ const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
 const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
 let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
 let googleSheetsBackupRunning = false;
+const campaignTimeZone = "America/Lima";
+const automaticClosureIntervalMs = 30_000;
+let lastPreviousDayAutomaticClosureSweep = "";
+let lastCurrentDayAutomaticClosureSweep = "";
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -83,6 +87,39 @@ function recordDate(record: StoredRecord) {
   return value(record, "updatedAt") || value(record, "date") || null;
 }
 
+function campaignDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: campaignTimeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value || "";
+  return {
+    day: `${part("year")}-${part("month")}-${part("day")}`,
+    hour: Number(part("hour")),
+    minute: Number(part("minute")),
+  };
+}
+
+function previousCampaignDay(day: string) {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function campaignDayBounds(day: string) {
+  return {
+    start: `${day}T00:00:00.000-05:00`,
+    end: `${day}T23:59:59.999-05:00`,
+    closureDate: `${day}T23:59:00.000-05:00`,
+  };
+}
+
 async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
   const derived = (await scrypt(password, salt, 64)) as Buffer;
@@ -136,7 +173,12 @@ async function readSnapshot(client: QueryClient = pool as unknown as QueryClient
   const snapshot = emptySnapshot();
   for (const name of Object.keys(collectionConfig) as CollectionName[]) {
     const { table } = collectionConfig[name];
-    const result = await client.query(`SELECT data FROM ${table} ORDER BY created_at`);
+    const orderBy = name === "attendance"
+      ? "event_date DESC, created_at DESC"
+      : name === "closures"
+        ? "closure_date DESC, created_at DESC"
+        : "created_at";
+    const result = await client.query(`SELECT data FROM ${table} ORDER BY ${orderBy}`);
     snapshot[name] = result.rows.map((row) =>
       name === "users" ? publicUser(row.data as StoredRecord) : row.data as StoredRecord,
     );
@@ -178,6 +220,91 @@ async function requestGoogleSheetsBackup(reason: string) {
     scheduleGoogleSheetsBackup(10_000);
   }
 }
+
+async function createAutomaticClosuresForDay(day: string) {
+  const bounds = campaignDayBounds(day);
+  const client = await pool.connect();
+  let created = 0;
+  try {
+    await client.query("BEGIN");
+    const lock = await client.query(
+      "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS locked",
+      [`automatic_closures:${day}`],
+    );
+    if (!lock.rows[0]?.locked) {
+      await client.query("ROLLBACK");
+      return 0;
+    }
+    const openPromoters = await client.query(
+      `SELECT DISTINCT ON (attendance.promoter_id)
+         attendance.promoter_id,attendance.market_id,attendance.client_id,users.data AS user_data
+       FROM attendance
+       JOIN users ON users.id=attendance.promoter_id
+       WHERE attendance.event_date >= $1::timestamptz
+         AND attendance.event_date <= $2::timestamptz
+         AND NOT EXISTS (
+           SELECT 1 FROM session_closures
+           WHERE session_closures.promoter_id=attendance.promoter_id
+             AND session_closures.closure_date >= $1::timestamptz
+             AND session_closures.closure_date <= $2::timestamptz
+         )
+       ORDER BY attendance.promoter_id,attendance.event_date DESC,attendance.created_at DESC`,
+      [bounds.start, bounds.end],
+    );
+    for (const row of openPromoters.rows) {
+      const promoterId = String(row.promoter_id || "");
+      const marketId = String(row.market_id || "");
+      if (!promoterId || !marketId) continue;
+      const userData = isRecord(row.user_data) ? row.user_data : {};
+      const closure: StoredRecord = {
+        id: `CIERRE-AUTO-${day}-${promoterId}`,
+        promoterId,
+        promoterRole: value(userData, "role") || undefined,
+        promoterRoleLabel: value(userData, "roleLabel") || value(userData, "role") || undefined,
+        marketId,
+        clientId: row.client_id ? String(row.client_id) : undefined,
+        tastingUsed: 0,
+        leads: 0,
+        automatic: true,
+        closureType: "AUTOMATICO",
+        evidence: `Cierre automático generado por el sistema a las 23:59 (hora de Lima) por falta de cierre manual del ${day}.`,
+        date: new Date(bounds.closureDate).toISOString(),
+        status: "SINCRONIZADA",
+      };
+      await upsertRecord(client as unknown as QueryClient, "closures", closure);
+      created += 1;
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error(`Unable to create automatic closures for ${day}`, error);
+  } finally {
+    client.release();
+  }
+  if (created) {
+    void requestGoogleSheetsBackup(`cierres automáticos del ${day}`);
+  }
+  return created;
+}
+
+async function runAutomaticClosureSweep() {
+  const current = campaignDateParts();
+  const previousDay = previousCampaignDay(current.day);
+  if (lastPreviousDayAutomaticClosureSweep !== previousDay) {
+    await createAutomaticClosuresForDay(previousDay);
+    lastPreviousDayAutomaticClosureSweep = previousDay;
+  }
+  if (current.hour === 23 && current.minute >= 59 && lastCurrentDayAutomaticClosureSweep !== current.day) {
+    await createAutomaticClosuresForDay(current.day);
+    lastCurrentDayAutomaticClosureSweep = current.day;
+  }
+}
+
+const automaticClosureTimer = setInterval(() => {
+  void runAutomaticClosureSweep();
+}, automaticClosureIntervalMs);
+automaticClosureTimer.unref();
+setTimeout(() => void runAutomaticClosureSweep(), 1_000).unref();
 
 async function runGoogleSheetsBackup() {
   if (googleSheetsBackupRunning) return;
@@ -941,6 +1068,83 @@ router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
 });
 
 router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
+  if (Array.isArray(req.body?.canjes)) {
+    const inputs: StoredRecord[] = (req.body.canjes as unknown[]).filter((input): input is StoredRecord => isRecord(input));
+    const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
+    const promoterId = inputs.length ? value(inputs[0], "promoterId") : "";
+    if (!inputs.length || inputs.length !== req.body.canjes.length ||
+        !promoterId || inputs.some(input => {
+          const kind = value(input, "kind");
+          const validKind = kind === "AJUSTE_CANJES"
+            ? validItemIds.has(value(input, "itemId"))
+            : kind === "AJUSTE_DEGUSTACION" && value(input, "degustacionProductId") === "PANETON";
+          return value(input, "promoterId") !== promoterId || !validKind || numeric(input, "quantity") <= 0;
+        })) {
+      res.status(400).json({ message: "El abastecimiento requiere un promotor y cantidades válidas para los artículos." });
+      return;
+    }
+    const canjes: StoredRecord[] = inputs.map(input => ({
+      id: value(input, "id") || `CANJE-${Date.now()}-${value(input, "itemId")}-${randomUUID().slice(0, 8)}`,
+      marketId: value(input, "marketId") || `PERSONAL:${promoterId}`,
+      kind: value(input, "kind") || "AJUSTE_CANJES",
+      itemId: value(input, "itemId") || undefined,
+      degustacionProductId: value(input, "degustacionProductId") || undefined,
+      degustacionProductLabel: value(input, "degustacionProductLabel") || undefined,
+      promoterId,
+      quantity: Math.floor(numeric(input, "quantity")),
+      actorId: value(input, "actorId") || "ADMIN",
+      actorName: value(input, "actorName") || "Analista",
+      date: value(input, "date") || new Date().toISOString(),
+      status: "PENDIENTE",
+    }));
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await lockInventoryLedger(client as unknown as QueryClient);
+      const userResult = await client.query(
+        "SELECT data FROM users WHERE id=$1 FOR UPDATE",
+        [promoterId],
+      ) as unknown as { rows: Array<{ data: StoredRecord }> };
+      const current = userResult.rows[0];
+      if (!current) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ message: "El promotor seleccionado no existe." });
+        return;
+      }
+      const currentStock = isRecord(current.data.redemptionStock) ? current.data.redemptionStock : {};
+      const redemptionStock = {
+        AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
+        BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
+        MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
+        SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
+      };
+      let tastingStock = Math.max(0, Number(current.data.tastingStock) || 0);
+      for (const canje of canjes) {
+        if (value(canje, "kind") === "AJUSTE_DEGUSTACION") {
+          tastingStock += Math.floor(numeric(canje, "quantity"));
+        } else {
+          const itemId = value(canje, "itemId") as keyof typeof redemptionStock;
+          redemptionStock[itemId] += Math.floor(numeric(canje, "quantity"));
+        }
+        await upsertRecord(client as unknown as QueryClient, "movements", canje);
+      }
+      const updatedAt = canjes[canjes.length - 1].date;
+      await client.query(
+        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+        [promoterId, { ...current.data, tastingStock, redemptionStock, updatedAt }, updatedAt],
+      );
+      await client.query("COMMIT");
+      res.status(201).json({ canjes, snapshot: await readSnapshot() });
+      return;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      req.log.error({ err: error }, "Unable to create grouped canjes");
+      res.status(500).json({ message: "No se pudo cargar el stock agrupado." });
+    } finally {
+      client.release();
+    }
+    return;
+  }
   const input = req.body?.canje;
   const personalStock = isRecord(input) && Boolean(value(input, "promoterId"));
   const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
@@ -1074,7 +1278,21 @@ router.delete("/app-storage/admin/canjes/:source/:id", async (req, res): Promise
       const promoterId = value(movement?.data || {}, "promoterId");
       const personalItemId = value(movement?.data || {}, "itemId");
       const components = isRecord(movement?.data?.canjeComponents) ? movement.data.canjeComponents : {};
-      if (movement && value(movement.data, "kind") === "AJUSTE_CANJES" && promoterId && personalItemId) {
+      if (movement && value(movement.data, "kind") === "AJUSTE_DEGUSTACION" && promoterId) {
+        const userResult = await client.query(
+          "SELECT data FROM users WHERE id=$1 FOR UPDATE",
+          [promoterId],
+        ) as unknown as { rows: Array<{ data: StoredRecord }> };
+        const currentUser = userResult.rows[0];
+        if (currentUser) {
+          const tastingStock = Math.max(0, Number(currentUser.data.tastingStock) || 0) - Math.max(0, Number(movement.quantity) || 0);
+          const updatedAt = new Date().toISOString();
+          await client.query(
+            "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+            [promoterId, { ...currentUser.data, tastingStock, updatedAt }, updatedAt],
+          );
+        }
+      } else if (movement && value(movement.data, "kind") === "AJUSTE_CANJES" && promoterId && personalItemId) {
         const userResult = await client.query(
           "SELECT data FROM users WHERE id=$1 FOR UPDATE",
           [promoterId],
