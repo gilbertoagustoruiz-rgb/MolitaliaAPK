@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: molitalia-app
+    runtime: node
+    plan: starter
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && PORT=10000 BASE_PATH=/ pnpm run build:render
+    startCommand: pnpm run start:render
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PHOTO_STORAGE_DIR
+        value: /var/data/molitalia/photos
+      - key: DATABASE_URL
+        fromDatabase:
+          name: molitalia-db
+          property: connectionString
+    disk:
+      name: molitalia-photos
+      mountPath: /var/data/molitalia
+      sizeGB: 10
+
+databases:
+  - name: molitalia-db
+    plan: basic-256mb
+    databaseName: molitalia
+    user: molitalia_app
