@@ -208,9 +208,45 @@ function openPhotoQueue() {
   });
 }
 type PhotoUploadContext = Pick<PendingPhotoUpload, 'clientName' | 'marketName' | 'recordType'>;
+async function compressEvidencePhoto(file: File) {
+  if (!file.type.startsWith('image/')) return file;
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('No se pudo leer la fotografía'));
+      element.src = objectUrl;
+    });
+    const maxSide = 1920;
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) return file;
+    context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    let quality = 0.84;
+    let blob: Blob | null = null;
+    do {
+      blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+      quality -= 0.08;
+    } while (blob && blob.size > 1_200_000 && quality >= 0.6);
+    if (!blob || blob.size >= file.size) return file;
+    const name = (file.name || 'evidencia').replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], name, { type: 'image/jpeg', lastModified: Date.now() });
+  } catch {
+    return file;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
 async function queuePhotoUpload(file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field'], context: PhotoUploadContext) {
+  const optimized = await compressEvidencePhoto(file);
   const database = await openPhotoQueue();
-  const upload: PendingPhotoUpload = { id: `${entityType}:${entityId}:${field}`, entityType, entityId, field, ...context, fileName: file.name || `${field}.jpg`, mimeType: file.type || 'image/jpeg', blob: file };
+  const upload: PendingPhotoUpload = { id: `${entityType}:${entityId}:${field}`, entityType, entityId, field, ...context, fileName: optimized.name || `${field}.jpg`, mimeType: optimized.type || 'image/jpeg', blob: optimized };
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(PHOTO_QUEUE_STORE, 'readwrite');
     transaction.objectStore(PHOTO_QUEUE_STORE).put(upload);
@@ -1558,7 +1594,7 @@ export default function App() {
               photoUploadErrorShown.current = false;
             } catch (error) {
               if (!photoUploadErrorShown.current) {
-                notify(error instanceof Error ? `Foto pendiente: ${error.message}` : 'Foto pendiente: no se pudo subir a Google Drive.', true);
+                notify(error instanceof Error ? `Foto pendiente: ${error.message}` : 'Foto pendiente: no se pudo subir a DigitalOcean.', true);
                 photoUploadErrorShown.current = true;
               }
              break;

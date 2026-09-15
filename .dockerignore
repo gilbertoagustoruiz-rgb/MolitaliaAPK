@@ -1,0 +1,13 @@
+.git
+.agents
+.conversation
+.config
+node_modules
+**/node_modules
+**/dist
+screenshots
+attached_assets
+*.zip
+*.log
+.env
+.env.*
