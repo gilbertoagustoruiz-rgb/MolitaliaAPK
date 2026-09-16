@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
@@ -32,7 +33,9 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
 
-const staticDir = process.env.STATIC_DIR || path.resolve(process.cwd(), "artifacts/below-trade-panetones/dist/public");
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const staticDir = process.env.STATIC_DIR
+  || path.resolve(moduleDir, "../../below-trade-panetones/dist/public");
 app.use(express.static(staticDir));
 app.get("/{*path}", (_req, res) => res.sendFile(path.join(staticDir, "index.html")));
 
