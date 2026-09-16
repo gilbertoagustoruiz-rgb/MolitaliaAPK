@@ -6,6 +6,7 @@ import { backupSnapshot } from "./google-sheets-storage";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
+const googleSheetsBackupEnabled = process.env.GOOGLE_SHEETS_BACKUP_ENABLED === "true";
 const googleSheetsBackupPendingKey = "google_sheets_backup_pending";
 const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
 const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
@@ -209,6 +210,7 @@ function scheduleGoogleSheetsBackup(delayMs = 250) {
 }
 
 async function requestGoogleSheetsBackup(reason: string) {
+  if (!googleSheetsBackupEnabled) return;
   try {
     await setBackupMetadata(
       googleSheetsBackupPendingKey,
@@ -307,6 +309,7 @@ automaticClosureTimer.unref();
 setTimeout(() => void runAutomaticClosureSweep(), 1_000).unref();
 
 async function runGoogleSheetsBackup() {
+  if (!googleSheetsBackupEnabled) return;
   if (googleSheetsBackupRunning) return;
   googleSheetsBackupRunning = true;
   const client = await pool.connect();
@@ -634,11 +637,13 @@ async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision
   return readSnapshot();
 }
 
-void requestGoogleSheetsBackup("inicio del servidor");
-const googleSheetsBackupInterval = setInterval(() => {
-  void runGoogleSheetsBackup();
-}, 60_000);
-googleSheetsBackupInterval.unref();
+if (googleSheetsBackupEnabled) {
+  void requestGoogleSheetsBackup("inicio del servidor");
+  const googleSheetsBackupInterval = setInterval(() => {
+    void runGoogleSheetsBackup();
+  }, 60_000);
+  googleSheetsBackupInterval.unref();
+}
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
