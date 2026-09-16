@@ -809,7 +809,7 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
     phone: value(input, "phone") || undefined,
     category,
     marketId: value(input, "marketId"),
-    status: "ACTIVO",
+    status: value(input, "status").toUpperCase() === "INACTIVO" ? "INACTIVO" : "ACTIVO",
     updatedAt: new Date().toISOString(),
   };
   try {
