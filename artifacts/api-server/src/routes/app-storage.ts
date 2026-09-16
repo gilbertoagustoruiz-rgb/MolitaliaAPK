@@ -614,10 +614,18 @@ async function syncSnapshot(incoming: Partial<StorageSnapshot>, incomingRevision
       "SELECT record_id FROM app_storage_tombstones WHERE collection='sales'",
     );
     const deletedSaleIds = new Set(deletedSalesResult.rows.map((row) => String(row.record_id)));
+    const tombstones = await client.query("SELECT collection,record_id FROM app_storage_tombstones");
+    const deletedRecords = new Set(tombstones.rows.map(row => `${row.collection}:${row.record_id}`));
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
       if (name === "inventory") continue;
       const records = Array.isArray(guardedIncoming[name]) ? guardedIncoming[name] : [];
       for (const record of records) {
+        if (!isRecord(record)) continue;
+        if (deletedRecords.has(`${name}:${value(record, 'id')}`)) continue;
+        const config = collectionConfig[name];
+        const existing = await client.query(`SELECT data FROM ${config.table} WHERE ${config.column}=$1`, [value(record, config.key)]);
+        const editedAt = existing.rows[0]?.data?.updatedAt;
+        if (editedAt && (!recordDate(record) || String(editedAt) > String(recordDate(record)))) continue;
         if (name === "sales" && record && typeof record === "object" && deletedSaleIds.has(value(record, "id"))) continue;
         if (name === "movements" && record && typeof record === "object") {
           if (isLegacyMarketInventoryMovement(record)) continue;
@@ -744,6 +752,122 @@ router.post("/app-storage/admin/users/sync", async (req, res): Promise<void> => 
   }
 });
 
+// Administrative record corrections keep stable IDs and reconcile personal stock.
+router.all('/app-storage/admin/records/:collection/:id', async (req, res): Promise<void> => {
+  const name = String(req.params.collection) as CollectionName;
+  const id = String(req.params.id);
+  if (!['markets', 'users', 'attendance', 'movements'].includes(name) || !['PUT', 'DELETE'].includes(req.method)) { res.status(400).json({ message: 'Operación no válida.' }); return; }
+  const credentials = await pool.query('SELECT data,password_hash,status FROM users WHERE dni=$1',[req.get('x-admin-dni') || '']);
+  const actor = credentials.rows[0];
+  if (!actor || actor.status !== 'ACTIVO' || !['ADMIN','ANALISTA','TRADE','SUPERVISOR'].includes(actor.data.role) || !actor.password_hash || !(await verifyPassword(req.get('x-admin-key') || '',actor.password_hash))) {
+    res.status(403).json({message:'Inicia sesión con un usuario autorizado para editar o eliminar.'}); return;
+  }
+  if (name === 'users' && id === actor.data.id && (req.method === 'DELETE' || req.body?.record?.status === 'INACTIVO')) {
+    res.status(409).json({message:'No puedes eliminar o desactivar tu propia sesión.'}); return;
+  }
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    await lockInventoryLedger(db as unknown as QueryClient);
+    const table = collectionConfig[name].table;
+    const result = await db.query(`SELECT data FROM ${table} WHERE id=$1 FOR UPDATE`, [id]);
+    if (!result.rows[0]) throw new Error('El registro ya no existe. Actualiza la pantalla.');
+    const old = result.rows[0].data as StoredRecord;
+    const input = isRecord(req.body?.record) ? req.body.record : {};
+    const deleting = req.method === 'DELETE';
+    const fields: Record<string, string[]> = {
+      markets: ['name','region','department','province','district','status'],
+      users: ['dni','name','role','roleLabel','marketId','clientId','status','password'],
+      attendance: ['promoterId','clientId','marketId','type','date','photo'],
+      movements: ['promoterId','actorId','actorName','marketId','quantity','date','itemId','canjeProductId','canjeProductLabel','canjeComponents','degustacionProductId','degustacionProductLabel'],
+    };
+    const next: StoredRecord = { ...old, ...Object.fromEntries(fields[name].filter(key => key in input).map(key => [key,input[key]])), id, updatedAt: new Date().toISOString() };
+    const required = (keys: string[]) => { if (keys.some(key => !value(next,key).trim())) throw new Error('Completa todos los campos obligatorios.'); };
+    if (!deleting) {
+      if (name === 'markets') required(['name','department','province','district']);
+      if (name === 'users') {
+        if (!['PROMOTOR','PROMOTOR ROTATIVO','PROMOTOR PERMANENTE','COORDINADOR','SUPERVISOR','ANALISTA','TRADE','ADMIN','CLIENTE'].includes(value(next,'role'))) throw new Error('Rol no válido.');
+        required(['name','role','status']);
+        if (!/^\d{8}$/.test(value(next,'dni'))) throw new Error('El DNI debe tener 8 dígitos.');
+        if (value(input,'password') && value(input,'password').length < 8) throw new Error('La clave debe tener al menos 8 caracteres.');
+        if (!value(input,'password')) delete next.password;
+      }
+      if (name === 'attendance' || name === 'movements') {
+        if (!Number.isFinite(new Date(value(next,'date')).getTime())) throw new Error('Fecha no válida.');
+        required(['marketId']);
+        if (!(await db.query('SELECT id FROM markets WHERE id=$1',[next.marketId])).rows.length) throw new Error('El mercado no existe.');
+      }
+      if (name === 'attendance') {
+        required(['promoterId','clientId','photo']);
+        if (!['ENTRADA','SALIDA'].includes(value(next,'type'))) throw new Error('Evento no válido.');
+        if (!(await db.query('SELECT id FROM clients WHERE id=$1 AND market_id=$2',[next.clientId,next.marketId])).rows.length) throw new Error('El cliente no pertenece al mercado.');
+        const promoter = await db.query('SELECT data FROM users WHERE id=$1',[next.promoterId]);
+        if (!promoter.rows.length) throw new Error('El promotor no existe.');
+        next.promoterRole = promoter.rows[0].data.role; next.promoterRoleLabel = promoter.rows[0].data.roleLabel || next.promoterRole;
+      }
+    }
+    if (name === 'users' && (deleting || next.role !== old.role || next.status === 'INACTIVO')) {
+      if (['ADMIN','ANALISTA'].includes(value(old,'role'))) {
+        const others = await db.query("SELECT id FROM users WHERE id<>$1 AND status='ACTIVO' AND data->>'role' IN ('ADMIN','ANALISTA')",[id]);
+        if (!others.rows.length) throw new Error('Debes conservar al menos un administrador o analista activo.');
+      }
+    }
+    if (name === 'markets' && deleting) {
+      for (const related of ['clients','sales','attendance','inventory_movements']) {
+        if ((await db.query(`SELECT 1 FROM ${related} WHERE market_id=$1 LIMIT 1`,[id])).rows.length) throw new Error('El mercado tiene registros relacionados. Reasígnalos antes de eliminarlo.');
+      }
+    }
+    if (name === 'movements') {
+      if (!deleting && !String(next.kind).includes('DEGUSTACION')) {
+        if (!value(next,'itemId') && !isRecord(next.canjeComponents)) throw new Error('Selecciona un producto de canje.');
+        if (isRecord(next.canjeComponents) && Object.entries(next.canjeComponents).some(([key,qty]) => !['AVENA','SPAGHETTI','BATEA','MANDIL'].includes(key) || !Number.isInteger(qty) || Number(qty) < 0)) throw new Error('Composición de canje inválida.');
+      }
+      if (!deleting && (!Number.isInteger(Number(next.quantity)) || Number(next.quantity) <= 0)) throw new Error('La cantidad debe ser un entero mayor que cero.');
+      const saleId = saleIdFromCanjeMovement(old);
+      if (saleId) throw new Error('Este canje está asociado a una venta. Edítalo desde Ventas para mantener sus evidencias e inventario.');
+      for (const [record, direction] of [[old,-1], ...(deleting ? [] : [[next,1]])] as [StoredRecord,number][]) {
+        const owner = value(record,'promoterId') || value(record,'actorId');
+        const found = await db.query('SELECT data FROM users WHERE id=$1 FOR UPDATE',[owner]);
+        if (!found.rows.length) throw new Error('No se encontró al propietario del stock.');
+        const person = found.rows[0].data;
+        const kind = value(record,'kind');
+        const sign = kind.startsWith('AJUSTE_') ? direction : -direction;
+        if (kind.includes('DEGUSTACION')) person.tastingStock = Number(person.tastingStock || 0) + sign * Number(record.quantity);
+        else {
+          const stock = { ...(person.redemptionStock || {}) };
+          for (const item of ['AVENA','SPAGHETTI','BATEA','MANDIL']) stock[item] = Number(stock[item] || 0) + sign * movementItemQuantity(record,item);
+          person.redemptionStock = stock;
+        }
+        // Intermediate reversal may be negative; validate final balances below.
+        await db.query('UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1',[owner,{...person,updatedAt:next.updatedAt},next.updatedAt]);
+      }
+      for (const owner of new Set([value(old,'promoterId') || value(old,'actorId'), value(next,'promoterId') || value(next,'actorId')])) {
+        const data = (await db.query('SELECT data FROM users WHERE id=$1',[owner])).rows[0]?.data;
+        if (data && (Number(data.tastingStock) < 0 || Object.values(data.redemptionStock || {}).some(x => Number(x) < 0))) throw new Error('Stock insuficiente para aplicar esta corrección.');
+      }
+    }
+    if (deleting) {
+      await db.query(`DELETE FROM ${table} WHERE id=$1`,[id]);
+      await db.query("INSERT INTO app_storage_tombstones (collection,record_id,deleted_at) VALUES ($1,$2,now()) ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now()",[name,id]);
+      if (name === 'users') await db.query('DELETE FROM assignments WHERE promoter_id=$1',[id]);
+    } else if (name === 'users') {
+      const passwordHash = value(next,'password') ? await hashPassword(value(next,'password')) : null;
+      delete next.password;
+      await db.query('UPDATE users SET dni=$2,name=$3,role=$4,status=$5,password_hash=COALESCE($6,password_hash),data=$7,record_updated_at=$8,updated_at=now() WHERE id=$1',[id,next.dni,next.name,next.role,next.status,passwordHash,next,next.updatedAt]);
+    } else if (name === 'attendance') {
+      await db.query("UPDATE attendance SET promoter_id=$2,client_id=$3,market_id=$4,event_type=$5,event_date=$6,photo=$7,data=$8,record_updated_at=$9,updated_at=now() WHERE id=$1",[id,next.promoterId,next.clientId,next.marketId,next.type,next.date,next.photo,next,next.updatedAt]);
+    } else if (name === 'movements') {
+      await db.query('UPDATE inventory_movements SET market_id=$2,item_id=$3,quantity=$4,actor_id=$5,movement_date=$6,data=$7,record_updated_at=$8,updated_at=now() WHERE id=$1',[id,next.marketId,next.itemId || null,next.quantity,next.actorId,next.date,next,next.updatedAt]);
+    } else await upsertRecord(db as unknown as QueryClient,name,next);
+    await db.query('COMMIT');
+    res.json({ snapshot: await readSnapshot() });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    req.log.error({err:error}, 'Administrative correction failed');
+    res.status(409).json({message: error instanceof Error && !('code' in error) ? error.message : 'No se pudo guardar. Verifica duplicados y registros relacionados.'});
+  } finally { db.release(); }
+});
+
 router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
   const input = req.body?.market;
   if (!isRecord(input) || !value(input, "name") || !value(input, "department") || !value(input, "province") || !value(input, "district")) {
@@ -828,6 +952,7 @@ router.delete("/app-storage/admin/clients/:id", async (req, res): Promise<void> 
     return;
   }
   try {
+    await pool.query("INSERT INTO app_storage_tombstones (collection,record_id,deleted_at) VALUES ('clients',$1,now()) ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now()",[id]);
     await pool.query("DELETE FROM clients WHERE id=$1", [id]);
     res.json({ deleted: id, snapshot: await readSnapshot() });
   } catch (error) {
