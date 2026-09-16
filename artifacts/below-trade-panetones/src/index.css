@@ -833,3 +833,34 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
   .page-head h1 { font-size:36px; }
   .hero-copy h1 { font-size:39px; }
 }
+
+/* Login: fondos y texto independientes para mantener el contraste en ambos temas. */
+.login-shell { grid-template-columns:minmax(0,1fr) minmax(380px,1fr); }
+.login-shell .login-hero { background:linear-gradient(145deg, hsl(var(--blue-pale)), hsl(var(--surface))); color:hsl(var(--ink)); padding:clamp(32px,5vw,80px); }
+.login-hero .logo { width:190px; filter:brightness(0); opacity:.85; }
+.login-hero .hero-copy { margin-block:48px; max-width:520px; }
+.login-hero .hero-copy h1 { font-size:clamp(44px,5.2vw,76px); line-height:1.06; letter-spacing:-.045em; margin:22px 0; }
+.login-hero .hero-copy p { color:hsl(var(--muted)); font-size:18px; max-width:390px; }
+.login-hero .hero-foot { color:hsl(var(--muted)); font-family:var(--font-sans); font-size:13px; }
+.login-hero:before { width:380px; height:380px; border-width:65px; right:-170px; bottom:-190px; opacity:.16; pointer-events:none; }
+.login-hero:after { width:180px; height:180px; border-width:30px; left:auto; right:-90px; top:18%; opacity:.12; pointer-events:none; }
+.login-shell .login-panel { background:hsl(var(--paper)); padding:clamp(24px,4vw,64px); }
+.login-card { width:min(460px,100%); padding:clamp(24px,3vw,42px); background:hsl(var(--surface)); border:1px solid hsl(var(--line)); border-radius:24px; box-shadow:var(--shadow); }
+.login-heading { align-items:flex-start; margin-bottom:32px; }
+.login-heading h2 { font-size:30px; line-height:1.2; }
+.login-card .input { min-height:50px; border-radius:12px; }
+.login-card .field { margin-bottom:22px; }
+.login-card .primary { border-radius:12px; }
+.login-note { padding-top:20px; border-top:1px solid hsl(var(--line)); line-height:1.5; text-align:center; }
+:root[data-theme='dark'] .login-hero .logo { filter:brightness(0) invert(1); opacity:1; }
+:root[data-theme='dark'] .login-shell .login-hero { background:linear-gradient(145deg,#182d46,hsl(var(--surface))); }
+@media (max-width:800px) {
+  .login-shell { display:flex; flex-direction:column; }
+  .login-shell .login-hero { min-height:auto; padding:28px 24px; }
+  .login-hero .logo { width:145px; }
+  .login-hero .hero-copy { margin:28px 0 0; }
+  .login-hero .hero-copy h1 { font-size:38px; margin:12px 0; }
+  .login-hero .hero-copy p { display:block; font-size:14px; max-width:340px; }
+  .login-shell .login-panel { min-height:auto; flex:1; padding:24px 16px 40px; align-items:flex-start; }
+  .login-card { border-radius:20px; }
+}
