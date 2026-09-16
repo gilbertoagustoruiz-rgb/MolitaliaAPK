@@ -1,4 +1,4 @@
-const CACHE = "belowtrade-panetones-v5";
+const CACHE = "belowtrade-panetones-v6";
 const CORE = ["/", "/index.html", "/manifest.webmanifest", "/below-trade-logo.png", "/pwa-icon.svg", "/favicon.svg"];
 
 self.addEventListener("install", event => {

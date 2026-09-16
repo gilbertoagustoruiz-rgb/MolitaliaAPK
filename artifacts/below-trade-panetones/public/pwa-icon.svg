@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#192d47"/>
+  <path d="M94 116h324v280H94z" fill="#fff" opacity=".06"/>
+  <circle cx="385" cy="126" r="64" fill="#dc5b23"/>
+  <path d="M137 164h119c67 0 107 31 107 83 0 30-14 52-39 66 32 13 50 39 50 73 0 61-46 94-126 94H137V164zm105 126c31 0 47-11 47-34s-16-33-47-33h-31v67h31zm8 129c34 0 51-12 51-37 0-24-17-36-51-36h-39v73h39z" fill="#fff" transform="translate(0 -65)"/>
+  <text x="256" y="438" fill="#fff" font-family="Arial,sans-serif" font-size="42" font-weight="700" text-anchor="middle">MOLITALIA</text>
+</svg>
