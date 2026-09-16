@@ -65,6 +65,7 @@ router.get("/evidence-photos/storage/:token", async (req, res) => {
     const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     if (!object.Body) { res.status(404).json({ message: "Fotografía no encontrada." }); return; }
     res.setHeader("Content-Type", object.ContentType || "image/jpeg");
+    res.setHeader("Content-Disposition", "inline");
     res.setHeader("Cache-Control", "private, max-age=3600");
     const bytes = await object.Body.transformToByteArray();
     res.send(Buffer.from(bytes));
@@ -72,6 +73,35 @@ router.get("/evidence-photos/storage/:token", async (req, res) => {
     if (error?.name === "NoSuchKey") { res.status(404).json({ message: "Fotografía no encontrada." }); return; }
     req.log.error({ err: error }, "No se pudo recuperar la fotografía de DigitalOcean Spaces");
     res.status(500).json({ message: "No se pudo recuperar la fotografía." });
+  }
+});
+
+// Compatibility viewer for evidence captured before the move to DigitalOcean.
+// New uploads never use this endpoint; they are stored in Spaces above.
+router.get("/evidence-photos/drive/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "");
+    if (!/^[A-Za-z0-9_-]{10,200}$/.test(id)) {
+      res.status(400).json({ message: "Identificador de fotografía inválido." });
+      return;
+    }
+    const response = await fetch(`https://drive.usercontent.google.com/download?id=${encodeURIComponent(id)}&export=view&confirm=t`);
+    if (!response.ok) {
+      res.status(response.status === 404 ? 404 : 502).json({ message: "No se pudo recuperar la fotografía antigua." });
+      return;
+    }
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+    if (!contentType.startsWith("image/")) {
+      res.status(502).json({ message: "La fotografía antigua no está disponible públicamente." });
+      return;
+    }
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) {
+    req.log.error({ err: error }, "No se pudo mostrar la fotografía antigua de Google Drive");
+    res.status(500).json({ message: "No se pudo mostrar la fotografía antigua." });
   }
 });
 
