@@ -818,9 +818,9 @@ function PhotoThumbnail({ label, src }: { label: string; src?: string }) {
     return <span className="photo-thumbnail pending" title={src ? 'Foto pendiente de sincronización' : 'Sin foto'}><Camera /><small>{label}<br />Pendiente</small></span>;
   }
   if (imageFailed) {
-    return <a className="photo-thumbnail pending" href={src} target="_blank" rel="noreferrer" title={`Abrir ${label} en su almacenamiento`}><Camera /><small>{label}<br />Abrir foto</small></a>;
+    return <a className="photo-thumbnail pending" href={photoImageSource(src)} target="_blank" rel="noreferrer" title={`Visualizar ${label}`}><Camera /><small>{label}<br />Ver foto</small></a>;
   }
-  return <a className="photo-thumbnail" href={src} target="_blank" rel="noreferrer" title={`Abrir ${label}`}><img src={photoImageSource(src)} alt={label} loading="lazy" onError={() => setImageFailed(true)} /><small>{label}</small></a>;
+  return <a className="photo-thumbnail" href={photoImageSource(src)} target="_blank" rel="noreferrer" title={`Visualizar ${label}`}><img src={photoImageSource(src)} alt={label} loading="lazy" onError={() => setImageFailed(true)} /><small>{label}</small></a>;
 }
 function PhotoField({ label, hint, file, setFile, disabled = false }: { label: string; hint: string; file: File | null; setFile: (file: File | null) => void; disabled?: boolean }) {
   return <label className={`photo-field ${file ? 'ready' : ''} ${disabled ? 'disabled' : ''}`} data-testid={`photo-field-${label.toLowerCase().replaceAll(' ', '-')}`}>
