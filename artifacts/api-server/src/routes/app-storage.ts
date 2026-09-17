@@ -171,53 +171,50 @@ async function ensurePromoterStockBaseline() {
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('promoter_stock_baseline',0))");
-    const alreadySeeded = await client.query("SELECT value FROM app_metadata WHERE key=$1 FOR UPDATE", [promoterStockBaselineKey]);
-    if (alreadySeeded.rows[0]?.value === "applied") {
-      await client.query("COMMIT");
-      return;
-    }
     const updatedAt = new Date().toISOString();
-    const consumptionByPromoter = new Map<string, { tastingStock: number; redemptionStock: Record<string, number> }>();
-    const consumptionFor = (promoterId: string) => {
-      const current = consumptionByPromoter.get(promoterId) || {
+    const stockDeltaByPromoter = new Map<string, { tastingStock: number; redemptionStock: Record<string, number> }>();
+    const stockDeltaFor = (promoterId: string) => {
+      const current = stockDeltaByPromoter.get(promoterId) || {
         tastingStock: 0,
         redemptionStock: Object.fromEntries(redemptionItemIds.map((itemId) => [itemId, 0])),
       };
-      consumptionByPromoter.set(promoterId, current);
+      stockDeltaByPromoter.set(promoterId, current);
       return current;
     };
-    const addRedemptionConsumption = (promoterId: string, itemId: string, quantity: number) => {
+    const addRedemptionDelta = (promoterId: string, itemId: string, quantity: number) => {
       if (!promoterId || !redemptionItemIds.includes(itemId)) return;
-      const current = consumptionFor(promoterId);
-      current.redemptionStock[itemId] = (Number(current.redemptionStock[itemId]) || 0) + Math.max(0, quantity);
+      const current = stockDeltaFor(promoterId);
+      current.redemptionStock[itemId] = (Number(current.redemptionStock[itemId]) || 0) + quantity;
     };
-    const addRequirementConsumption = (promoterId: string, requirements: unknown, multiplier = 1) => {
+    const addRequirementDelta = (promoterId: string, requirements: unknown, multiplier = 1) => {
       if (!promoterId || !isRecord(requirements)) return;
       for (const itemId of redemptionItemIds) {
-        addRedemptionConsumption(promoterId, itemId, Math.max(0, Number(requirements[itemId]) || 0) * multiplier);
+        addRedemptionDelta(promoterId, itemId, Math.max(0, Number(requirements[itemId]) || 0) * multiplier);
       }
     };
     const movementResult = await client.query(
       `SELECT id,promoter_id,kind,item_id,quantity,data
        FROM inventory_movements
        WHERE promoter_id IS NOT NULL
-         AND kind IN ('CANJE','DEGUSTACION')`,
+         AND kind IN ('AJUSTE_CANJES','AJUSTE_DEGUSTACION','CANJE','DEGUSTACION')`,
     );
     const saleIdsWithCanjeMovement = new Set<string>();
     for (const row of movementResult.rows) {
       const promoterId = String(row.promoter_id || "");
       const source = isRecord(row.data) ? row.data : {};
       const quantity = Math.max(0, Number(row.quantity) || 0);
-      if (String(row.kind) === "DEGUSTACION") {
-        consumptionFor(promoterId).tastingStock += quantity;
+      const kind = String(row.kind);
+      const sign = kind === "AJUSTE_CANJES" || kind === "AJUSTE_DEGUSTACION" ? 1 : -1;
+      if (kind === "DEGUSTACION" || kind === "AJUSTE_DEGUSTACION") {
+        stockDeltaFor(promoterId).tastingStock += sign * quantity;
         continue;
       }
       const movementId = String(row.id || "");
       const saleMatch = movementId.match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);
       if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
       const components = isRecord(source.canjeComponents) ? source.canjeComponents : null;
-      if (components) addRequirementConsumption(promoterId, components, quantity);
-      else addRedemptionConsumption(promoterId, String(row.item_id || value(source, "itemId")), quantity);
+      if (components) addRequirementDelta(promoterId, components, sign * quantity);
+      else addRedemptionDelta(promoterId, String(row.item_id || value(source, "itemId")), sign * quantity);
     }
     const saleResult = await client.query(
       `SELECT id,promoter_id,data
@@ -229,7 +226,7 @@ async function ensurePromoterStockBaseline() {
       const saleId = String(row.id || "");
       if (saleIdsWithCanjeMovement.has(saleId)) continue;
       const source = isRecord(row.data) ? row.data : {};
-      addRequirementConsumption(String(row.promoter_id || ""), source.redemptionItems);
+      addRequirementDelta(String(row.promoter_id || ""), source.redemptionItems, -1);
     }
     const result = await client.query(
       `SELECT id,data FROM users
@@ -240,17 +237,17 @@ async function ensurePromoterStockBaseline() {
     );
     for (const row of result.rows) {
       const current = isRecord(row.data) ? row.data : {};
-      const consumed = consumptionByPromoter.get(String(row.id)) || {
+      const delta = stockDeltaByPromoter.get(String(row.id)) || {
         tastingStock: 0,
         redemptionStock: Object.fromEntries(redemptionItemIds.map((itemId) => [itemId, 0])),
       };
       const redemptionStock = Object.fromEntries(redemptionItemIds.map((itemId) => [
         itemId,
-        Math.max(0, Number(promoterStockBaseline.redemptionStock[itemId as keyof typeof promoterStockBaseline.redemptionStock]) - (Number(consumed.redemptionStock[itemId]) || 0)),
+        Math.max(0, Number(promoterStockBaseline.redemptionStock[itemId as keyof typeof promoterStockBaseline.redemptionStock]) + (Number(delta.redemptionStock[itemId]) || 0)),
       ]));
       const next = {
         ...current,
-        tastingStock: Math.max(0, promoterStockBaseline.tastingStock - consumed.tastingStock),
+        tastingStock: Math.max(0, promoterStockBaseline.tastingStock + delta.tastingStock),
         redemptionStock,
         updatedAt,
       };
