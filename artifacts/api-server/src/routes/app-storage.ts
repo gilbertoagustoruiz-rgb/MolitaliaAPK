@@ -766,7 +766,9 @@ if (googleSheetsBackupEnabled) {
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    await ensurePromoterStockBaseline();
+    await ensurePromoterStockBaseline().catch((error) => {
+      req.log.error({ err: error }, "Unable to refresh promoter stock baseline");
+    });
     res.json({ storage: "replit-postgresql", catalogRevision: await readCatalogRevision(), snapshot: await readSnapshot() });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read app storage");
@@ -1719,7 +1721,9 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
     return;
   }
   try {
-    await ensurePromoterStockBaseline();
+    await ensurePromoterStockBaseline().catch((error) => {
+      req.log.error({ err: error }, "Unable to refresh promoter stock baseline before login");
+    });
     const result = await pool.query(
       "SELECT data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
       [dni],
