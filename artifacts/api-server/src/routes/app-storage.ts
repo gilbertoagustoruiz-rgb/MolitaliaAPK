@@ -196,7 +196,7 @@ async function ensurePromoterStockBaseline() {
       `SELECT id,promoter_id,kind,item_id,quantity,data
        FROM inventory_movements
        WHERE promoter_id IS NOT NULL
-         AND kind IN ('AJUSTE_CANJES','AJUSTE_DEGUSTACION','CANJE','DEGUSTACION')`,
+         AND kind IN ('CANJE','DEGUSTACION')`,
     );
     const saleIdsWithCanjeMovement = new Set<string>();
     for (const row of movementResult.rows) {
@@ -204,17 +204,16 @@ async function ensurePromoterStockBaseline() {
       const source = isRecord(row.data) ? row.data : {};
       const quantity = Math.max(0, Number(row.quantity) || 0);
       const kind = String(row.kind);
-      const sign = kind === "AJUSTE_CANJES" || kind === "AJUSTE_DEGUSTACION" ? 1 : -1;
-      if (kind === "DEGUSTACION" || kind === "AJUSTE_DEGUSTACION") {
-        stockDeltaFor(promoterId).tastingStock += sign * quantity;
+      if (kind === "DEGUSTACION") {
+        stockDeltaFor(promoterId).tastingStock -= quantity;
         continue;
       }
       const movementId = String(row.id || "");
       const saleMatch = movementId.match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);
       if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
       const components = isRecord(source.canjeComponents) ? source.canjeComponents : null;
-      if (components) addRequirementDelta(promoterId, components, sign * quantity);
-      else addRedemptionDelta(promoterId, String(row.item_id || value(source, "itemId")), sign * quantity);
+      if (components) addRequirementDelta(promoterId, components, -quantity);
+      else addRedemptionDelta(promoterId, String(row.item_id || value(source, "itemId")), -quantity);
     }
     const saleResult = await client.query(
       `SELECT id,promoter_id,data

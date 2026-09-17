@@ -660,16 +660,14 @@ function calculatedPromoterStock(promoterId: string, sales: Sale[], movements: I
   movements.forEach(movement => {
     if (movement.promoterId !== promoterId) return;
     const quantity = Math.max(0, Number(movement.quantity) || 0);
-    if (movement.kind === 'AJUSTE_DEGUSTACION') tastingStock += quantity;
     if (movement.kind === 'DEGUSTACION') tastingStock -= quantity;
-    if (movement.kind === 'CANJE' || movement.kind === 'AJUSTE_CANJES') {
-      const sign = movement.kind === 'AJUSTE_CANJES' ? 1 : -1;
+    if (movement.kind === 'CANJE') {
       const saleMatch = movement.id.match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);
       if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
       const components = movement.canjeComponents || canjeProducts.find(product => product.id === movement.canjeProductId)?.components;
       redemptionItems.forEach(item => {
         const componentQty = components ? Number(components[item.id]) || 0 : movement.itemId === item.id ? 1 : 0;
-        redemptionStock[item.id] += sign * componentQty * quantity;
+        redemptionStock[item.id] -= componentQty * quantity;
       });
     }
   });
