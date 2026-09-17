@@ -187,6 +187,21 @@ function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
   });
   return sortNewestByDate(Array.from(next.values()));
 }
+function movementFreshness(item: InventoryMovement) {
+  return item.date || '';
+}
+function mergeMovements(local: InventoryMovement[], incoming: InventoryMovement[]) {
+  const next = new Map(incoming.map(item => [item.id, item]));
+  local.forEach(localItem => {
+    const cloudItem = next.get(localItem.id);
+    if (!cloudItem) {
+      if (localItem.status === 'PENDIENTE') next.set(localItem.id, localItem);
+      return;
+    }
+    if (movementFreshness(localItem) > movementFreshness(cloudItem)) next.set(localItem.id, localItem);
+  });
+  return Array.from(next.values()).sort((first, second) => second.date.localeCompare(first.date) || second.id.localeCompare(first.id));
+}
 function cloudSnapshotFromStores(): CloudSnapshot {
   const users = readStore<AppUser[]>('bt-users', []).map(({ password: _password, ...user }) => user);
   return {
@@ -1752,7 +1767,9 @@ export default function App() {
            const cloudAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
            const localAttendance = readStore<Attendance[]>('bt-attendance', []);
            const nextAttendance = mergeAttendance(localAttendance, cloudAttendance);
-          const nextMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
+          const cloudMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
+          const localMovements = readStore<InventoryMovement[]>('bt-inventory-movements', []);
+          const nextMovements = mergeMovements(localMovements, cloudMovements);
            const nextInventory = reconcileInventory(Array.isArray(snapshot.inventory) ? snapshot.inventory : [], nextMovements);
           const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
           const nextClosures = Array.isArray(snapshot.closures) ? snapshot.closures : [];
@@ -1831,6 +1848,12 @@ export default function App() {
              if (JSON.stringify(nextAttendance) === JSON.stringify(current)) return current;
              writeStore('bt-attendance', nextAttendance);
              return nextAttendance;
+           });
+           setMovements(current => {
+             const nextMovements = mergeMovements(current, payload.snapshot?.movements || []);
+             if (JSON.stringify(nextMovements) === JSON.stringify(current)) return current;
+             writeStore('bt-inventory-movements', nextMovements);
+             return nextMovements;
            });
          }).catch(() => undefined);
       }, 1500);
