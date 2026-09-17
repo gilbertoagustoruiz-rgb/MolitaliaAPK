@@ -274,7 +274,7 @@ async function ensurePromoterStockBaseline() {
 function canjeSnapshot(snapshot: StorageSnapshot) {
   return [
     ...snapshot.movements
-      .filter((movement) => value(movement, "kind") === "CANJE" || (value(movement, "kind") === "AJUSTE_CANJES" && value(movement, "canjeProductId")))
+      .filter((movement) => value(movement, "kind") === "CANJE")
       .map((movement) => ({ ...movement, source: "movement", canjeId: value(movement, "id") })),
     ...snapshot.sales
       .filter((sale) => value(sale, "mode") === "CANJE")
