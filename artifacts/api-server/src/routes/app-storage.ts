@@ -10,12 +10,13 @@ const googleSheetsBackupEnabled = process.env.GOOGLE_SHEETS_BACKUP_ENABLED === "
 const googleSheetsBackupPendingKey = "google_sheets_backup_pending";
 const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
 const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
-const promoterStockBaselineKey = "promoter_stock_baseline_v2";
+const promoterStockBaselineKey = "promoter_stock_baseline_v3";
 const promoterRoles = ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"];
 const promoterStockBaseline = {
   tastingStock: 50,
   redemptionStock: { AVENA: 120, BATEA: 50, MANDIL: 50, SPAGHETTI: 100 },
 };
+const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
 let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
 let googleSheetsBackupRunning = false;
 const campaignTimeZone = "America/Lima";
@@ -176,6 +177,60 @@ async function ensurePromoterStockBaseline() {
       return;
     }
     const updatedAt = new Date().toISOString();
+    const consumptionByPromoter = new Map<string, { tastingStock: number; redemptionStock: Record<string, number> }>();
+    const consumptionFor = (promoterId: string) => {
+      const current = consumptionByPromoter.get(promoterId) || {
+        tastingStock: 0,
+        redemptionStock: Object.fromEntries(redemptionItemIds.map((itemId) => [itemId, 0])),
+      };
+      consumptionByPromoter.set(promoterId, current);
+      return current;
+    };
+    const addRedemptionConsumption = (promoterId: string, itemId: string, quantity: number) => {
+      if (!promoterId || !redemptionItemIds.includes(itemId)) return;
+      const current = consumptionFor(promoterId);
+      current.redemptionStock[itemId] = (Number(current.redemptionStock[itemId]) || 0) + Math.max(0, quantity);
+    };
+    const addRequirementConsumption = (promoterId: string, requirements: unknown, multiplier = 1) => {
+      if (!promoterId || !isRecord(requirements)) return;
+      for (const itemId of redemptionItemIds) {
+        addRedemptionConsumption(promoterId, itemId, Math.max(0, Number(requirements[itemId]) || 0) * multiplier);
+      }
+    };
+    const movementResult = await client.query(
+      `SELECT id,promoter_id,kind,item_id,quantity,data
+       FROM inventory_movements
+       WHERE promoter_id IS NOT NULL
+         AND kind IN ('CANJE','DEGUSTACION')`,
+    );
+    const saleIdsWithCanjeMovement = new Set<string>();
+    for (const row of movementResult.rows) {
+      const promoterId = String(row.promoter_id || "");
+      const source = isRecord(row.data) ? row.data : {};
+      const quantity = Math.max(0, Number(row.quantity) || 0);
+      if (String(row.kind) === "DEGUSTACION") {
+        consumptionFor(promoterId).tastingStock += quantity;
+        continue;
+      }
+      const movementId = String(row.id || "");
+      const saleMatch = movementId.match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);
+      if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
+      const components = isRecord(source.canjeComponents) ? source.canjeComponents : null;
+      if (components) addRequirementConsumption(promoterId, components, quantity);
+      else addRedemptionConsumption(promoterId, String(row.item_id || value(source, "itemId")), quantity);
+    }
+    const saleResult = await client.query(
+      `SELECT id,promoter_id,data
+       FROM sales
+       WHERE promoter_id IS NOT NULL
+         AND data ? 'bonus'`,
+    );
+    for (const row of saleResult.rows) {
+      const saleId = String(row.id || "");
+      if (saleIdsWithCanjeMovement.has(saleId)) continue;
+      const source = isRecord(row.data) ? row.data : {};
+      addRequirementConsumption(String(row.promoter_id || ""), source.redemptionItems);
+    }
     const result = await client.query(
       `SELECT id,data FROM users
        WHERE status='ACTIVO'
@@ -185,10 +240,18 @@ async function ensurePromoterStockBaseline() {
     );
     for (const row of result.rows) {
       const current = isRecord(row.data) ? row.data : {};
+      const consumed = consumptionByPromoter.get(String(row.id)) || {
+        tastingStock: 0,
+        redemptionStock: Object.fromEntries(redemptionItemIds.map((itemId) => [itemId, 0])),
+      };
+      const redemptionStock = Object.fromEntries(redemptionItemIds.map((itemId) => [
+        itemId,
+        Math.max(0, Number(promoterStockBaseline.redemptionStock[itemId as keyof typeof promoterStockBaseline.redemptionStock]) - (Number(consumed.redemptionStock[itemId]) || 0)),
+      ]));
       const next = {
         ...current,
-        tastingStock: promoterStockBaseline.tastingStock,
-        redemptionStock: { ...promoterStockBaseline.redemptionStock },
+        tastingStock: Math.max(0, promoterStockBaseline.tastingStock - consumed.tastingStock),
+        redemptionStock,
         updatedAt,
       };
       await client.query(
