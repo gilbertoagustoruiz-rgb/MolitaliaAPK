@@ -172,6 +172,21 @@ function mergeSales(local: Sale[], incoming: Sale[]) {
     return byDate || saleFreshness(b).localeCompare(saleFreshness(a)) || b.id.localeCompare(a.id);
   });
 }
+function attendanceFreshness(item: Attendance) {
+  return item.date || '';
+}
+function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
+  const next = new Map(incoming.map(item => [item.id, item]));
+  local.forEach(localItem => {
+    const cloudItem = next.get(localItem.id);
+    if (!cloudItem) {
+      if (localItem.status === 'PENDIENTE') next.set(localItem.id, localItem);
+      return;
+    }
+    if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem)) next.set(localItem.id, localItem);
+  });
+  return sortNewestByDate(Array.from(next.values()));
+}
 function cloudSnapshotFromStores(): CloudSnapshot {
   const users = readStore<AppUser[]>('bt-users', []).map(({ password: _password, ...user }) => user);
   return {
@@ -1605,7 +1620,7 @@ function PromoterApp({ user, markets, clients, assignments, productPrices, sales
     const finalizeAttendance = (tastingUsed = 0) => {
       const stock = userTastingStock(user);
       if (tastingUsed > stock) { notify(`Solo tienes ${stock} panetones de degustación disponibles`, true); return; }
-      const now = new Date(); const id = `MAR-${now.getFullYear()}-${String(attendance.length + 1).padStart(6, '0')}`; const type = markType; const item: Attendance = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId: markClientId, marketId: selectedMarketId, type, photo: `${type} - ${available.find(client => client.id === markClientId)?.name || 'TIENDA'} - ${id}.jpg`, date: now.toISOString(), status: syncStatus() };
+      const now = new Date(); const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`; const type = markType; const item: Attendance = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId: markClientId, marketId: selectedMarketId, type, photo: `${type} - ${available.find(client => client.id === markClientId)?.name || 'TIENDA'} - ${id}.jpg`, date: now.toISOString(), status: syncStatus() };
       const next = [item, ...attendance]; setAttendance(next); writeStore('bt-attendance', next);
       const attendanceClient = clients.find(client => client.id === markClientId);
       if (markPhoto) enqueueEvidencePhoto(markPhoto, 'attendance', id, 'photo', { clientName: attendanceClient?.name || attendanceClient?.code || 'CLIENTE NO IDENTIFICADO', marketName: selectedMarket?.name || 'MERCADO NO IDENTIFICADO', recordType: `ASISTENCIA ${type}` });
@@ -1734,7 +1749,9 @@ export default function App() {
         const cloudSales = Array.isArray(snapshot.sales) ? snapshot.sales : [];
         const localSales = readStore<Sale[]>('bt-sales', []);
         const nextSales = mergeSales(localSales, cloudSales).map(sale => enrichSaleMarketLocation(sale, nextMarkets));
-           const nextAttendance = Array.isArray(snapshot.attendance) ? sortNewestByDate(snapshot.attendance) : [];
+           const cloudAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
+           const localAttendance = readStore<Attendance[]>('bt-attendance', []);
+           const nextAttendance = mergeAttendance(localAttendance, cloudAttendance);
           const nextMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
            const nextInventory = reconcileInventory(Array.isArray(snapshot.inventory) ? snapshot.inventory : [], nextMovements);
           const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
@@ -1802,12 +1819,18 @@ export default function App() {
          }).then(async response => {
            if (!response.ok) return;
            const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
-           if (!Array.isArray(payload.snapshot?.sales)) return;
+           if (!payload.snapshot) return;
            setSales(current => {
              const nextSales = mergeSales(current, payload.snapshot?.sales || []);
              if (JSON.stringify(nextSales) === JSON.stringify(current)) return current;
              writeStore('bt-sales', nextSales);
              return nextSales;
+           });
+           setAttendance(current => {
+             const nextAttendance = mergeAttendance(current, payload.snapshot?.attendance || []);
+             if (JSON.stringify(nextAttendance) === JSON.stringify(current)) return current;
+             writeStore('bt-attendance', nextAttendance);
+             return nextAttendance;
            });
          }).catch(() => undefined);
       }, 1500);
