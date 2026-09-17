@@ -10,6 +10,12 @@ const googleSheetsBackupEnabled = process.env.GOOGLE_SHEETS_BACKUP_ENABLED === "
 const googleSheetsBackupPendingKey = "google_sheets_backup_pending";
 const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
 const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
+const promoterStockBaselineKey = "promoter_stock_baseline_v2";
+const promoterRoles = ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"];
+const promoterStockBaseline = {
+  tastingStock: 50,
+  redemptionStock: { AVENA: 120, BATEA: 50, MANDIL: 50, SPAGHETTI: 100 },
+};
 let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
 let googleSheetsBackupRunning = false;
 const campaignTimeZone = "America/Lima";
@@ -157,6 +163,52 @@ async function lockAndValidateCatalogRevision(client: QueryClient, incomingRevis
 async function readCatalogRevision(client: QueryClient = pool as unknown as QueryClient) {
   const result = await client.query("SELECT value FROM app_metadata WHERE key=$1", ["catalog_revision"]);
   return value(result.rows[0] || {}, "value") || null;
+}
+
+async function ensurePromoterStockBaseline() {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('promoter_stock_baseline',0))");
+    const alreadySeeded = await client.query("SELECT value FROM app_metadata WHERE key=$1 FOR UPDATE", [promoterStockBaselineKey]);
+    if (alreadySeeded.rows[0]?.value === "applied") {
+      await client.query("COMMIT");
+      return;
+    }
+    const updatedAt = new Date().toISOString();
+    const result = await client.query(
+      `SELECT id,data FROM users
+       WHERE status='ACTIVO'
+         AND data->>'role' = ANY($1::text[])
+       FOR UPDATE`,
+      [promoterRoles],
+    );
+    for (const row of result.rows) {
+      const current = isRecord(row.data) ? row.data : {};
+      const next = {
+        ...current,
+        tastingStock: promoterStockBaseline.tastingStock,
+        redemptionStock: { ...promoterStockBaseline.redemptionStock },
+        updatedAt,
+      };
+      await client.query(
+        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+        [row.id, next, updatedAt],
+      );
+    }
+    await client.query(
+      `INSERT INTO app_metadata (key,value)
+       VALUES ($1,'applied')
+       ON CONFLICT (key) DO UPDATE SET value='applied',updated_at=now()`,
+      [promoterStockBaselineKey],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function canjeSnapshot(snapshot: StorageSnapshot) {
@@ -655,6 +707,7 @@ if (googleSheetsBackupEnabled) {
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
+    await ensurePromoterStockBaseline();
     res.json({ storage: "replit-postgresql", catalogRevision: await readCatalogRevision(), snapshot: await readSnapshot() });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read app storage");
@@ -1607,6 +1660,7 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
     return;
   }
   try {
+    await ensurePromoterStockBaseline();
     const result = await pool.query(
       "SELECT data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
       [dni],
