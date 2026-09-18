@@ -1567,8 +1567,7 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
     return `${sale.id} ${client?.name || ''} ${market?.name || ''} ${promoter?.name || ''} ${promoter?.dni || ''} ${products} ${sale.mode} ${sale.bonus || ''}`.toLowerCase().includes(salesQuery.trim().toLowerCase());
   });
    const adminCanjes: AdminCanje[] = [
-      ...movements.filter(movement => movement.kind === 'CANJE').map(movement => ({ ...movement, source: 'movement' as const, canjeId: movement.id })),
-     ...sales.filter(sale => (sale.mode as string) === 'CANJE').map(sale => ({ id: sale.id, marketId: sale.marketId, kind: 'CANJE' as const, itemId: undefined, quantity: sale.redemptionCount || 1, actorId: sale.promoterId, actorName: users.find(current => current.id === sale.promoterId)?.name || 'Promotor', date: sale.date, status: sale.status, source: 'sale' as const, canjeId: sale.id, sale })),
+     ...sales.filter(sale => Boolean(sale.bonus)).map(sale => ({ id: `CAN-${sale.id}`, marketId: sale.marketId, kind: 'CANJE' as const, itemId: undefined, quantity: sale.redemptionCount || 1, actorId: sale.promoterId, actorName: users.find(current => current.id === sale.promoterId)?.name || 'Promotor', promoterId: sale.promoterId, canjeProductLabel: sale.bonus, canjeComponents: sale.redemptionItems, date: sale.date, status: sale.status, source: 'sale' as const, canjeId: `CAN-${sale.id}`, sale })),
    ];
     const tastingConsumptions = movements.filter(movement => movement.kind === 'DEGUSTACION').sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
      const tabs = [['inicio', 'Resumen'], ['mercados', 'Mercados'], ['usuarios', 'Usuarios'], ['clientes', 'Clientes'], ['canjes', 'Canjes'], ['degustacion', 'Degustación'], ['asignaciones', 'Asignaciones'], ['ventas', 'Ventas'], ['marcaciones', 'Marcaciones']];
