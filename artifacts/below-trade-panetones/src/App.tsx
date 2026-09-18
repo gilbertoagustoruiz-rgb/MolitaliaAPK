@@ -887,6 +887,7 @@ function photoExportLink(value?: string) {
   if (!value) return '';
   const source = photoImageSource(value);
   if (/^(https?:\/\/|data:image\/|blob:)/.test(source)) return source;
+  if (!source.startsWith('/')) return '';
   return `${window.location.origin}${source.startsWith('/') ? source : `/${source}`}`;
 }
 function PhotoThumbnail({ label, src }: { label: string; src?: string }) {
@@ -1695,19 +1696,21 @@ export default function App() {
       const photoContextRef = useRef({ sales, attendance, clients, markets });
       photoContextRef.current = { sales, attendance, clients, markets };
      const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
+       const updatedAt = new Date().toISOString();
        if (upload.entityType === 'sale') {
          setSales(current => {
-           const next = current.map(sale => sale.id === upload.entityId ? (upload.field === 'exchangePhoto' ? { ...sale, exchangePhoto: url } : { ...sale, receiptPhoto: url }) : sale);
+           const next = current.map(sale => sale.id === upload.entityId ? (upload.field === 'exchangePhoto' ? { ...sale, exchangePhoto: url, updatedAt } : { ...sale, receiptPhoto: url, updatedAt }) : sale);
            writeStore('bt-sales', next);
            return next;
          });
        } else {
          setAttendance(current => {
-           const next = current.map(item => item.id === upload.entityId ? { ...item, photo: url } : item);
+           const next = current.map(item => item.id === upload.entityId ? { ...item, photo: url, date: item.date || updatedAt } : item);
            writeStore('bt-attendance', next);
            return next;
          });
        }
+       setCloudSyncTick(value => value + 1);
      };
      const flushEvidencePhotos = async () => {
        if (photoUploadRunning.current || !navigator.onLine) return;
