@@ -699,24 +699,14 @@ function lowStockLabels(tastingStock: number, redemptionStock: RedemptionStock) 
 function calculatedPromoterStock(promoterId: string, sales: Sale[], movements: InventoryMovement[]) {
   const redemptionStock = { ...DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM };
   let tastingStock = DEFAULT_CAMPAIGN_TASTING_STOCK;
-  const saleIdsWithCanjeMovement = new Set<string>();
   movements.forEach(movement => {
     if (movement.promoterId !== promoterId) return;
     const quantity = Math.max(0, Number(movement.quantity) || 0);
     if (movement.kind === 'DEGUSTACION') tastingStock -= quantity;
-    if (movement.kind === 'CANJE') {
-      const saleMatch = movement.id.match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);
-      if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
-      const components = movement.canjeComponents || canjeProducts.find(product => product.id === movement.canjeProductId)?.components;
-      redemptionItems.forEach(item => {
-        const componentQty = components ? Number(components[item.id]) || 0 : movement.itemId === item.id ? 1 : 0;
-        redemptionStock[item.id] -= componentQty * quantity;
-      });
-    }
   });
   sales.forEach(sale => {
-    if (sale.promoterId !== promoterId || !sale.bonus || saleIdsWithCanjeMovement.has(sale.id)) return;
-    const requirements = sale.redemptionItems || parseBonusItems(sale.bonus);
+    if (sale.promoterId !== promoterId || !sale.bonus) return;
+    const requirements = saleRedemptionRequirements(sale);
     redemptionItems.forEach(item => { redemptionStock[item.id] -= Math.max(0, Number(requirements[item.id]) || 0); });
   });
   return {
@@ -827,6 +817,12 @@ function requiredRedemptionEntries(requirements: Partial<RedemptionStock>) {
 }
 function multiplyRedemptionRequirements(requirements: Partial<RedemptionStock>, count: number) {
   return redemptionItems.reduce((result, item) => ({ ...result, [item.id]: (requirements[item.id] || 0) * count }), {} as Partial<RedemptionStock>);
+}
+function saleRedemptionRequirements(sale: Sale) {
+  if (!sale.bonus) return {} as Partial<RedemptionStock>;
+  const storedRequirements = redemptionItems.reduce((result, item) => ({ ...result, [item.id]: Math.max(0, Number(sale.redemptionItems?.[item.id]) || 0) }), {} as Partial<RedemptionStock>);
+  if (redemptionItems.some(item => (storedRequirements[item.id] || 0) > 0)) return storedRequirements;
+  return multiplyRedemptionRequirements(parseBonusItems(sale.bonus), Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)));
 }
 function bonusProductsFor(mode: 'UNIDADES' | 'PLANCHAS', total: number, planchas: number, stock: RedemptionStock) {
   const activeProducts = activeCanjeProducts(new Date(), stock);
@@ -1567,7 +1563,7 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
     return `${sale.id} ${client?.name || ''} ${market?.name || ''} ${promoter?.name || ''} ${promoter?.dni || ''} ${products} ${sale.mode} ${sale.bonus || ''}`.toLowerCase().includes(salesQuery.trim().toLowerCase());
   });
    const adminCanjes: AdminCanje[] = [
-     ...sales.filter(sale => Boolean(sale.bonus)).map(sale => ({ id: `CAN-${sale.id}`, marketId: sale.marketId, kind: 'CANJE' as const, itemId: undefined, quantity: sale.redemptionCount || 1, actorId: sale.promoterId, actorName: users.find(current => current.id === sale.promoterId)?.name || 'Promotor', promoterId: sale.promoterId, canjeProductLabel: sale.bonus, canjeComponents: sale.redemptionItems, date: sale.date, status: sale.status, source: 'sale' as const, canjeId: `CAN-${sale.id}`, sale })),
+     ...sales.filter(sale => Boolean(sale.bonus)).map(sale => ({ id: `CAN-${sale.id}`, marketId: sale.marketId, kind: 'CANJE' as const, itemId: undefined, quantity: sale.redemptionCount || 1, actorId: sale.promoterId, actorName: users.find(current => current.id === sale.promoterId)?.name || 'Promotor', promoterId: sale.promoterId, canjeProductLabel: sale.bonus, canjeComponents: saleRedemptionRequirements(sale), date: sale.date, status: sale.status, source: 'sale' as const, canjeId: `CAN-${sale.id}`, sale })),
    ];
     const tastingConsumptions = movements.filter(movement => movement.kind === 'DEGUSTACION').sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
      const tabs = [['inicio', 'Resumen'], ['mercados', 'Mercados'], ['usuarios', 'Usuarios'], ['clientes', 'Clientes'], ['canjes', 'Canjes'], ['degustacion', 'Degustación'], ['asignaciones', 'Asignaciones'], ['ventas', 'Ventas'], ['marcaciones', 'Marcaciones']];
