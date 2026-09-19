@@ -886,3 +886,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .table-search-detail { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:8px 0; }
 .table-search small { color:hsl(var(--muted)); font-size:12px; line-height:1.5; }
 .table-search-detail .btn { flex-shrink:0; }
+
+/* Administrative sales fill the dialog instead of reserving a hidden sidebar. */
+.modal.admin-sale-modal { width:min(1050px,100%); }
+.admin-sale-modal .sale-layout { grid-template-columns:minmax(0,1fr); margin-top:20px; }
+.admin-sale-modal .sale-form { min-width:0; width:100%; }
+.admin-sale-modal .form-grid > *, .admin-sale-modal .field { min-width:0; }
+.admin-sale-modal .input, .admin-sale-modal .select { min-width:0; max-width:100%; width:100%; }
+.admin-sale-modal .form-actions { flex-wrap:wrap; }
+@media (max-width:640px) {
+  .modal.admin-sale-modal { padding:16px; }
+  .admin-sale-modal .form-grid, .admin-sale-modal .evidence-grid { grid-template-columns:minmax(0,1fr); }
+  .admin-sale-modal .sale-form { padding:16px; }
+}

@@ -1096,6 +1096,10 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     const promoterResult = await db.query("SELECT data,status FROM users WHERE id=$1 FOR UPDATE", [value(input,"promoterId")]);
     const promoter = promoterResult.rows[0];
     if (!promoter || promoter.status !== "ACTIVO" || !["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"].includes(promoter.data.role)) throw new Error("Selecciona un promotor activo.");
+    const assigned = await db.query("SELECT market_ids,client_ids FROM assignments WHERE promoter_id=$1 OR (promoter_dni=$2 AND promoter_dni <> '') ORDER BY (promoter_id=$1) DESC LIMIT 1", [value(input,"promoterId"),promoter.data.dni || ""]);
+    const assignment = assigned.rows[0];
+    const allowedMarkets = assignment ? assignment.market_ids : (promoter.data.marketId ? [promoter.data.marketId] : []);
+    if (!Array.isArray(allowedMarkets) || !allowedMarkets.includes(value(input,"marketId")) || (assignment && (!Array.isArray(assignment.client_ids) || !assignment.client_ids.includes(value(input,"clientId"))))) throw new Error("El mercado o cliente no está asignado al promotor seleccionado.");
     const customer = await db.query("SELECT id FROM clients WHERE id=$1 AND market_id=$2 AND status='ACTIVO'", [value(input,"clientId"),value(input,"marketId")]);
     const market = await db.query("SELECT data FROM markets WHERE id=$1 AND status='ACTIVO'", [value(input,"marketId")]);
     if (!customer.rows.length || !market.rows.length) throw new Error("Selecciona un cliente activo del mercado elegido.");
