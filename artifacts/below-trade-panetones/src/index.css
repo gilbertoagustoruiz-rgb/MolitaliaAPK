@@ -430,8 +430,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, .photo-field:fo
 .modal-head p { margin:0; color:hsl(var(--muted)); font-size:13px; }
 .icon-button { width:34px; height:34px; border:1px solid hsl(var(--line)); border-radius:9px; display:grid; place-items:center; color:hsl(var(--muted)); background:transparent; }
 .modal-actions { display:flex; justify-content:flex-end; gap:9px; padding-top:5px; }
-.toast { position:fixed; right:20px; bottom:22px; z-index:60; max-width:360px; padding:14px 16px; border-left:4px solid hsl(var(--green)); border-radius:11px; background:hsl(var(--ink)); color:hsl(42 40% 98%); box-shadow:var(--shadow); font-size:13px; animation:slide-in .22s ease-out; }
-.toast.error { border-color:hsl(var(--red)); }
+.toast { position:fixed; right:20px; bottom:22px; z-index:60; max-width:360px; padding:14px 16px; border:1px solid hsl(var(--line)); border-left:4px solid hsl(var(--green)); border-radius:11px; background:hsl(var(--surface)); color:hsl(var(--ink)); box-shadow:var(--shadow); font-size:13px; animation:slide-in .22s ease-out; }
+.toast.error { border-left-color:hsl(var(--red)); }
 @keyframes slide-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
 
 .promoter-page { min-height:calc(100dvh - 72px); background:#17283f; color:#f4f0e8; }
