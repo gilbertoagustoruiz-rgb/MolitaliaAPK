@@ -21,8 +21,6 @@ let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
 let googleSheetsBackupRunning = false;
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
-let lastPreviousDayAutomaticClosureSweep = "";
-let lastCurrentDayAutomaticClosureSweep = "";
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -124,7 +122,7 @@ function campaignDayBounds(day: string) {
   return {
     start: `${day}T00:00:00.000-05:00`,
     end: `${day}T23:59:59.999-05:00`,
-    closureDate: `${day}T23:59:00.000-05:00`,
+    closureDate: `${day}T23:59:59.000-05:00`,
   };
 }
 
@@ -349,19 +347,15 @@ async function createAutomaticClosuresForDay(day: string) {
       return 0;
     }
     const openPromoters = await client.query(
-      `SELECT DISTINCT ON (attendance.promoter_id)
-         attendance.promoter_id,attendance.market_id,attendance.client_id,users.data AS user_data
-       FROM attendance
-       JOIN users ON users.id=attendance.promoter_id
-       WHERE attendance.event_date >= $1::timestamptz
-         AND attendance.event_date <= $2::timestamptz
-         AND NOT EXISTS (
-           SELECT 1 FROM session_closures
-           WHERE session_closures.promoter_id=attendance.promoter_id
-             AND session_closures.closure_date >= $1::timestamptz
-             AND session_closures.closure_date <= $2::timestamptz
-         )
-       ORDER BY attendance.promoter_id,attendance.event_date DESC,attendance.created_at DESC`,
+      `SELECT latest.*,users.data AS user_data FROM (
+         SELECT DISTINCT ON (promoter_id,client_id)
+           id,promoter_id,market_id,client_id,event_type
+         FROM attendance
+         WHERE event_date >= $1::timestamptz AND event_date <= $2::timestamptz
+         ORDER BY promoter_id,client_id,event_date DESC,created_at DESC
+       ) latest
+       JOIN users ON users.id=latest.promoter_id
+       WHERE latest.event_type='ENTRADA'`,
       [bounds.start, bounds.end],
     );
     for (const row of openPromoters.rows) {
@@ -370,7 +364,7 @@ async function createAutomaticClosuresForDay(day: string) {
       if (!promoterId || !marketId) continue;
       const userData = isRecord(row.user_data) ? row.user_data : {};
       const closure: StoredRecord = {
-        id: `CIERRE-AUTO-${day}-${promoterId}`,
+        id: `CIERRE-AUTO-${day}-${promoterId}-${row.client_id}`,
         promoterId,
         promoterRole: value(userData, "role") || undefined,
         promoterRoleLabel: value(userData, "roleLabel") || value(userData, "role") || undefined,
@@ -380,10 +374,16 @@ async function createAutomaticClosuresForDay(day: string) {
         leads: 0,
         automatic: true,
         closureType: "AUTOMATICO",
-        evidence: `Cierre automático generado por el sistema a las 23:59 (hora de Lima) por falta de cierre manual del ${day}.`,
+        evidence: `Cierre automático generado por el sistema a las 23:59:59 (hora de Lima) por falta de cierre manual del ${day}.`,
         date: new Date(bounds.closureDate).toISOString(),
         status: "SINCRONIZADA",
       };
+      await upsertRecord(client as unknown as QueryClient, "attendance", {
+        ...closure,
+        id: `MAR-AUTO-${day}-${row.id}`,
+        type: "SALIDA",
+        automatic: true,
+      });
       await upsertRecord(client as unknown as QueryClient, "closures", closure);
       created += 1;
     }
@@ -403,14 +403,9 @@ async function createAutomaticClosuresForDay(day: string) {
 async function runAutomaticClosureSweep() {
   const current = campaignDateParts();
   const previousDay = previousCampaignDay(current.day);
-  if (lastPreviousDayAutomaticClosureSweep !== previousDay) {
-    await createAutomaticClosuresForDay(previousDay);
-    lastPreviousDayAutomaticClosureSweep = previousDay;
-  }
-  if (current.hour === 23 && current.minute >= 59 && lastCurrentDayAutomaticClosureSweep !== current.day) {
-    await createAutomaticClosuresForDay(current.day);
-    lastCurrentDayAutomaticClosureSweep = current.day;
-  }
+  // Only close completed Lima days. Rechecking also catches late synchronization;
+  // the generated SALIDA becomes the latest event, making this idempotent.
+  await createAutomaticClosuresForDay(previousDay);
 }
 
 const automaticClosureTimer = setInterval(() => {
