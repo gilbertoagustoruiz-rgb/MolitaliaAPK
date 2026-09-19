@@ -1070,6 +1070,94 @@ router.delete("/app-storage/admin/clients/:id", async (req, res): Promise<void> 
   }
 });
 
+// Administrative sales use the promoter as owner and retain the authenticated creator.
+router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
+  const credentials = await pool.query("SELECT id,data,password_hash,status FROM users WHERE dni=$1", [req.get("x-admin-dni") || ""]);
+  const actor = credentials.rows[0];
+  if (!actor || actor.status !== "ACTIVO" || !["ADMIN", "ANALISTA"].includes(actor.data.role) || !actor.password_hash || !(await verifyPassword(req.get("x-admin-key") || "", actor.password_hash))) {
+    res.status(403).json({message:"Solo Analista y Admin pueden registrar ventas de promotores."}); return;
+  }
+  const input = req.body?.sale;
+  if (!isRecord(input)) { res.status(400).json({message:"Venta no válida."}); return; }
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    if (!(await lockAndValidateCatalogRevision(db as unknown as QueryClient, req.get("x-catalog-revision") || null))) throw new Error("Actualiza la aplicación antes de registrar la venta.");
+    const id = value(input,"id");
+    if (!id.startsWith("VTA-")) throw new Error("Código de venta no válido.");
+    await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`sale:${id}`]);
+    await lockInventoryLedger(db as unknown as QueryClient);
+    const existing = await db.query("SELECT data FROM sales WHERE id=$1", [id]);
+    if (existing.rows.length) {
+      if (existing.rows[0].data.createdById !== actor.id) throw new Error("El código de venta ya existe.");
+      await db.query("COMMIT");
+      res.json({sale:existing.rows[0].data,snapshot:await readSnapshot()}); return;
+    }
+    const promoterResult = await db.query("SELECT data,status FROM users WHERE id=$1 FOR UPDATE", [value(input,"promoterId")]);
+    const promoter = promoterResult.rows[0];
+    if (!promoter || promoter.status !== "ACTIVO" || !["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"].includes(promoter.data.role)) throw new Error("Selecciona un promotor activo.");
+    const customer = await db.query("SELECT id FROM clients WHERE id=$1 AND market_id=$2 AND status='ACTIVO'", [value(input,"clientId"),value(input,"marketId")]);
+    const market = await db.query("SELECT data FROM markets WHERE id=$1 AND status='ACTIVO'", [value(input,"marketId")]);
+    if (!customer.rows.length || !market.rows.length) throw new Error("Selecciona un cliente activo del mercado elegido.");
+    const date = new Date(value(input,"date"));
+    const units = Number(input.units);
+    const planchas = Number(input.planchas);
+    const mode = value(input,"mode");
+    if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now()) throw new Error("La fecha de venta no puede estar vacía ni ser futura.");
+    if (!Number.isInteger(units) || units < 1 || !["UNIDADES","PLANCHAS"].includes(mode) || (mode === "UNIDADES" && units > 5)) throw new Error("En unidades puedes registrar de 1 a 5.");
+    const mix = isRecord(input.mix) ? input.mix : {};
+    const prices = isRecord(input.unitPrices) ? input.unitPrices : {};
+    if (!Object.keys(mix).length || Object.entries(mix).some(([brand,n]) => !["TODINNO","COSTA","PASQUALINO"].includes(brand) || !Number.isInteger(Number(n)) || Number(n) < 0) || Object.values(mix).reduce((sum: number,n) => sum + Number(n),0) !== units) throw new Error("El mix debe sumar las unidades de la venta.");
+    if (mode === "PLANCHAS" && (!Number.isInteger(planchas) || planchas < 1 || planchas > 80 || units !== planchas * 6)) throw new Error("Cada plancha debe sumar 6 unidades; más de 80 requiere autorización Trade.");
+    const amount = mode === "PLANCHAS" ? Object.entries(mix).reduce((sum,[brand,n]) => sum + Number(n) * Number(prices[brand] || 0),0) : units * Number(Object.values(prices)[0]);
+    if (!(amount > 0) || !Number.isFinite(amount) || Math.abs(amount - Number(input.amountSoles)) > 0.01 || (mode === "PLANCHAS" && Object.entries(mix).some(([brand,n]) => Number(n)>0 && !(Number(prices[brand])>0)))) throw new Error("Verifica los precios unitarios y el total.");
+    const photoValid = (photo: string) => /^(https:\/\/|\/api\/)/.test(photo);
+    const bonus = value(input,"bonus");
+    if (!photoValid(value(input,"receiptPhoto")) || (bonus && !photoValid(value(input,"exchangePhoto")))) throw new Error("Primero sube las fotografías de boleta y canje.");
+    const count = Number(input.redemptionCount || 0);
+    if ((bonus && (!Number.isInteger(count) || count < 1 || count > 3)) || (!bonus && count !== 0) || (mode === "UNIDADES" && count !== Math.floor(units / 2)) || (count === 3 && !value(input,"comment"))) throw new Error("Número de canjes o justificación no válido.");
+    const requestedSource = isRecord(input.redemptionItems) ? input.redemptionItems : {};
+    const requested = Object.fromEntries(redemptionItemIds.map(item => [item,Number(requestedSource[item] || 0)]));
+    if (Object.values(requested).some(n => !Number.isInteger(n) || n < 0) || (!bonus && Object.values(requested).some(n => n > 0)) || (bonus && !Object.values(requested).some(n => n > 0))) throw new Error("Los componentes del canje no son válidos.");
+    if (mode === "UNIDADES" && (requested.AVENA !== count || requested.BATEA || requested.MANDIL || requested.SPAGHETTI)) throw new Error("En unidades corresponde una avena cada 2 unidades.");
+    if (mode === "PLANCHAS") {
+      const month = Number(new Intl.DateTimeFormat("en-US",{timeZone:"America/Lima",month:"numeric"}).format(date));
+      const eligible = planchas === 10 || ([9,10,11,12].includes(month) && [1,4].includes(planchas));
+      if (Boolean(bonus) !== eligible) throw new Error("El canje no corresponde a las planchas y fecha elegidas.");
+      if (bonus) {
+        const avena = planchas === 1 ? 3 : planchas === 4 ? 12 : 24;
+        const spaghetti = planchas === 1 ? 1 : planchas === 4 ? 3 : 10;
+        const accessory = requested.MANDIL || requested.BATEA;
+        if (requested.AVENA !== avena * count || requested.SPAGHETTI !== spaghetti * count || (accessory && (planchas !== 10 || accessory !== count)) || (requested.MANDIL && ![9,10].includes(month)) || (requested.BATEA && month !== 11)) throw new Error("Los items del canje no corresponden a esta dinámica.");
+      }
+    }
+    const previous = await db.query("SELECT data FROM sales WHERE promoter_id=$1",[value(input,"promoterId")]);
+    const stock: Record<string,number> = {...promoterStockBaseline.redemptionStock};
+    for (const row of previous.rows) {
+      const requirements = isRecord(row.data.redemptionItems) ? row.data.redemptionItems : {};
+      if (row.data.bonus) for (const item of redemptionItemIds) stock[item] -= Math.max(0,Number(requirements[item]) || 0);
+    }
+    for (const item of redemptionItemIds) {
+      if (requested[item] > Math.max(0,stock[item])) throw new Error(`Stock insuficiente de ${item}.`);
+      stock[item] = Math.max(0,stock[item]) - requested[item];
+    }
+    const updatedAt = new Date().toISOString();
+    const sale = {...input, amountSoles:amount, date:date.toISOString(), updatedAt, promoterRole:promoter.data.role, promoterRoleLabel:promoter.data.roleLabel || promoter.data.role, createdById:actor.id, createdByRole:actor.data.role, administrative:true, status:"SINCRONIZADA"};
+    await upsertRecord(db as unknown as QueryClient,"sales",sale);
+    for (const item of redemptionItemIds) {
+      if (!requested[item]) continue;
+      await upsertRecord(db as unknown as QueryClient,"movements",{id:`CAN-${id}-${item}`,marketId:input.marketId,kind:"CANJE",itemId:item,quantity:requested[item],actorId:actor.id,actorName:actor.data.name,promoterId:input.promoterId,date:date.toISOString(),updatedAt,status:"SINCRONIZADA"});
+    }
+    await db.query("UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",[input.promoterId,{...promoter.data,redemptionStock:stock},updatedAt]);
+    await db.query("COMMIT");
+    res.status(201).json({sale,snapshot:await readSnapshot()});
+  } catch (error) {
+    await db.query("ROLLBACK");
+    req.log.error({err:error},"Unable to create administrative sale");
+    res.status(400).json({message:error instanceof Error ? error.message : "No se pudo guardar la venta."});
+  } finally { db.release(); }
+});
+
 router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
   const id = String(req.params.id || "").trim();
   const input = req.body?.sale;
