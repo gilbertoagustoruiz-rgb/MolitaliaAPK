@@ -1,37 +1,232 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import { AlertTriangle, Camera, Check, CheckCircle2, Clock3, Download, FileSpreadsheet, Gift, LogOut, MapPin, Moon, PackageCheck, Pencil, Plus, RefreshCw, Search, ShieldCheck, ShoppingBag, Smartphone, Store, Sun, Trash2, Upload, UserRound, Users, WifiOff, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import {
+  AlertTriangle,
+  Camera,
+  Check,
+  CheckCircle2,
+  Clock3,
+  Download,
+  FileSpreadsheet,
+  Gift,
+  LogOut,
+  MapPin,
+  Moon,
+  PackageCheck,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  ShoppingBag,
+  Smartphone,
+  Store,
+  Sun,
+  Trash2,
+  Upload,
+  UserRound,
+  Users,
+  WifiOff,
+  X,
+} from "lucide-react";
 
-type Role = 'ANALISTA' | 'PROMOTOR' | 'PROMOTOR ROTATIVO' | 'PROMOTOR PERMANENTE' | 'COORDINADOR' | 'SUPERVISOR' | 'TRADE' | 'ADMIN' | 'CLIENTE';
-const promoterRoles: Role[] = ['PROMOTOR', 'PROMOTOR ROTATIVO', 'PROMOTOR PERMANENTE'];
-const selectablePromoterRoles: Role[] = ['PROMOTOR ROTATIVO', 'PROMOTOR PERMANENTE'];
+type Role =
+  | "ANALISTA"
+  | "PROMOTOR"
+  | "PROMOTOR ROTATIVO"
+  | "PROMOTOR PERMANENTE"
+  | "COORDINADOR"
+  | "SUPERVISOR"
+  | "TRADE"
+  | "ADMIN"
+  | "CLIENTE";
+const promoterRoles: Role[] = [
+  "PROMOTOR",
+  "PROMOTOR ROTATIVO",
+  "PROMOTOR PERMANENTE",
+];
+const selectablePromoterRoles: Role[] = [
+  "PROMOTOR ROTATIVO",
+  "PROMOTOR PERMANENTE",
+];
 function isPromoterRole(role?: Role) {
   return Boolean(role && promoterRoles.includes(role));
 }
 function isZoneManagerRole(role?: Role) {
-  return isPromoterRole(role) || role === 'COORDINADOR';
+  return isPromoterRole(role) || role === "COORDINADOR";
 }
-type Status = 'ACTIVO' | 'INACTIVO';
-type SyncStatus = 'SINCRONIZADA' | 'PENDIENTE';
-type Market = { id: string; department: string; region?: string; province: string; district: string; name: string; status: Status };
-type AppUser = { id: string; dni: string; name: string; role: Role; roleLabel?: string; marketId?: string; clientId?: string; password?: string; status: Status; tastingStock?: number; redemptionStock?: RedemptionStock; sheetArchived?: boolean };
-type PromoterAssignment = { promoterId: string; promoterDni?: string; marketIds: string[]; clientIds: string[]; updatedAt: string };
-type AssignmentRelationship = { key: string; promoter: AppUser; marketId: string; client: Client | null };
-type ClientCategory = 'MIXTO' | 'CONFETI';
-type Client = { id: string; code: string; name: string; phone?: string; category?: ClientCategory; marketId: string; status: Status };
-type ProductPrice = { sku: string; product: string; unitsPerPackage: number; unitPrice: number; totalPrice: number; updatedAt: string };
-type Sale = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; marketRegion?: string; marketDepartment?: string; marketProvince?: string; marketDistrict?: string; mode: 'UNIDADES' | 'PLANCHAS'; units: number; amountSoles: number; weightKg?: number; unitPrices?: Record<string, number>; planchas?: number; mix: Record<string, number>; bonus?: string; redemptionCount?: number; redemptionItems?: Partial<RedemptionStock>; comment?: string; receiptPhoto: string; exchangePhoto?: string; date: string; updatedAt?: string; status: SyncStatus };
-type Attendance = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; clientId: string; marketId: string; type: 'ENTRADA' | 'SALIDA'; photo: string; date: string; status: SyncStatus };
-type SessionClosure = { id: string; promoterId: string; promoterRole?: Role; promoterRoleLabel?: string; marketId: string; clientId?: string; tastingUsed: number; leads: number; automatic?: boolean; closureType?: 'MANUAL' | 'AUTOMATICO'; evidence?: string; date: string; status: SyncStatus };
-type RedemptionItemId = 'AVENA' | 'BATEA' | 'MANDIL' | 'SPAGHETTI';
-type CanjeProductId = 'CANJE_AVENA_2' | 'CANJE_AVENA_1' | 'CANJE_AVENA_3_SPAGHETTI_1' | 'CANJE_AVENA_12_SPAGHETTI_3' | 'CANJE_AVENA_24_SPAGHETTI_10' | 'CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1' | 'CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4' | 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1' | 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4' | 'CANJE_AVENA_30_SPAGHETTI_10' | 'CANJE_AVENA_144_SPAGHETTI_100';
-type DegustacionProductId = 'PANETON';
+type Status = "ACTIVO" | "INACTIVO";
+type SyncStatus = "SINCRONIZADA" | "PENDIENTE";
+type Market = {
+  id: string;
+  department: string;
+  region?: string;
+  province: string;
+  district: string;
+  name: string;
+  status: Status;
+};
+type AppUser = {
+  id: string;
+  dni: string;
+  name: string;
+  role: Role;
+  roleLabel?: string;
+  marketId?: string;
+  clientId?: string;
+  password?: string;
+  status: Status;
+  tastingStock?: number;
+  redemptionStock?: RedemptionStock;
+  sheetArchived?: boolean;
+};
+type PromoterAssignment = {
+  promoterId: string;
+  promoterDni?: string;
+  marketIds: string[];
+  clientIds: string[];
+  updatedAt: string;
+};
+type AssignmentRelationship = {
+  key: string;
+  promoter: AppUser;
+  marketId: string;
+  client: Client | null;
+};
+type ClientCategory = string;
+type Category = {
+  id: string;
+  name: string;
+  status: Status;
+  updatedAt?: string;
+};
+type Client = {
+  id: string;
+  code: string;
+  name: string;
+  phone?: string;
+  category?: ClientCategory;
+  marketId: string;
+  status: Status;
+};
+type SaleMode = "UNIDADES" | "PLANCHAS";
+type ProductPrice = {
+  sku: string;
+  product: string;
+  brand?: string;
+  weightKg?: number;
+  saleModes?: SaleMode[];
+  unitsPerPackage: number;
+  unitPrice: number;
+  totalPrice: number;
+  status?: Status;
+  updatedAt: string;
+};
+type Sale = {
+  id: string;
+  promoterId: string;
+  promoterRole?: Role;
+  promoterRoleLabel?: string;
+  clientId: string;
+  marketId: string;
+  marketRegion?: string;
+  marketDepartment?: string;
+  marketProvince?: string;
+  marketDistrict?: string;
+  mode: "UNIDADES" | "PLANCHAS";
+  units: number;
+  amountSoles: number;
+  weightKg?: number;
+  unitPrices?: Record<string, number>;
+  planchas?: number;
+  mix: Record<string, number>;
+  bonus?: string;
+  redemptionCount?: number;
+  redemptionItems?: Partial<RedemptionStock>;
+  comment?: string;
+  receiptPhoto: string;
+  exchangePhoto?: string;
+  date: string;
+  updatedAt?: string;
+  status: SyncStatus;
+};
+type Attendance = {
+  id: string;
+  promoterId: string;
+  promoterRole?: Role;
+  promoterRoleLabel?: string;
+  clientId: string;
+  marketId: string;
+  type: "ENTRADA" | "SALIDA";
+  photo: string;
+  date: string;
+  status: SyncStatus;
+};
+type SessionClosure = {
+  id: string;
+  promoterId: string;
+  promoterRole?: Role;
+  promoterRoleLabel?: string;
+  marketId: string;
+  clientId?: string;
+  tastingUsed: number;
+  leads: number;
+  automatic?: boolean;
+  closureType?: "MANUAL" | "AUTOMATICO";
+  evidence?: string;
+  date: string;
+  status: SyncStatus;
+};
+type RedemptionItemId = "AVENA" | "BATEA" | "MANDIL" | "SPAGHETTI";
+type CanjeProductId =
+  | "CANJE_AVENA_2"
+  | "CANJE_AVENA_1"
+  | "CANJE_AVENA_3_SPAGHETTI_1"
+  | "CANJE_AVENA_12_SPAGHETTI_3"
+  | "CANJE_AVENA_24_SPAGHETTI_10"
+  | "CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1"
+  | "CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4"
+  | "CANJE_AVENA_24_SPAGHETTI_10_BATEA_1"
+  | "CANJE_AVENA_144_SPAGHETTI_100_BATEA_4"
+  | "CANJE_AVENA_30_SPAGHETTI_10"
+  | "CANJE_AVENA_144_SPAGHETTI_100";
+type DegustacionProductId = "PANETON";
 type RedemptionStock = Record<RedemptionItemId, number>;
-type MarketInventory = { marketId: string; tastingStock: number; redemptionStock: RedemptionStock; updatedAt: string; exchangeStock?: number };
-type InventoryMovementKind = 'CANJE' | 'DEGUSTACION' | 'AJUSTE_DEGUSTACION' | 'AJUSTE_CANJES';
-type InventoryMovement = { id: string; marketId: string; kind: InventoryMovementKind; itemId?: RedemptionItemId; canjeProductId?: CanjeProductId; canjeProductLabel?: string; canjeComponents?: Partial<RedemptionStock>; degustacionProductId?: DegustacionProductId; degustacionProductLabel?: string; quantity: number; actorId: string; actorName: string; promoterId?: string; date: string; status: SyncStatus };
-type AdminCanje = InventoryMovement & { source: 'movement' | 'sale'; canjeId: string; sale?: Sale };
-type AdminDegustacion = InventoryMovement & { source: 'movement'; degustacionId: string };
+type MarketInventory = {
+  marketId: string;
+  tastingStock: number;
+  redemptionStock: RedemptionStock;
+  updatedAt: string;
+  exchangeStock?: number;
+};
+type InventoryMovementKind =
+  "CANJE" | "DEGUSTACION" | "AJUSTE_DEGUSTACION" | "AJUSTE_CANJES";
+type InventoryMovement = {
+  id: string;
+  marketId: string;
+  kind: InventoryMovementKind;
+  itemId?: RedemptionItemId;
+  canjeProductId?: CanjeProductId;
+  canjeProductLabel?: string;
+  canjeComponents?: Partial<RedemptionStock>;
+  degustacionProductId?: DegustacionProductId;
+  degustacionProductLabel?: string;
+  quantity: number;
+  actorId: string;
+  actorName: string;
+  promoterId?: string;
+  date: string;
+  status: SyncStatus;
+};
+type AdminCanje = InventoryMovement & {
+  source: "movement" | "sale";
+  canjeId: string;
+  sale?: Sale;
+};
+type AdminDegustacion = InventoryMovement & {
+  source: "movement";
+  degustacionId: string;
+};
 type Toast = { message: string; error?: boolean };
 type CloudSnapshot = {
   markets: Market[];
@@ -44,184 +239,412 @@ type CloudSnapshot = {
   assignments: PromoterAssignment[];
   closures: SessionClosure[];
   productPrices: ProductPrice[];
+  categories: Category[];
 };
 
-const MARKETS_SHEET_ID = '1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM';
+const MARKETS_SHEET_ID = "1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM";
 const MARKETS_SHEET = `https://docs.google.com/spreadsheets/d/${MARKETS_SHEET_ID}/export?format=csv&gid=0`;
-const CLIENTS_SHEET_ID = '1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA';
-const USERS_SHEET_ID = '1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo';
-const PRICES_SHEET_ID = '1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8';
-const GOOGLE_SHEETS_PROXY = '/api/google-sheets';
+const CLIENTS_SHEET_ID = "1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA";
+const USERS_SHEET_ID = "1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo";
+const PRICES_SHEET_ID = "1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8";
+const GOOGLE_SHEETS_PROXY = "/api/google-sheets";
 const GOOGLE_INTEGRATIONS_ENABLED = false;
-const APP_STORAGE_READ = '/api/app-storage';
-const APP_STORAGE_SYNC = '/api/app-storage/sync';
-const APP_STORAGE_ASSIGNMENTS = '/api/app-storage/assignments';
-const APP_STORAGE_LOGIN = '/api/app-storage/login';
-const APP_STORAGE_ADMIN = '/api/app-storage/admin';
-const GOOGLE_DRIVE_PHOTO_UPLOAD = '/api/evidence-photos';
-const PRODUCT_PRICES_STORE_KEY = 'bt-product-prices';
+const APP_STORAGE_READ = "/api/app-storage";
+const APP_STORAGE_SYNC = "/api/app-storage/sync";
+const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
+const APP_STORAGE_LOGIN = "/api/app-storage/login";
+const APP_STORAGE_ADMIN = "/api/app-storage/admin";
+const GOOGLE_DRIVE_PHOTO_UPLOAD = "/api/evidence-photos";
+const PRODUCT_PRICES_STORE_KEY = "bt-product-prices";
+const CATEGORIES_STORE_KEY = "bt-client-categories";
 const DEFAULT_CAMPAIGN_TASTING_STOCK = 50;
 const DEFAULT_CAMPAIGN_REDEMPTION_STOCK = 0;
-const DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM: RedemptionStock = { AVENA: 120, BATEA: 50, MANDIL: 50, SPAGHETTI: 100 };
+const DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM: RedemptionStock = {
+  AVENA: 120,
+  BATEA: 50,
+  MANDIL: 50,
+  SPAGHETTI: 100,
+};
 const LOW_STOCK_THRESHOLD_RATIO = 0.2;
 const MAX_DAILY_ATTENDANCE_BY_TYPE = 3;
-const DEFAULT_STOCK_SEED_KEY = 'bt-inventory-defaults-v1';
+const DEFAULT_STOCK_SEED_KEY = "bt-inventory-defaults-v1";
 const redemptionItems: { id: RedemptionItemId; label: string }[] = [
-  { id: 'AVENA', label: 'Avena' },
-  { id: 'BATEA', label: 'Batea' },
-  { id: 'MANDIL', label: 'Mandil' },
-  { id: 'SPAGHETTI', label: 'Spaghetti' },
+  { id: "AVENA", label: "Avena" },
+  { id: "BATEA", label: "Batea" },
+  { id: "MANDIL", label: "Mandil" },
+  { id: "SPAGHETTI", label: "Spaghetti" },
 ];
-const canjeProducts: { id: CanjeProductId; label: string; components: Partial<RedemptionStock> }[] = [
-  { id: 'CANJE_AVENA_2', label: '2 UN AVENA CLÁSICA', components: { AVENA: 2 } },
-  { id: 'CANJE_AVENA_1', label: '1 UN AVENA CLÁSICA', components: { AVENA: 1 } },
-  { id: 'CANJE_AVENA_3_SPAGHETTI_1', label: '3 UN AVENA CLASICA + 1 UN SPAGUETTI', components: { AVENA: 3, SPAGHETTI: 1 } },
-  { id: 'CANJE_AVENA_12_SPAGHETTI_3', label: '12 UN AVENA CLÁSICA + 3 UN SPAGUETTI', components: { AVENA: 12, SPAGHETTI: 3 } },
-  { id: 'CANJE_AVENA_24_SPAGHETTI_10', label: '24 UN AVENA CLÁSICA + 10 UN SPAGUETTI', components: { AVENA: 24, SPAGHETTI: 10 } },
-  { id: 'CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1', label: '24 UN AVENA CLÁSICA + 10 UN SPAGUETTI + 1 UN MANDIL', components: { AVENA: 24, SPAGHETTI: 10, MANDIL: 1 } },
-  { id: 'CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI + 4 MANDILES', components: { AVENA: 144, SPAGHETTI: 100, MANDIL: 4 } },
-  { id: 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1', label: '24 UN AVENA CLÁSICA + 10 UN SPAGUETTI + 1 UN BATEAS', components: { AVENA: 24, SPAGHETTI: 10, BATEA: 1 } },
-  { id: 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI + 4 BATEAS', components: { AVENA: 144, SPAGHETTI: 100, BATEA: 4 } },
-  { id: 'CANJE_AVENA_30_SPAGHETTI_10', label: '30 UN AVENA CLÁSICA + 10 UN SPAGUETTI', components: { AVENA: 30, SPAGHETTI: 10 } },
-  { id: 'CANJE_AVENA_144_SPAGHETTI_100', label: '144 UN AVENA CLÁSICA + 100 UN SPAGUETTI', components: { AVENA: 144, SPAGHETTI: 100 } },
+const canjeProducts: {
+  id: CanjeProductId;
+  label: string;
+  components: Partial<RedemptionStock>;
+}[] = [
+  {
+    id: "CANJE_AVENA_2",
+    label: "2 UN AVENA CLÁSICA",
+    components: { AVENA: 2 },
+  },
+  {
+    id: "CANJE_AVENA_1",
+    label: "1 UN AVENA CLÁSICA",
+    components: { AVENA: 1 },
+  },
+  {
+    id: "CANJE_AVENA_3_SPAGHETTI_1",
+    label: "3 UN AVENA CLASICA + 1 UN SPAGUETTI",
+    components: { AVENA: 3, SPAGHETTI: 1 },
+  },
+  {
+    id: "CANJE_AVENA_12_SPAGHETTI_3",
+    label: "12 UN AVENA CLÁSICA + 3 UN SPAGUETTI",
+    components: { AVENA: 12, SPAGHETTI: 3 },
+  },
+  {
+    id: "CANJE_AVENA_24_SPAGHETTI_10",
+    label: "24 UN AVENA CLÁSICA + 10 UN SPAGUETTI",
+    components: { AVENA: 24, SPAGHETTI: 10 },
+  },
+  {
+    id: "CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1",
+    label: "24 UN AVENA CLÁSICA + 10 UN SPAGUETTI + 1 UN MANDIL",
+    components: { AVENA: 24, SPAGHETTI: 10, MANDIL: 1 },
+  },
+  {
+    id: "CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4",
+    label: "144 UN AVENA CLÁSICA + 100 UN SPAGUETTI + 4 MANDILES",
+    components: { AVENA: 144, SPAGHETTI: 100, MANDIL: 4 },
+  },
+  {
+    id: "CANJE_AVENA_24_SPAGHETTI_10_BATEA_1",
+    label: "24 UN AVENA CLÁSICA + 10 UN SPAGUETTI + 1 UN BATEAS",
+    components: { AVENA: 24, SPAGHETTI: 10, BATEA: 1 },
+  },
+  {
+    id: "CANJE_AVENA_144_SPAGHETTI_100_BATEA_4",
+    label: "144 UN AVENA CLÁSICA + 100 UN SPAGUETTI + 4 BATEAS",
+    components: { AVENA: 144, SPAGHETTI: 100, BATEA: 4 },
+  },
+  {
+    id: "CANJE_AVENA_30_SPAGHETTI_10",
+    label: "30 UN AVENA CLÁSICA + 10 UN SPAGUETTI",
+    components: { AVENA: 30, SPAGHETTI: 10 },
+  },
+  {
+    id: "CANJE_AVENA_144_SPAGHETTI_100",
+    label: "144 UN AVENA CLÁSICA + 100 UN SPAGUETTI",
+    components: { AVENA: 144, SPAGHETTI: 100 },
+  },
 ];
-const commonCanjeProductIds: CanjeProductId[] = ['CANJE_AVENA_2', 'CANJE_AVENA_1', 'CANJE_AVENA_3_SPAGHETTI_1', 'CANJE_AVENA_12_SPAGHETTI_3'];
-const mandilCanjeProductIds: CanjeProductId[] = [...commonCanjeProductIds, 'CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1', 'CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4'];
-const bateaCanjeProductIds: CanjeProductId[] = [...commonCanjeProductIds, 'CANJE_AVENA_24_SPAGHETTI_10_BATEA_1', 'CANJE_AVENA_144_SPAGHETTI_100_BATEA_4'];
-const noAccessoryCanjeProductIds: CanjeProductId[] = [...commonCanjeProductIds, 'CANJE_AVENA_30_SPAGHETTI_10', 'CANJE_AVENA_144_SPAGHETTI_100'];
+const commonCanjeProductIds: CanjeProductId[] = [
+  "CANJE_AVENA_2",
+  "CANJE_AVENA_1",
+  "CANJE_AVENA_3_SPAGHETTI_1",
+  "CANJE_AVENA_12_SPAGHETTI_3",
+];
+const mandilCanjeProductIds: CanjeProductId[] = [
+  ...commonCanjeProductIds,
+  "CANJE_AVENA_24_SPAGHETTI_10_MANDIL_1",
+  "CANJE_AVENA_144_SPAGHETTI_100_MANDIL_4",
+];
+const bateaCanjeProductIds: CanjeProductId[] = [
+  ...commonCanjeProductIds,
+  "CANJE_AVENA_24_SPAGHETTI_10_BATEA_1",
+  "CANJE_AVENA_144_SPAGHETTI_100_BATEA_4",
+];
+const noAccessoryCanjeProductIds: CanjeProductId[] = [
+  ...commonCanjeProductIds,
+  "CANJE_AVENA_30_SPAGHETTI_10",
+  "CANJE_AVENA_144_SPAGHETTI_100",
+];
 function activeCanjeProducts(date = new Date(), stock?: RedemptionStock) {
   const month = date.getMonth() + 1;
-  const accessoriesExhausted = Boolean(stock && stock.MANDIL <= 0 && stock.BATEA <= 0);
+  const accessoriesExhausted = Boolean(
+    stock && stock.MANDIL <= 0 && stock.BATEA <= 0,
+  );
   let ids: CanjeProductId[] = [];
-  if (month === 9 || month === 10) ids = accessoriesExhausted ? noAccessoryCanjeProductIds : mandilCanjeProductIds;
-  else if (month === 11) ids = accessoriesExhausted ? noAccessoryCanjeProductIds : bateaCanjeProductIds;
+  if (month === 9 || month === 10)
+    ids = accessoriesExhausted
+      ? noAccessoryCanjeProductIds
+      : mandilCanjeProductIds;
+  else if (month === 11)
+    ids = accessoriesExhausted
+      ? noAccessoryCanjeProductIds
+      : bateaCanjeProductIds;
   else if (month === 12) ids = noAccessoryCanjeProductIds;
-  return ids.map(id => canjeProducts.find(product => product.id === id)).filter(Boolean) as typeof canjeProducts;
+  return ids
+    .map((id) => canjeProducts.find((product) => product.id === id))
+    .filter(Boolean) as typeof canjeProducts;
 }
 const degustacionProducts: { id: DegustacionProductId; label: string }[] = [
-  { id: 'PANETON', label: 'Panetón' },
+  { id: "PANETON", label: "Panetón" },
 ];
 function emptyRedemptionStock(): RedemptionStock {
   return { ...DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM };
 }
 function userRedemptionStock(user: AppUser): RedemptionStock {
   const source = user.redemptionStock || emptyRedemptionStock();
-  return redemptionItems.reduce((result, item) => ({ ...result, [item.id]: Math.max(0, Math.floor(Number(source[item.id]) || 0)) }), {} as RedemptionStock);
+  return redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: Math.max(0, Math.floor(Number(source[item.id]) || 0)),
+    }),
+    {} as RedemptionStock,
+  );
 }
 function userTastingStock(user: AppUser) {
   return Math.max(0, Math.floor(Number(user.tastingStock) || 0));
 }
-function withUserStock(user: AppUser, tastingStock: number, redemptionStock: RedemptionStock): AppUser {
-  return { ...user, tastingStock: Math.max(0, Math.floor(Number(tastingStock) || 0)), redemptionStock: userRedemptionStock({ ...user, redemptionStock }) };
+function withUserStock(
+  user: AppUser,
+  tastingStock: number,
+  redemptionStock: RedemptionStock,
+): AppUser {
+  return {
+    ...user,
+    tastingStock: Math.max(0, Math.floor(Number(tastingStock) || 0)),
+    redemptionStock: userRedemptionStock({ ...user, redemptionStock }),
+  };
 }
 function emptyInventory(marketId: string): MarketInventory {
-  return { marketId, tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK, redemptionStock: emptyRedemptionStock(), updatedAt: new Date().toISOString() };
+  return {
+    marketId,
+    tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK,
+    redemptionStock: emptyRedemptionStock(),
+    updatedAt: new Date().toISOString(),
+  };
 }
 function normalizeInventory(stored: MarketInventory[]) {
-  const byMarket = new Map(stored.map(item => [item.marketId, item]));
-  return Array.from(byMarket.values()).map(existing => {
-    const legacyStock = Math.max(0, Math.floor(Number(existing.exchangeStock) || 0));
+  const byMarket = new Map(stored.map((item) => [item.marketId, item]));
+  return Array.from(byMarket.values()).map((existing) => {
+    const legacyStock = Math.max(
+      0,
+      Math.floor(Number(existing.exchangeStock) || 0),
+    );
     const source = existing.redemptionStock || emptyRedemptionStock();
-    const redemptionStock = redemptionItems.reduce((result, item) => ({ ...result, [item.id]: Math.max(0, Math.floor(Number(source[item.id]) || 0)) }), {} as RedemptionStock);
-    return { ...existing, tastingStock: Math.max(0, Math.floor(Number(existing.tastingStock) || 0)), redemptionStock, exchangeStock: legacyStock, updatedAt: existing.updatedAt || new Date().toISOString() };
+    const redemptionStock = redemptionItems.reduce(
+      (result, item) => ({
+        ...result,
+        [item.id]: Math.max(0, Math.floor(Number(source[item.id]) || 0)),
+      }),
+      {} as RedemptionStock,
+    );
+    return {
+      ...existing,
+      tastingStock: Math.max(0, Math.floor(Number(existing.tastingStock) || 0)),
+      redemptionStock,
+      exchangeStock: legacyStock,
+      updatedAt: existing.updatedAt || new Date().toISOString(),
+    };
   });
 }
 const products = [
-  { sku: '801177', brand: 'TODINNO', name: 'Panetón Todinno 900 g + Todinnito 85 g', weightKg: 0.9 },
-  { sku: '801200', brand: 'COSTA', name: 'Panetón Costa 800 g', weightKg: 0.8 },
-  { sku: '800891', brand: 'PASQUALINO', name: 'Pasqualino 800 g', weightKg: 0.8 },
-  { sku: '801201', brand: 'COSTA', name: 'Mini Costa Minions 80 g', weightKg: 0.08 },
-  { sku: '801384', brand: 'COSTA', name: 'Mini Costa Jurassic 80 g', weightKg: 0.08 },
-  { sku: '800659', brand: 'TODINNO', name: 'Todinnito 85 g', weightKg: 0.085 },
+  {
+    sku: "801177",
+    brand: "TODINNO",
+    name: "Panetón Todinno 900 g + Todinnito 85 g",
+    weightKg: 0.9,
+  },
+  { sku: "801200", brand: "COSTA", name: "Panetón Costa 800 g", weightKg: 0.8 },
+  {
+    sku: "800891",
+    brand: "PASQUALINO",
+    name: "Pasqualino 800 g",
+    weightKg: 0.8,
+  },
+  {
+    sku: "801201",
+    brand: "COSTA",
+    name: "Mini Costa Minions 80 g",
+    weightKg: 0.08,
+  },
+  {
+    sku: "801384",
+    brand: "COSTA",
+    name: "Mini Costa Jurassic 80 g",
+    weightKg: 0.08,
+  },
+  { sku: "800659", brand: "TODINNO", name: "Todinnito 85 g", weightKg: 0.085 },
 ];
-const planchaProducts = { TODINNO: products[0], COSTA: products[1], PASQUALINO: products[2] };
+const planchaProducts = {
+  TODINNO: products[0],
+  COSTA: products[1],
+  PASQUALINO: products[2],
+};
+function normalizedProducts(
+  productPrices: ProductPrice[],
+): Array<
+  ProductPrice & {
+    brand: string;
+    name: string;
+    weightKg: number;
+    saleModes: SaleMode[];
+    status: Status;
+  }
+> {
+  if (!productPrices.length)
+    return products.map((product) => ({
+      ...product,
+      product: product.name,
+      saleModes: [
+        "UNIDADES",
+        ...(products.slice(0, 3).some((item) => item.sku === product.sku)
+          ? ["PLANCHAS"]
+          : []),
+      ] as SaleMode[],
+      unitsPerPackage: 1,
+      unitPrice: 0,
+      totalPrice: 0,
+      status: "ACTIVO" as Status,
+      updatedAt: "",
+    }));
+  return productPrices.map((item) => {
+    const fallback = products.find((product) => product.sku === item.sku);
+    return {
+      ...item,
+      brand: item.brand || fallback?.brand || item.product,
+      name: item.product,
+      weightKg: Number(item.weightKg ?? fallback?.weightKg ?? 0),
+      saleModes: item.saleModes?.length
+        ? item.saleModes
+        : fallback
+          ? ([
+              "UNIDADES",
+              ...(products
+                .slice(0, 3)
+                .some((product) => product.sku === fallback.sku)
+                ? ["PLANCHAS"]
+                : []),
+            ] as SaleMode[])
+          : (["UNIDADES"] as SaleMode[]),
+      status: item.status || ("ACTIVO" as Status),
+    };
+  });
+}
 
 function readStore<T>(key: string, fallback: T): T {
-  try { const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : fallback; } catch { return fallback; }
+  try {
+    const value = localStorage.getItem(key);
+    return value ? (JSON.parse(value) as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }
-function writeStore(key: string, value: unknown) { localStorage.setItem(key, JSON.stringify(value)); }
+function writeStore(key: string, value: unknown) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
 function assignmentMatchesUser(assignment: PromoterAssignment, user: AppUser) {
-  return assignment.promoterId === user.id || Boolean(assignment.promoterDni && assignment.promoterDni === user.dni);
+  return (
+    assignment.promoterId === user.id ||
+    Boolean(assignment.promoterDni && assignment.promoterDni === user.dni)
+  );
 }
-function mergeAssignments(current: PromoterAssignment[], incoming: PromoterAssignment[]) {
-  const next = new Map(current.map(item => [item.promoterDni || item.promoterId, item]));
-  incoming.forEach(item => {
+function mergeAssignments(
+  current: PromoterAssignment[],
+  incoming: PromoterAssignment[],
+) {
+  const next = new Map(
+    current.map((item) => [item.promoterDni || item.promoterId, item]),
+  );
+  incoming.forEach((item) => {
     const key = item.promoterDni || item.promoterId;
     const previous = next.get(key);
-    if (!previous || !previous.updatedAt || !item.updatedAt || item.updatedAt >= previous.updatedAt) next.set(key, item);
+    if (
+      !previous ||
+      !previous.updatedAt ||
+      !item.updatedAt ||
+      item.updatedAt >= previous.updatedAt
+    )
+      next.set(key, item);
   });
   return Array.from(next.values());
 }
 function saleFreshness(sale: Sale) {
-  return sale.updatedAt || sale.date || '';
+  return sale.updatedAt || sale.date || "";
 }
 function mergeSales(local: Sale[], incoming: Sale[]) {
-  const next = new Map(incoming.map(sale => [sale.id, sale]));
-  local.forEach(localSale => {
+  const next = new Map(incoming.map((sale) => [sale.id, sale]));
+  local.forEach((localSale) => {
     const cloudSale = next.get(localSale.id);
     if (!cloudSale) {
       // Solo se conserva lo que todavía no fue confirmado por el servidor.
       // Una venta sincronizada ausente del snapshot debe reflejar una eliminación real.
-      if (localSale.status === 'PENDIENTE') next.set(localSale.id, localSale);
+      if (localSale.status === "PENDIENTE") next.set(localSale.id, localSale);
       return;
     }
-    if (saleFreshness(localSale) > saleFreshness(cloudSale)) next.set(localSale.id, localSale);
+    if (saleFreshness(localSale) > saleFreshness(cloudSale))
+      next.set(localSale.id, localSale);
   });
   return Array.from(next.values()).sort((a, b) => {
     const byDate = new Date(b.date).getTime() - new Date(a.date).getTime();
-    return byDate || saleFreshness(b).localeCompare(saleFreshness(a)) || b.id.localeCompare(a.id);
+    return (
+      byDate ||
+      saleFreshness(b).localeCompare(saleFreshness(a)) ||
+      b.id.localeCompare(a.id)
+    );
   });
 }
 function attendanceFreshness(item: Attendance) {
-  return item.date || '';
+  return item.date || "";
 }
 function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
-  const next = new Map(incoming.map(item => [item.id, item]));
-  local.forEach(localItem => {
+  const next = new Map(incoming.map((item) => [item.id, item]));
+  local.forEach((localItem) => {
     const cloudItem = next.get(localItem.id);
     if (!cloudItem) {
-      if (localItem.status === 'PENDIENTE') next.set(localItem.id, localItem);
+      if (localItem.status === "PENDIENTE") next.set(localItem.id, localItem);
       return;
     }
-    if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem)) next.set(localItem.id, localItem);
+    if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
+      next.set(localItem.id, localItem);
   });
   return sortNewestByDate(Array.from(next.values()));
 }
 function movementFreshness(item: InventoryMovement) {
-  return item.date || '';
+  return item.date || "";
 }
-function mergeMovements(local: InventoryMovement[], incoming: InventoryMovement[]) {
-  const next = new Map(incoming.map(item => [item.id, item]));
-  local.forEach(localItem => {
+function mergeMovements(
+  local: InventoryMovement[],
+  incoming: InventoryMovement[],
+) {
+  const next = new Map(incoming.map((item) => [item.id, item]));
+  local.forEach((localItem) => {
     const cloudItem = next.get(localItem.id);
     if (!cloudItem) {
-      if (localItem.status === 'PENDIENTE') next.set(localItem.id, localItem);
+      if (localItem.status === "PENDIENTE") next.set(localItem.id, localItem);
       return;
     }
-    if (movementFreshness(localItem) > movementFreshness(cloudItem)) next.set(localItem.id, localItem);
+    if (movementFreshness(localItem) > movementFreshness(cloudItem))
+      next.set(localItem.id, localItem);
   });
-  return Array.from(next.values()).sort((first, second) => second.date.localeCompare(first.date) || second.id.localeCompare(first.id));
+  return Array.from(next.values()).sort(
+    (first, second) =>
+      second.date.localeCompare(first.date) ||
+      second.id.localeCompare(first.id),
+  );
 }
 function cloudSnapshotFromStores(): CloudSnapshot {
-  const users = readStore<AppUser[]>('bt-users', []).map(({ password: _password, ...user }) => user);
+  const users = readStore<AppUser[]>("bt-users", []).map(
+    ({ password: _password, ...user }) => user,
+  );
   return {
-    markets: readStore<Market[]>('bt-markets', []),
+    markets: readStore<Market[]>("bt-markets", []),
     users,
-    clients: readStore<Client[]>('bt-clients', []),
-    sales: readStore<Sale[]>('bt-sales', []),
-    attendance: readStore<Attendance[]>('bt-attendance', []),
-    inventory: readStore<MarketInventory[]>('bt-inventory', []),
-    movements: readStore<InventoryMovement[]>('bt-inventory-movements', []),
-    assignments: readStore<PromoterAssignment[]>('bt-promoter-assignments', []),
-    closures: readStore<SessionClosure[]>('bt-session-closures', []),
+    clients: readStore<Client[]>("bt-clients", []),
+    sales: readStore<Sale[]>("bt-sales", []),
+    attendance: readStore<Attendance[]>("bt-attendance", []),
+    inventory: readStore<MarketInventory[]>("bt-inventory", []),
+    movements: readStore<InventoryMovement[]>("bt-inventory-movements", []),
+    assignments: readStore<PromoterAssignment[]>("bt-promoter-assignments", []),
+    closures: readStore<SessionClosure[]>("bt-session-closures", []),
     productPrices: readStore<ProductPrice[]>(PRODUCT_PRICES_STORE_KEY, []),
+    categories: readStore<Category[]>(CATEGORIES_STORE_KEY, []),
   };
 }
 type PendingPhotoUpload = {
   id: string;
-  entityType: 'sale' | 'attendance';
+  entityType: "sale" | "attendance";
   entityId: string;
-  field: 'receiptPhoto' | 'exchangePhoto' | 'photo';
+  field: "receiptPhoto" | "exchangePhoto" | "photo";
   clientName?: string;
   marketName?: string;
   recordType?: string;
@@ -229,60 +652,90 @@ type PendingPhotoUpload = {
   mimeType: string;
   blob: Blob;
 };
-const PHOTO_QUEUE_DB = 'below-trade-photo-queue';
-const PHOTO_QUEUE_STORE = 'uploads';
+const PHOTO_QUEUE_DB = "below-trade-photo-queue";
+const PHOTO_QUEUE_STORE = "uploads";
 function openPhotoQueue() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(PHOTO_QUEUE_DB, 1);
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(PHOTO_QUEUE_STORE)) request.result.createObjectStore(PHOTO_QUEUE_STORE, { keyPath: 'id' });
+      if (!request.result.objectStoreNames.contains(PHOTO_QUEUE_STORE))
+        request.result.createObjectStore(PHOTO_QUEUE_STORE, { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
-type PhotoUploadContext = Pick<PendingPhotoUpload, 'clientName' | 'marketName' | 'recordType'>;
+type PhotoUploadContext = Pick<
+  PendingPhotoUpload,
+  "clientName" | "marketName" | "recordType"
+>;
 async function compressEvidencePhoto(file: File) {
-  if (!file.type.startsWith('image/')) return file;
+  if (!file.type.startsWith("image/")) return file;
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
       const element = new Image();
       element.onload = () => resolve(element);
-      element.onerror = () => reject(new Error('No se pudo leer la fotografía'));
+      element.onerror = () =>
+        reject(new Error("No se pudo leer la fotografía"));
       element.src = objectUrl;
     });
     const maxSide = 1920;
-    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+    const scale = Math.min(
+      1,
+      maxSide / Math.max(image.naturalWidth, image.naturalHeight),
+    );
     const width = Math.max(1, Math.round(image.naturalWidth * scale));
     const height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width; canvas.height = height;
-    const context = canvas.getContext('2d', { alpha: false });
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
     if (!context) return file;
-    context.fillStyle = '#fff'; context.fillRect(0, 0, width, height);
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
     let quality = 0.84;
     let blob: Blob | null = null;
     do {
-      blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+      blob = await new Promise((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", quality),
+      );
       quality -= 0.08;
     } while (blob && blob.size > 1_200_000 && quality >= 0.6);
     if (!blob || blob.size >= file.size) return file;
-    const name = (file.name || 'evidencia').replace(/\.[^.]+$/, '') + '.jpg';
-    return new File([blob], name, { type: 'image/jpeg', lastModified: Date.now() });
+    const name = (file.name || "evidencia").replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], name, {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
   } catch {
     return file;
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
 }
-async function queuePhotoUpload(file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field'], context: PhotoUploadContext) {
+async function queuePhotoUpload(
+  file: File,
+  entityType: PendingPhotoUpload["entityType"],
+  entityId: string,
+  field: PendingPhotoUpload["field"],
+  context: PhotoUploadContext,
+) {
   const optimized = await compressEvidencePhoto(file);
   const database = await openPhotoQueue();
-  const upload: PendingPhotoUpload = { id: `${entityType}:${entityId}:${field}`, entityType, entityId, field, ...context, fileName: optimized.name || `${field}.jpg`, mimeType: optimized.type || 'image/jpeg', blob: optimized };
+  const upload: PendingPhotoUpload = {
+    id: `${entityType}:${entityId}:${field}`,
+    entityType,
+    entityId,
+    field,
+    ...context,
+    fileName: optimized.name || `${field}.jpg`,
+    mimeType: optimized.type || "image/jpeg",
+    blob: optimized,
+  };
   await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(PHOTO_QUEUE_STORE, 'readwrite');
+    const transaction = database.transaction(PHOTO_QUEUE_STORE, "readwrite");
     transaction.objectStore(PHOTO_QUEUE_STORE).put(upload);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
@@ -292,7 +745,10 @@ async function queuePhotoUpload(file: File, entityType: PendingPhotoUpload['enti
 async function pendingPhotoUploads() {
   const database = await openPhotoQueue();
   const uploads = await new Promise<PendingPhotoUpload[]>((resolve, reject) => {
-    const request = database.transaction(PHOTO_QUEUE_STORE, 'readonly').objectStore(PHOTO_QUEUE_STORE).getAll();
+    const request = database
+      .transaction(PHOTO_QUEUE_STORE, "readonly")
+      .objectStore(PHOTO_QUEUE_STORE)
+      .getAll();
     request.onsuccess = () => resolve(request.result as PendingPhotoUpload[]);
     request.onerror = () => reject(request.error);
   });
@@ -302,7 +758,7 @@ async function pendingPhotoUploads() {
 async function removePhotoUpload(id: string) {
   const database = await openPhotoQueue();
   await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(PHOTO_QUEUE_STORE, 'readwrite');
+    const transaction = database.transaction(PHOTO_QUEUE_STORE, "readwrite");
     transaction.objectStore(PHOTO_QUEUE_STORE).delete(id);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
@@ -311,25 +767,39 @@ async function removePhotoUpload(id: string) {
 }
 async function uploadPhoto(upload: PendingPhotoUpload) {
   const response = await fetch(GOOGLE_DRIVE_PHOTO_UPLOAD, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': upload.mimeType,
-      'X-File-Name': encodeURIComponent(upload.fileName),
-      'X-Record-Id': upload.entityId,
-      'X-Evidence-Type': upload.field,
-      'X-Client-Name': encodeURIComponent(upload.clientName || 'CLIENTE NO IDENTIFICADO'),
-      'X-Market-Name': encodeURIComponent(upload.marketName || 'MERCADO NO IDENTIFICADO'),
-      'X-Record-Type': encodeURIComponent(upload.recordType || (upload.entityType === 'sale' ? 'VENTA' : 'ASISTENCIA')),
+      "Content-Type": upload.mimeType,
+      "X-File-Name": encodeURIComponent(upload.fileName),
+      "X-Record-Id": upload.entityId,
+      "X-Evidence-Type": upload.field,
+      "X-Client-Name": encodeURIComponent(
+        upload.clientName || "CLIENTE NO IDENTIFICADO",
+      ),
+      "X-Market-Name": encodeURIComponent(
+        upload.marketName || "MERCADO NO IDENTIFICADO",
+      ),
+      "X-Record-Type": encodeURIComponent(
+        upload.recordType ||
+          (upload.entityType === "sale" ? "VENTA" : "ASISTENCIA"),
+      ),
     },
     body: upload.blob,
   });
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { message?: string } | null;
-    throw new Error(payload?.message || 'No se pudo cargar la evidencia');
+    const payload = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    throw new Error(payload?.message || "No se pudo cargar la evidencia");
   }
   return response.json() as Promise<{ id: string; url: string }>;
 }
-async function uploadEvidenceFile(file: File, entityType: PendingPhotoUpload['entityType'], field: PendingPhotoUpload['field'], context: PhotoUploadContext) {
+async function uploadEvidenceFile(
+  file: File,
+  entityType: PendingPhotoUpload["entityType"],
+  field: PendingPhotoUpload["field"],
+  context: PhotoUploadContext,
+) {
   const optimized = await compressEvidencePhoto(file);
   return uploadPhoto({
     id: `${entityType}:${crypto.randomUUID()}:${field}`,
@@ -338,206 +808,376 @@ async function uploadEvidenceFile(file: File, entityType: PendingPhotoUpload['en
     field,
     ...context,
     fileName: optimized.name || `${field}.jpg`,
-    mimeType: optimized.type || 'image/jpeg',
+    mimeType: optimized.type || "image/jpeg",
     blob: optimized,
   });
 }
-const APP_DATA_KEYS = ['bt-session', 'bt-markets', 'bt-users', 'bt-clients', 'bt-sales', 'bt-attendance', 'bt-inventory', 'bt-inventory-movements', 'bt-session-closures', PRODUCT_PRICES_STORE_KEY, DEFAULT_STOCK_SEED_KEY];
-const TEST_DATA_CLEARED_KEY = 'bt-test-data-cleared-v1';
-const CATALOG_DATA_CLEARED_KEY = 'bt-operational-data-cleared-v2';
-const CATALOG_REVISION_STORE_KEY = 'bt-catalog-revision';
-const USERS_CLEARED_KEY = 'bt-users-cleared-v1';
+const APP_DATA_KEYS = [
+  "bt-session",
+  "bt-markets",
+  "bt-users",
+  "bt-clients",
+  "bt-sales",
+  "bt-attendance",
+  "bt-inventory",
+  "bt-inventory-movements",
+  "bt-session-closures",
+  PRODUCT_PRICES_STORE_KEY,
+  CATEGORIES_STORE_KEY,
+  DEFAULT_STOCK_SEED_KEY,
+];
+const TEST_DATA_CLEARED_KEY = "bt-test-data-cleared-v1";
+const CATALOG_DATA_CLEARED_KEY = "bt-operational-data-cleared-v2";
+const CATALOG_REVISION_STORE_KEY = "bt-catalog-revision";
+const USERS_CLEARED_KEY = "bt-users-cleared-v1";
 function clearTestDataOnce() {
-  if (typeof localStorage === 'undefined' || localStorage.getItem(TEST_DATA_CLEARED_KEY)) return;
-  APP_DATA_KEYS.forEach(key => localStorage.removeItem(key));
-  localStorage.setItem(TEST_DATA_CLEARED_KEY, 'true');
+  if (
+    typeof localStorage === "undefined" ||
+    localStorage.getItem(TEST_DATA_CLEARED_KEY)
+  )
+    return;
+  APP_DATA_KEYS.forEach((key) => localStorage.removeItem(key));
+  localStorage.setItem(TEST_DATA_CLEARED_KEY, "true");
 }
 function clearCatalogDataOnce() {
-  if (typeof localStorage === 'undefined' || localStorage.getItem(CATALOG_DATA_CLEARED_KEY)) return;
-  localStorage.removeItem('bt-markets');
-  localStorage.removeItem('bt-clients');
-  localStorage.removeItem('bt-sales');
-  localStorage.removeItem('bt-attendance');
-  localStorage.removeItem('bt-inventory');
-  localStorage.removeItem('bt-inventory-movements');
-  localStorage.removeItem('bt-promoter-assignments');
-  localStorage.removeItem('bt-session-closures');
+  if (
+    typeof localStorage === "undefined" ||
+    localStorage.getItem(CATALOG_DATA_CLEARED_KEY)
+  )
+    return;
+  localStorage.removeItem("bt-markets");
+  localStorage.removeItem("bt-clients");
+  localStorage.removeItem("bt-sales");
+  localStorage.removeItem("bt-attendance");
+  localStorage.removeItem("bt-inventory");
+  localStorage.removeItem("bt-inventory-movements");
+  localStorage.removeItem("bt-promoter-assignments");
+  localStorage.removeItem("bt-session-closures");
   localStorage.removeItem(DEFAULT_STOCK_SEED_KEY);
-  localStorage.setItem(CATALOG_DATA_CLEARED_KEY, 'true');
+  localStorage.setItem(CATALOG_DATA_CLEARED_KEY, "true");
 }
 function keepAnalystUsersOnce() {
-  if (typeof localStorage === 'undefined' || localStorage.getItem(USERS_CLEARED_KEY)) return;
-  const localUsers = readStore<AppUser[]>('bt-users', []);
-  writeStore('bt-users', localUsers.filter(user => user.role === 'ANALISTA'));
-  localStorage.setItem(USERS_CLEARED_KEY, 'true');
+  if (
+    typeof localStorage === "undefined" ||
+    localStorage.getItem(USERS_CLEARED_KEY)
+  )
+    return;
+  const localUsers = readStore<AppUser[]>("bt-users", []);
+  writeStore(
+    "bt-users",
+    localUsers.filter((user) => user.role === "ANALISTA"),
+  );
+  localStorage.setItem(USERS_CLEARED_KEY, "true");
 }
-function csvValue(value: unknown) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
+function csvValue(value: unknown) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
 function downloadCsv(filename: string, headers: string[], rows: unknown[][]) {
-  const csv = [headers, ...rows].map(row => row.map(csvValue).join(';')).join('\r\n');
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
-  link.download = filename; document.body.appendChild(link); link.click(); link.remove();
+  const csv = [headers, ...rows]
+    .map((row) => row.map(csvValue).join(";"))
+    .join("\r\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(
+    new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" }),
+  );
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
   URL.revokeObjectURL(link.href);
 }
 function parseCsvLine(line: string) {
-  const values: string[] = []; let current = ''; let quoted = false;
+  const values: string[] = [];
+  let current = "";
+  let quoted = false;
   for (let i = 0; i < line.length; i += 1) {
     const character = line[i];
-    if (character === '"' && line[i + 1] === '"') { current += '"'; i += 1; }
-    else if (character === '"') quoted = !quoted;
-    else if (character === ',' && !quoted) { values.push(current); current = ''; }
-    else current += character;
+    if (character === '"' && line[i + 1] === '"') {
+      current += '"';
+      i += 1;
+    } else if (character === '"') quoted = !quoted;
+    else if (character === "," && !quoted) {
+      values.push(current);
+      current = "";
+    } else current += character;
   }
-  values.push(current); return values;
+  values.push(current);
+  return values;
 }
 function parseCsvText(text: string) {
-  const firstLine = text.split(/\r?\n/).find(line => line.trim()) || '';
-  const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
-  const rows: string[][] = []; let row: string[] = []; let current = ''; let quoted = false;
+  const firstLine = text.split(/\r?\n/).find((line) => line.trim()) || "";
+  const delimiter =
+    (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length
+      ? ";"
+      : ",";
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let current = "";
+  let quoted = false;
   for (let i = 0; i < text.length; i += 1) {
     const character = text[i];
-    if (character === '"' && text[i + 1] === '"') { current += '"'; i += 1; }
-    else if (character === '"') quoted = !quoted;
-    else if (character === delimiter && !quoted) { row.push(current.trim()); current = ''; }
-    else if (character === '\n' && !quoted) { row.push(current.trim().replace(/\r$/, '')); current = ''; if (row.some(value => value)) rows.push(row); row = []; }
-    else current += character;
+    if (character === '"' && text[i + 1] === '"') {
+      current += '"';
+      i += 1;
+    } else if (character === '"') quoted = !quoted;
+    else if (character === delimiter && !quoted) {
+      row.push(current.trim());
+      current = "";
+    } else if (character === "\n" && !quoted) {
+      row.push(current.trim().replace(/\r$/, ""));
+      current = "";
+      if (row.some((value) => value)) rows.push(row);
+      row = [];
+    } else current += character;
   }
-  if (current || row.length) { row.push(current.trim().replace(/\r$/, '')); if (row.some(value => value)) rows.push(row); }
+  if (current || row.length) {
+    row.push(current.trim().replace(/\r$/, ""));
+    if (row.some((value) => value)) rows.push(row);
+  }
   return rows;
 }
 function parseCsvRecords(text: string) {
   const rows = parseCsvText(text);
-  if (rows.length < 2) throw new Error('El CSV debe tener encabezados y al menos una fila');
+  if (rows.length < 2)
+    throw new Error("El CSV debe tener encabezados y al menos una fila");
   const headers = rows[0].map(normalizeCsvHeader);
-  return rows.slice(1).map(row => Object.fromEntries(headers.map((header, index) => [header, (row[index] || '').trim()])));
+  return rows
+    .slice(1)
+    .map((row) =>
+      Object.fromEntries(
+        headers.map((header, index) => [header, (row[index] || "").trim()]),
+      ),
+    );
 }
 async function fetchGoogleSheetRecords(sheetId: string) {
-  const response = await fetch(`${GOOGLE_SHEETS_PROXY}/${encodeURIComponent(sheetId)}?gid=0`);
+  const response = await fetch(
+    `${GOOGLE_SHEETS_PROXY}/${encodeURIComponent(sheetId)}?gid=0`,
+  );
   if (!response.ok) {
-    let detail = '';
-    try { detail = (await response.json() as { message?: string }).message || ''; } catch { detail = ''; }
-    throw new Error(detail || `Google Sheets no disponible (${response.status})`);
+    let detail = "";
+    try {
+      detail = ((await response.json()) as { message?: string }).message || "";
+    } catch {
+      detail = "";
+    }
+    throw new Error(
+      detail || `Google Sheets no disponible (${response.status})`,
+    );
   }
   return parseCsvRecords(await response.text());
 }
 function normalizeCsvHeader(value: string) {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 function csvField(record: Record<string, string>, aliases: string[]) {
-  const key = aliases.map(normalizeCsvHeader).find(alias => Object.prototype.hasOwnProperty.call(record, alias));
-  return key ? record[key] : '';
+  const key = aliases
+    .map(normalizeCsvHeader)
+    .find((alias) => Object.prototype.hasOwnProperty.call(record, alias));
+  return key ? record[key] : "";
 }
 function csvHasField(record: Record<string, string>, aliases: string[]) {
-  return aliases.map(normalizeCsvHeader).some(alias => Object.prototype.hasOwnProperty.call(record, alias));
+  return aliases
+    .map(normalizeCsvHeader)
+    .some((alias) => Object.prototype.hasOwnProperty.call(record, alias));
 }
 function csvStatus(value: string): Status {
-  return normalizeCsvHeader(value) === 'inactivo' ? 'INACTIVO' : 'ACTIVO';
+  return normalizeCsvHeader(value) === "inactivo" ? "INACTIVO" : "ACTIVO";
 }
 function importedDni(value: string) {
-  const digits = String(value || '').replace(/\D/g, '');
-  return digits.length === 7 ? digits.padStart(8, '0') : digits;
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length === 7 ? digits.padStart(8, "0") : digits;
 }
 function importedRole(value: string): Role | undefined {
   const normalized = normalizeCsvHeader(value);
-  if (normalized.includes('promotorpermanente')) return 'PROMOTOR PERMANENTE';
-  if (normalized.includes('promotorrotativo')) return 'PROMOTOR ROTATIVO';
-  if (normalized === 'promotor' || normalized.includes('promotor')) return 'PROMOTOR';
-  if (normalized.includes('coordinador')) return 'COORDINADOR';
-  if (normalized.includes('analista')) return 'ANALISTA';
-  if (normalized.includes('supervisor')) return 'SUPERVISOR';
-  if (normalized.includes('trade')) return 'TRADE';
-  if (normalized.includes('admin')) return 'ADMIN';
-  if (normalized.includes('cliente')) return 'CLIENTE';
+  if (normalized.includes("promotorpermanente")) return "PROMOTOR PERMANENTE";
+  if (normalized.includes("promotorrotativo")) return "PROMOTOR ROTATIVO";
+  if (normalized === "promotor" || normalized.includes("promotor"))
+    return "PROMOTOR";
+  if (normalized.includes("coordinador")) return "COORDINADOR";
+  if (normalized.includes("analista")) return "ANALISTA";
+  if (normalized.includes("supervisor")) return "SUPERVISOR";
+  if (normalized.includes("trade")) return "TRADE";
+  if (normalized.includes("admin")) return "ADMIN";
+  if (normalized.includes("cliente")) return "CLIENTE";
   return undefined;
 }
 function csvNumber(value: string) {
-  const normalized = value.replace(/[^\d,.-]/g, '').replace(',', '.');
+  const normalized = value.replace(/[^\d,.-]/g, "").replace(",", ".");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
-function importedPriceFromRecord(record: Record<string, string>): ProductPrice | null {
-  const sku = csvField(record, ['sku', 'codigo', 'codigoproducto']);
-  const unitPrice = csvNumber(csvField(record, ['preciounitario', 'punitario', 'precio']));
+function importedPriceFromRecord(
+  record: Record<string, string>,
+): ProductPrice | null {
+  const sku = csvField(record, ["sku", "codigo", "codigoproducto"]);
+  const unitPrice = csvNumber(
+    csvField(record, ["preciounitario", "punitario", "precio"]),
+  );
   if (!sku || unitPrice <= 0) return null;
   return {
     sku,
-    product: csvField(record, ['producto', 'descripcion', 'nombreproducto']) || sku,
-    unitsPerPackage: csvNumber(csvField(record, ['und', 'unidades', 'unidadesporcaja'])),
+    product:
+      csvField(record, ["producto", "descripcion", "nombreproducto"]) || sku,
+    unitsPerPackage: csvNumber(
+      csvField(record, ["und", "unidades", "unidadesporcaja"]),
+    ),
     unitPrice,
-    totalPrice: csvNumber(csvField(record, ['preciototal', 'total'])),
+    totalPrice: csvNumber(csvField(record, ["preciototal", "total"])),
     updatedAt: new Date().toISOString(),
   };
 }
 function csvMarketId(value: string, markets: Market[]) {
   const normalized = normalizeCsvHeader(value);
-  return markets.find(market => [market.id, market.name, market.district].some(candidate => normalizeCsvHeader(candidate) === normalized))?.id;
+  return markets.find((market) =>
+    [market.id, market.name, market.district].some(
+      (candidate) => normalizeCsvHeader(candidate) === normalized,
+    ),
+  )?.id;
 }
-function importedUserFromRecord(record: Record<string, string>, index: number, markets: Market[]): AppUser | null {
-  const dni = importedDni(csvField(record, ['dni', 'documento', 'documentoidentidad']));
-  const firstName = csvField(record, ['nombre', 'nombrecompleto', 'nombreyapellido', 'nombres', 'usuario']);
-  const lastName = csvField(record, ['apellido', 'apellidos']);
-  const name = [firstName, lastName].filter(Boolean).join(' ');
-  const roleLabel = csvField(record, ['rol', 'cargo', 'perfil', 'tipousuario']).trim().toUpperCase();
+function importedUserFromRecord(
+  record: Record<string, string>,
+  index: number,
+  markets: Market[],
+): AppUser | null {
+  const dni = importedDni(
+    csvField(record, ["dni", "documento", "documentoidentidad"]),
+  );
+  const firstName = csvField(record, [
+    "nombre",
+    "nombrecompleto",
+    "nombreyapellido",
+    "nombres",
+    "usuario",
+  ]);
+  const lastName = csvField(record, ["apellido", "apellidos"]);
+  const name = [firstName, lastName].filter(Boolean).join(" ");
+  const roleLabel = csvField(record, ["rol", "cargo", "perfil", "tipousuario"])
+    .trim()
+    .toUpperCase();
   const roleValue = importedRole(roleLabel);
-  const marketValue = csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercadoid', 'mercado', 'market', 'nombremercado']);
+  const marketValue = csvField(record, [
+    "marketid",
+    "idmercado",
+    "idmerc",
+    "mercadoid",
+    "mercado",
+    "market",
+    "nombremercado",
+  ]);
   const marketId = marketValue ? csvMarketId(marketValue, markets) : undefined;
-  if (!/^\d{8}$/.test(dni) || !name || !roleValue || (isZoneManagerRole(roleValue) && marketValue && !marketId)) return null;
+  if (
+    !/^\d{8}$/.test(dni) ||
+    !name ||
+    !roleValue ||
+    (isZoneManagerRole(roleValue) && marketValue && !marketId)
+  )
+    return null;
   return {
-    id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${index + 1}`,
-    dni, name, role: roleValue, roleLabel: roleLabel || roleValue,
+    id:
+      csvField(record, ["id", "codigo", "idusuario", "idpromotor"]) ||
+      `USR-IMP-${index + 1}`,
+    dni,
+    name,
+    role: roleValue,
+    roleLabel: roleLabel || roleValue,
     marketId: isZoneManagerRole(roleValue) ? marketId : undefined,
-    clientId: roleValue === 'CLIENTE' ? csvField(record, ['idcliente', 'clienteid', 'codigocliente']) || undefined : undefined,
-    password: csvField(record, ['clave', 'password', 'contrasena']) || undefined,
-    status: csvStatus(csvField(record, ['estado', 'status'])),
+    clientId:
+      roleValue === "CLIENTE"
+        ? csvField(record, ["idcliente", "clienteid", "codigocliente"]) ||
+          undefined
+        : undefined,
+    password:
+      csvField(record, ["clave", "password", "contrasena"]) || undefined,
+    status: csvStatus(csvField(record, ["estado", "status"])),
   };
 }
 function importedMarketsFromRecords(records: Record<string, string>[]) {
   return records.flatMap<Market>((record) => {
-    const id = csvField(record, ['idmerc', 'idmercado', 'id', 'codigo']);
-    const name = csvField(record, ['nombredelmercado', 'mercado', 'nombre']);
+    const id = csvField(record, ["idmerc", "idmercado", "id", "codigo"]);
+    const name = csvField(record, ["nombredelmercado", "mercado", "nombre"]);
     if (!id || !name) return [];
-    const department = (csvField(record, ['departamento']) || 'LIMA').toUpperCase();
-    return [{
-      id,
-      department,
-      region: (csvField(record, ['region']) || department).toUpperCase(),
-      province: (csvField(record, ['provincia', 'ciudad']) || department).toUpperCase(),
-      district: (csvField(record, ['distrito']) || department).toUpperCase(),
-      name: name.toUpperCase(),
-      status: csvStatus(csvField(record, ['estado', 'status'])),
-    }];
+    const department = (
+      csvField(record, ["departamento"]) || "LIMA"
+    ).toUpperCase();
+    return [
+      {
+        id,
+        department,
+        region: (csvField(record, ["region"]) || department).toUpperCase(),
+        province: (
+          csvField(record, ["provincia", "ciudad"]) || department
+        ).toUpperCase(),
+        district: (csvField(record, ["distrito"]) || department).toUpperCase(),
+        name: name.toUpperCase(),
+        status: csvStatus(csvField(record, ["estado", "status"])),
+      },
+    ];
   });
 }
-function importedClientsFromRecords(records: Record<string, string>[], markets: Market[]) {
+function importedClientsFromRecords(
+  records: Record<string, string>[],
+  markets: Market[],
+) {
   return records.flatMap<Client>((record) => {
-    const code = csvField(record, ['codigo', 'code', 'codigocliente']);
-    const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda', 'razonsocial', 'nombrecomercial']);
-    const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercado', 'market', 'nombremercado']), markets);
+    const code = csvField(record, ["codigo", "code", "codigocliente"]);
+    const name = csvField(record, [
+      "cliente",
+      "nombre",
+      "nombrecliente",
+      "tienda",
+      "razonsocial",
+      "nombrecomercial",
+    ]);
+    const marketId = csvMarketId(
+      csvField(record, [
+        "marketid",
+        "idmercado",
+        "idmerc",
+        "mercado",
+        "market",
+        "nombremercado",
+      ]),
+      markets,
+    );
     if (!code || !name || !marketId) return [];
     return {
-      id: csvField(record, ['id', 'idcliente']) || code,
+      id: csvField(record, ["id", "idcliente"]) || code,
       code,
       name,
-      phone: csvField(record, ['celular', 'telefono', 'phone', 'movil']) || undefined,
+      phone:
+        csvField(record, ["celular", "telefono", "phone", "movil"]) ||
+        undefined,
       marketId,
-      status: csvStatus(csvField(record, ['estado', 'status'])),
+      status: csvStatus(csvField(record, ["estado", "status"])),
     };
   });
 }
-function mergeReferenceRows<T>(current: T[], incoming: T[], keyOf: (item: T) => string) {
-  const merged = new Map(current.map(item => [keyOf(item), item]));
-  incoming.forEach(item => {
+function mergeReferenceRows<T>(
+  current: T[],
+  incoming: T[],
+  keyOf: (item: T) => string,
+) {
+  const merged = new Map(current.map((item) => [keyOf(item), item]));
+  incoming.forEach((item) => {
     const key = keyOf(item);
     if (!key) return;
     const previous = merged.get(key);
-    const defined = Object.fromEntries(Object.entries(item as Record<string, unknown>).filter(([, value]) => value !== undefined));
+    const defined = Object.fromEntries(
+      Object.entries(item as Record<string, unknown>).filter(
+        ([, value]) => value !== undefined,
+      ),
+    );
     merged.set(key, { ...(previous as object), ...defined } as T);
   });
   return Array.from(merged.values());
 }
 function mergeUsersByDni(current: AppUser[], incoming: AppUser[]) {
   const merged = new Map<string, AppUser>();
-  [...current, ...incoming].forEach(user => {
+  [...current, ...incoming].forEach((user) => {
     const key = user.dni.trim();
     if (!key) return;
     const previous = merged.get(key);
@@ -549,64 +1189,147 @@ function mergeUsersByDni(current: AppUser[], incoming: AppUser[]) {
   });
   return Array.from(merged.values());
 }
-function formatDate(value: string) { return new Date(value).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }); }
-function sortNewestByDate<T extends { id: string; date: string }>(items: T[]) {
-  return [...items].sort((first, second) => second.date.localeCompare(first.date) || second.id.localeCompare(first.id));
+function formatDate(value: string) {
+  return new Date(value).toLocaleString("es-PE", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 }
-function formatSoles(value: number | undefined) { return `S/ ${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
-function formatKilos(value: number | undefined) { return `${Number(value ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`; }
+function sortNewestByDate<T extends { id: string; date: string }>(items: T[]) {
+  return [...items].sort(
+    (first, second) =>
+      second.date.localeCompare(first.date) ||
+      second.id.localeCompare(first.id),
+  );
+}
+function formatSoles(value: number | undefined) {
+  return `S/ ${Number(value ?? 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function formatKilos(value: number | undefined) {
+  return `${Number(value ?? 0).toLocaleString("es-PE", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`;
+}
 function saleExportBreakdown(sale: Sale) {
-  if (sale.mode === 'PLANCHAS') {
-    return Object.entries(sale.mix || {}).filter(([, quantity]) => Number(quantity) > 0).map(([brand, quantity]) => ({
-      label: planchaProducts[brand as keyof typeof planchaProducts]?.brand || brand,
-      units: Number(quantity),
-      unitPrice: Number(sale.unitPrices?.[brand] ?? 0),
-    }));
+  if (sale.mode === "PLANCHAS") {
+    return Object.entries(sale.mix || {})
+      .filter(([, quantity]) => Number(quantity) > 0)
+      .map(([brand, quantity]) => ({
+        label:
+          planchaProducts[brand as keyof typeof planchaProducts]?.brand ||
+          brand,
+        units: Number(quantity),
+        unitPrice: Number(sale.unitPrices?.[brand] ?? 0),
+      }));
   }
   const sku = Object.keys(sale.unitPrices || {})[0];
-  const product = products.find(item => item.sku === sku);
-  const brand = product?.brand || Object.keys(sale.mix || {})[0] || 'Producto';
-  return [{ label: product ? `${product.brand} · ${product.name}` : brand, units: sale.units, unitPrice: Number(sale.unitPrices?.[sku] ?? (sale.units > 0 ? sale.amountSoles / sale.units : 0)) }];
+  const product = products.find((item) => item.sku === sku);
+  const brand = product?.brand || Object.keys(sale.mix || {})[0] || "Producto";
+  return [
+    {
+      label: product ? `${product.brand} · ${product.name}` : brand,
+      units: sale.units,
+      unitPrice: Number(
+        sale.unitPrices?.[sku] ??
+          (sale.units > 0 ? sale.amountSoles / sale.units : 0),
+      ),
+    },
+  ];
 }
-type SalesSummaryRow = { key: string; region: string; city: string; soles: number; units: number; kilos: number; salesCount: number };
+type SalesSummaryRow = {
+  key: string;
+  region: string;
+  city: string;
+  soles: number;
+  units: number;
+  kilos: number;
+  salesCount: number;
+};
 function saleWeightKg(sale: Sale) {
   if (Number(sale.weightKg) > 0) return Number(sale.weightKg);
-  if (sale.mode === 'UNIDADES') {
+  if (sale.mode === "UNIDADES") {
     const sku = Object.keys(sale.unitPrices || {})[0];
-    return sale.units * (products.find(item => item.sku === sku)?.weightKg || 0);
+    return (
+      sale.units * (products.find((item) => item.sku === sku)?.weightKg || 0)
+    );
   }
-  return Object.entries(sale.mix || {}).reduce((sum, [brand, quantity]) => sum + Number(quantity) * (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0), 0);
+  return Object.entries(sale.mix || {}).reduce(
+    (sum, [brand, quantity]) =>
+      sum +
+      Number(quantity) *
+        (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0),
+    0,
+  );
 }
 function aggregateSalesByRegionCity(sales: Sale[], markets: Market[]) {
-  const marketMap = Object.fromEntries(markets.map(market => [market.id, market]));
+  const marketMap = Object.fromEntries(
+    markets.map((market) => [market.id, market]),
+  );
   const grouped = new Map<string, SalesSummaryRow>();
-  sales.forEach(sale => {
+  sales.forEach((sale) => {
     const market = marketMap[sale.marketId];
-    const region = sale.marketRegion || market?.region || sale.marketDepartment || market?.department || 'SIN REGIÓN';
-    const city = sale.marketProvince || market?.province || sale.marketDistrict || market?.district || 'SIN CIUDAD';
+    const region =
+      sale.marketRegion ||
+      market?.region ||
+      sale.marketDepartment ||
+      market?.department ||
+      "SIN REGIÓN";
+    const city =
+      sale.marketProvince ||
+      market?.province ||
+      sale.marketDistrict ||
+      market?.district ||
+      "SIN CIUDAD";
     const key = `${region} · ${city}`;
-    const current = grouped.get(key) || { key, region, city, soles: 0, units: 0, kilos: 0, salesCount: 0 };
+    const current = grouped.get(key) || {
+      key,
+      region,
+      city,
+      soles: 0,
+      units: 0,
+      kilos: 0,
+      salesCount: 0,
+    };
     current.soles += Number(sale.amountSoles) || 0;
     current.units += Number(sale.units) || 0;
     current.kilos += saleWeightKg(sale);
     current.salesCount += 1;
     grouped.set(key, current);
   });
-  return Array.from(grouped.values()).sort((first, second) => second.soles - first.soles);
+  return Array.from(grouped.values()).sort(
+    (first, second) => second.soles - first.soles,
+  );
 }
-type SalesMetricRow = { key: string; label: string; subtitle: string; soles: number; units: number; kilos: number; salesCount: number };
-function aggregateSalesMetrics(sales: Sale[], getGroup: (sale: Sale) => { key: string; label: string; subtitle: string }) {
+type SalesMetricRow = {
+  key: string;
+  label: string;
+  subtitle: string;
+  soles: number;
+  units: number;
+  kilos: number;
+  salesCount: number;
+};
+function aggregateSalesMetrics(
+  sales: Sale[],
+  getGroup: (sale: Sale) => { key: string; label: string; subtitle: string },
+) {
   const grouped = new Map<string, SalesMetricRow>();
-  sales.forEach(sale => {
+  sales.forEach((sale) => {
     const group = getGroup(sale);
-    const current = grouped.get(group.key) || { ...group, soles: 0, units: 0, kilos: 0, salesCount: 0 };
+    const current = grouped.get(group.key) || {
+      ...group,
+      soles: 0,
+      units: 0,
+      kilos: 0,
+      salesCount: 0,
+    };
     current.soles += Number(sale.amountSoles) || 0;
     current.units += Number(sale.units) || 0;
     current.kilos += saleWeightKg(sale);
     current.salesCount += 1;
     grouped.set(group.key, current);
   });
-  return Array.from(grouped.values()).sort((first, second) => second.soles - first.soles);
+  return Array.from(grouped.values()).sort(
+    (first, second) => second.soles - first.soles,
+  );
 }
 type MarketStockSummary = {
   marketId: string;
@@ -617,57 +1340,175 @@ type MarketStockSummary = {
   redemptionUsed: RedemptionStock;
   redemptionRemaining: RedemptionStock;
 };
-function movementComponentQuantity(movement: InventoryMovement, itemId: RedemptionItemId) {
-  const components = movement.canjeComponents || canjeProducts.find(product => product.id === movement.canjeProductId)?.components;
-  if (components) return (Number(components[itemId]) || 0) * Math.max(0, Number(movement.quantity) || 0);
-  return movement.itemId === itemId ? Math.max(0, Number(movement.quantity) || 0) : 0;
+function movementComponentQuantity(
+  movement: InventoryMovement,
+  itemId: RedemptionItemId,
+) {
+  const components =
+    movement.canjeComponents ||
+    canjeProducts.find((product) => product.id === movement.canjeProductId)
+      ?.components;
+  if (components)
+    return (
+      (Number(components[itemId]) || 0) *
+      Math.max(0, Number(movement.quantity) || 0)
+    );
+  return movement.itemId === itemId
+    ? Math.max(0, Number(movement.quantity) || 0)
+    : 0;
 }
-function signedMovementComponentQuantity(movement: InventoryMovement, itemId: RedemptionItemId) {
-  const components = movement.canjeComponents || canjeProducts.find(product => product.id === movement.canjeProductId)?.components;
-  if (components) return (Number(components[itemId]) || 0) * (Number(movement.quantity) || 0);
+function signedMovementComponentQuantity(
+  movement: InventoryMovement,
+  itemId: RedemptionItemId,
+) {
+  const components =
+    movement.canjeComponents ||
+    canjeProducts.find((product) => product.id === movement.canjeProductId)
+      ?.components;
+  if (components)
+    return (Number(components[itemId]) || 0) * (Number(movement.quantity) || 0);
   return movement.itemId === itemId ? Number(movement.quantity) || 0 : 0;
 }
-function reconcileInventory(stored: MarketInventory[], movements: InventoryMovement[]) {
+function reconcileInventory(
+  stored: MarketInventory[],
+  movements: InventoryMovement[],
+) {
   const normalized = normalizeInventory(stored);
   const marketIds = new Set([
-    ...normalized.map(item => item.marketId),
-    ...movements.filter(movement => !movement.promoterId && ['AJUSTE_DEGUSTACION', 'DEGUSTACION', 'AJUSTE_CANJES', 'CANJE'].includes(movement.kind)).map(movement => movement.marketId),
+    ...normalized.map((item) => item.marketId),
+    ...movements
+      .filter(
+        (movement) =>
+          !movement.promoterId &&
+          [
+            "AJUSTE_DEGUSTACION",
+            "DEGUSTACION",
+            "AJUSTE_CANJES",
+            "CANJE",
+          ].includes(movement.kind),
+      )
+      .map((movement) => movement.marketId),
   ]);
-  return Array.from(marketIds).map(marketId => {
-    const current = normalized.find(item => item.marketId === marketId) || emptyInventory(marketId);
-    const marketMovements = movements.filter(movement => movement.marketId === marketId && !movement.promoterId);
-    const tastingMovements = marketMovements.filter(movement => movement.kind === 'AJUSTE_DEGUSTACION' || movement.kind === 'DEGUSTACION');
+  return Array.from(marketIds).map((marketId) => {
+    const current =
+      normalized.find((item) => item.marketId === marketId) ||
+      emptyInventory(marketId);
+    const marketMovements = movements.filter(
+      (movement) => movement.marketId === marketId && !movement.promoterId,
+    );
+    const tastingMovements = marketMovements.filter(
+      (movement) =>
+        movement.kind === "AJUSTE_DEGUSTACION" ||
+        movement.kind === "DEGUSTACION",
+    );
     const tastingStock = tastingMovements.length
-      ? Math.max(0, tastingMovements.reduce((total, movement) => total + (movement.kind === 'AJUSTE_DEGUSTACION' ? Number(movement.quantity) || 0 : -Math.max(0, Number(movement.quantity) || 0)), 0))
+      ? Math.max(
+          0,
+          tastingMovements.reduce(
+            (total, movement) =>
+              total +
+              (movement.kind === "AJUSTE_DEGUSTACION"
+                ? Number(movement.quantity) || 0
+                : -Math.max(0, Number(movement.quantity) || 0)),
+            0,
+          ),
+        )
       : current.tastingStock;
     const redemptionStock = redemptionItems.reduce((result, item) => {
-      const itemMovements = marketMovements.filter(movement => (movement.kind === 'AJUSTE_CANJES' || movement.kind === 'CANJE') && (movement.itemId === item.id || signedMovementComponentQuantity(movement, item.id) !== 0));
+      const itemMovements = marketMovements.filter(
+        (movement) =>
+          (movement.kind === "AJUSTE_CANJES" || movement.kind === "CANJE") &&
+          (movement.itemId === item.id ||
+            signedMovementComponentQuantity(movement, item.id) !== 0),
+      );
       const stock = itemMovements.length
-        ? Math.max(0, itemMovements.reduce((total, movement) => total + (movement.kind === 'AJUSTE_CANJES' ? signedMovementComponentQuantity(movement, item.id) : -movementComponentQuantity(movement, item.id)), 0))
+        ? Math.max(
+            0,
+            itemMovements.reduce(
+              (total, movement) =>
+                total +
+                (movement.kind === "AJUSTE_CANJES"
+                  ? signedMovementComponentQuantity(movement, item.id)
+                  : -movementComponentQuantity(movement, item.id)),
+              0,
+            ),
+          )
         : current.redemptionStock[item.id];
       return { ...result, [item.id]: stock };
     }, {} as RedemptionStock);
     return { ...current, tastingStock, redemptionStock };
   });
 }
-function sumMovementQuantities(movements: InventoryMovement[], marketId: string, kind: InventoryMovementKind, itemId?: RedemptionItemId) {
+function sumMovementQuantities(
+  movements: InventoryMovement[],
+  marketId: string,
+  kind: InventoryMovementKind,
+  itemId?: RedemptionItemId,
+) {
   return movements
-    .filter(movement => movement.marketId === marketId && movement.kind === kind && (!itemId || movementComponentQuantity(movement, itemId) > 0))
-    .reduce((sum, movement) => sum + (itemId ? movementComponentQuantity(movement, itemId) : Math.max(0, Number(movement.quantity) || 0)), 0);
+    .filter(
+      (movement) =>
+        movement.marketId === marketId &&
+        movement.kind === kind &&
+        (!itemId || movementComponentQuantity(movement, itemId) > 0),
+    )
+    .reduce(
+      (sum, movement) =>
+        sum +
+        (itemId
+          ? movementComponentQuantity(movement, itemId)
+          : Math.max(0, Number(movement.quantity) || 0)),
+      0,
+    );
 }
-function summarizeMarketStock(marketId: string, inventory: MarketInventory[], movements: InventoryMovement[]): MarketStockSummary {
-  const current = inventory.find(item => item.marketId === marketId) || emptyInventory(marketId);
-  const tastingUsed = sumMovementQuantities(movements, marketId, 'DEGUSTACION');
-  const redemptionUsed = redemptionItems.reduce((result, item) => ({ ...result, [item.id]: sumMovementQuantities(movements, marketId, 'CANJE', item.id) }), {} as RedemptionStock);
-  const tastingDelivered = DEFAULT_CAMPAIGN_TASTING_STOCK + movements
-    .filter(movement => movement.marketId === marketId && movement.kind === 'AJUSTE_DEGUSTACION')
-    .reduce((sum, movement) => sum + Math.max(0, Number(movement.quantity) || 0), 0);
-  const redemptionDelivered = redemptionItems.reduce((result, item) => ({
-    ...result,
-    [item.id]: DEFAULT_CAMPAIGN_REDEMPTION_STOCK + movements
-      .filter(movement => movement.marketId === marketId && movement.kind === 'AJUSTE_CANJES' && movement.itemId === item.id)
-      .reduce((sum, movement) => sum + Math.max(0, Number(movement.quantity) || 0), 0),
-  }), {} as RedemptionStock);
+function summarizeMarketStock(
+  marketId: string,
+  inventory: MarketInventory[],
+  movements: InventoryMovement[],
+): MarketStockSummary {
+  const current =
+    inventory.find((item) => item.marketId === marketId) ||
+    emptyInventory(marketId);
+  const tastingUsed = sumMovementQuantities(movements, marketId, "DEGUSTACION");
+  const redemptionUsed = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: sumMovementQuantities(movements, marketId, "CANJE", item.id),
+    }),
+    {} as RedemptionStock,
+  );
+  const tastingDelivered =
+    DEFAULT_CAMPAIGN_TASTING_STOCK +
+    movements
+      .filter(
+        (movement) =>
+          movement.marketId === marketId &&
+          movement.kind === "AJUSTE_DEGUSTACION",
+      )
+      .reduce(
+        (sum, movement) => sum + Math.max(0, Number(movement.quantity) || 0),
+        0,
+      );
+  const redemptionDelivered = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]:
+        DEFAULT_CAMPAIGN_REDEMPTION_STOCK +
+        movements
+          .filter(
+            (movement) =>
+              movement.marketId === marketId &&
+              movement.kind === "AJUSTE_CANJES" &&
+              movement.itemId === item.id,
+          )
+          .reduce(
+            (sum, movement) =>
+              sum + Math.max(0, Number(movement.quantity) || 0),
+            0,
+          ),
+    }),
+    {} as RedemptionStock,
+  );
   return {
     marketId,
     tastingDelivered,
@@ -679,71 +1520,130 @@ function summarizeMarketStock(marketId: string, inventory: MarketInventory[], mo
   };
 }
 function sumRedemptionStock(stock: RedemptionStock) {
-  return redemptionItems.reduce((sum, item) => sum + (Number(stock[item.id]) || 0), 0);
+  return redemptionItems.reduce(
+    (sum, item) => sum + (Number(stock[item.id]) || 0),
+    0,
+  );
 }
 function redemptionStockText(stock: RedemptionStock) {
-  return redemptionItems.map(item => `${item.label}: ${stock[item.id]}`).join(' · ');
+  return redemptionItems
+    .map((item) => `${item.label}: ${stock[item.id]}`)
+    .join(" · ");
 }
 function isBelowStockThreshold(current: number, initial: number) {
-  return initial > 0 && current <= Math.floor(initial * LOW_STOCK_THRESHOLD_RATIO);
+  return (
+    initial > 0 && current <= Math.floor(initial * LOW_STOCK_THRESHOLD_RATIO)
+  );
 }
-function lowStockLabels(tastingStock: number, redemptionStock: RedemptionStock) {
+function lowStockLabels(
+  tastingStock: number,
+  redemptionStock: RedemptionStock,
+) {
   const lowItems = [
-    ...(isBelowStockThreshold(tastingStock, DEFAULT_CAMPAIGN_TASTING_STOCK) ? ['Panetón degustación'] : []),
+    ...(isBelowStockThreshold(tastingStock, DEFAULT_CAMPAIGN_TASTING_STOCK)
+      ? ["Panetón degustación"]
+      : []),
     ...redemptionItems
-      .filter(item => isBelowStockThreshold(redemptionStock[item.id], DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM[item.id]))
-      .map(item => item.label),
+      .filter((item) =>
+        isBelowStockThreshold(
+          redemptionStock[item.id],
+          DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM[item.id],
+        ),
+      )
+      .map((item) => item.label),
   ];
   return lowItems;
 }
-function calculatedPromoterStock(promoterId: string, sales: Sale[], movements: InventoryMovement[]) {
+function calculatedPromoterStock(
+  promoterId: string,
+  sales: Sale[],
+  movements: InventoryMovement[],
+) {
   const redemptionStock = { ...DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM };
   let tastingStock = DEFAULT_CAMPAIGN_TASTING_STOCK;
-  movements.forEach(movement => {
+  movements.forEach((movement) => {
     if (movement.promoterId !== promoterId) return;
     const quantity = Math.max(0, Number(movement.quantity) || 0);
-    if (movement.kind === 'DEGUSTACION') tastingStock -= quantity;
+    if (movement.kind === "DEGUSTACION") tastingStock -= quantity;
   });
-  sales.forEach(sale => {
+  sales.forEach((sale) => {
     if (sale.promoterId !== promoterId || !sale.bonus) return;
     const requirements = saleRedemptionRequirements(sale);
-    redemptionItems.forEach(item => { redemptionStock[item.id] -= Math.max(0, Number(requirements[item.id]) || 0); });
+    redemptionItems.forEach((item) => {
+      redemptionStock[item.id] -= Math.max(
+        0,
+        Number(requirements[item.id]) || 0,
+      );
+    });
   });
   return {
     tastingStock: Math.max(0, tastingStock),
-    redemptionStock: redemptionItems.reduce((result, item) => ({ ...result, [item.id]: Math.max(0, Math.floor(Number(redemptionStock[item.id]) || 0)) }), {} as RedemptionStock),
+    redemptionStock: redemptionItems.reduce(
+      (result, item) => ({
+        ...result,
+        [item.id]: Math.max(
+          0,
+          Math.floor(Number(redemptionStock[item.id]) || 0),
+        ),
+      }),
+      {} as RedemptionStock,
+    ),
   };
 }
 function aggregateSalesByRegion(sales: Sale[], markets: Market[]) {
-  const marketMap = Object.fromEntries(markets.map(market => [market.id, market]));
-  return aggregateSalesMetrics(sales, sale => {
+  const marketMap = Object.fromEntries(
+    markets.map((market) => [market.id, market]),
+  );
+  return aggregateSalesMetrics(sales, (sale) => {
     const market = marketMap[sale.marketId];
-    const region = sale.marketRegion || market?.region || sale.marketDepartment || market?.department || 'SIN REGIÓN';
-    return { key: region, label: region, subtitle: 'Región' };
+    const region =
+      sale.marketRegion ||
+      market?.region ||
+      sale.marketDepartment ||
+      market?.department ||
+      "SIN REGIÓN";
+    return { key: region, label: region, subtitle: "Región" };
   });
 }
 function aggregateSalesByMarket(sales: Sale[], markets: Market[]) {
-  const marketMap = Object.fromEntries(markets.map(market => [market.id, market]));
-  return aggregateSalesMetrics(sales, sale => {
+  const marketMap = Object.fromEntries(
+    markets.map((market) => [market.id, market]),
+  );
+  return aggregateSalesMetrics(sales, (sale) => {
     const market = marketMap[sale.marketId];
-    return { key: sale.marketId, label: market?.name || 'MERCADO NO IDENTIFICADO', subtitle: `${sale.marketRegion || market?.region || sale.marketDepartment || market?.department || 'SIN REGIÓN'} · ${sale.marketProvince || market?.province || sale.marketDistrict || market?.district || 'SIN CIUDAD'}` };
+    return {
+      key: sale.marketId,
+      label: market?.name || "MERCADO NO IDENTIFICADO",
+      subtitle: `${sale.marketRegion || market?.region || sale.marketDepartment || market?.department || "SIN REGIÓN"} · ${sale.marketProvince || market?.province || sale.marketDistrict || market?.district || "SIN CIUDAD"}`,
+    };
   });
 }
 function aggregateSalesByPromoter(sales: Sale[], users: AppUser[]) {
-  const userMap = Object.fromEntries(users.map(user => [user.id, user]));
-  return aggregateSalesMetrics(sales, sale => {
+  const userMap = Object.fromEntries(users.map((user) => [user.id, user]));
+  return aggregateSalesMetrics(sales, (sale) => {
     const promoter = userMap[sale.promoterId];
-    const role = sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role;
-    return { key: sale.promoterId, label: promoter?.name || 'PROMOTOR NO IDENTIFICADO', subtitle: promoter ? `DNI ${promoter.dni} · Rol: ${role || 'ROL NO IDENTIFICADO'}` : `Rol: ${role || 'ROL NO IDENTIFICADO'}` };
+    const role =
+      sale.promoterRoleLabel ||
+      promoter?.roleLabel ||
+      sale.promoterRole ||
+      promoter?.role;
+    return {
+      key: sale.promoterId,
+      label: promoter?.name || "PROMOTOR NO IDENTIFICADO",
+      subtitle: promoter
+        ? `DNI ${promoter.dni} · Rol: ${role || "ROL NO IDENTIFICADO"}`
+        : `Rol: ${role || "ROL NO IDENTIFICADO"}`,
+    };
   });
 }
 function saleMarketLocation(sale: Sale, markets: Market[]) {
-  const market = markets.find(item => item.id === sale.marketId);
+  const market = markets.find((item) => item.id === sale.marketId);
   return {
-    region: sale.marketRegion || market?.region || 'SIN REGIÓN',
-    department: sale.marketDepartment || market?.department || 'SIN DEPARTAMENTO',
-    province: sale.marketProvince || market?.province || 'SIN PROVINCIA',
-    district: sale.marketDistrict || market?.district || 'SIN DISTRITO',
+    region: sale.marketRegion || market?.region || "SIN REGIÓN",
+    department:
+      sale.marketDepartment || market?.department || "SIN DEPARTAMENTO",
+    province: sale.marketProvince || market?.province || "SIN PROVINCIA",
+    district: sale.marketDistrict || market?.district || "SIN DISTRITO",
   };
 }
 function saleMarketLocationText(sale: Sale, markets: Market[]) {
@@ -751,28 +1651,60 @@ function saleMarketLocationText(sale: Sale, markets: Market[]) {
   return `${location.region} · ${location.department} · ${location.province} · ${location.district}`;
 }
 function enrichSaleMarketLocation(sale: Sale, markets: Market[]) {
-  const market = markets.find(item => item.id === sale.marketId);
+  const market = markets.find((item) => item.id === sale.marketId);
   if (!market) return sale;
   const marketRegion = sale.marketRegion || market.region || market.department;
   const marketDepartment = sale.marketDepartment || market.department;
   const marketProvince = sale.marketProvince || market.province;
   const marketDistrict = sale.marketDistrict || market.district;
-  if (sale.marketRegion === marketRegion && sale.marketDepartment === marketDepartment && sale.marketProvince === marketProvince && sale.marketDistrict === marketDistrict) return sale;
-  return { ...sale, marketRegion, marketDepartment, marketProvince, marketDistrict };
+  if (
+    sale.marketRegion === marketRegion &&
+    sale.marketDepartment === marketDepartment &&
+    sale.marketProvince === marketProvince &&
+    sale.marketDistrict === marketDistrict
+  )
+    return sale;
+  return {
+    ...sale,
+    marketRegion,
+    marketDepartment,
+    marketProvince,
+    marketDistrict,
+  };
 }
 function aggregateSalesByBrand(sales: Sale[]) {
   const grouped = new Map<string, SalesMetricRow>();
-  sales.forEach(sale => {
+  sales.forEach((sale) => {
     const entries = Object.entries(sale.mix || {});
-    const brandEntries = entries.length ? entries : [['SIN MARCA', sale.units] as [string, number]];
+    const brandEntries = entries.length
+      ? entries
+      : [["SIN MARCA", sale.units] as [string, number]];
     brandEntries.forEach(([brand, rawQuantity]) => {
       const units = Number(rawQuantity) || 0;
       if (units <= 0) return;
       const unitPrice = Number(sale.unitPrices?.[brand] ?? 0);
-      const amount = sale.mode === 'PLANCHAS' ? units * unitPrice : (sale.units > 0 ? sale.amountSoles * (units / sale.units) : 0);
-      const kilos = sale.mode === 'PLANCHAS' ? units * (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0) : saleWeightKg(sale) * (sale.units > 0 ? units / sale.units : 0);
+      const amount =
+        sale.mode === "PLANCHAS"
+          ? units * unitPrice
+          : sale.units > 0
+            ? sale.amountSoles * (units / sale.units)
+            : 0;
+      const kilos =
+        sale.mode === "PLANCHAS"
+          ? units *
+            (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg ||
+              0)
+          : saleWeightKg(sale) * (sale.units > 0 ? units / sale.units : 0);
       const key = brand.toUpperCase();
-      const current = grouped.get(key) || { key, label: key, subtitle: 'Marca', soles: 0, units: 0, kilos: 0, salesCount: 0 };
+      const current = grouped.get(key) || {
+        key,
+        label: key,
+        subtitle: "Marca",
+        soles: 0,
+        units: 0,
+        kilos: 0,
+        salesCount: 0,
+      };
       current.soles += amount;
       current.units += units;
       current.kilos += kilos;
@@ -780,23 +1712,44 @@ function aggregateSalesByBrand(sales: Sale[]) {
       grouped.set(key, current);
     });
   });
-  return Array.from(grouped.values()).sort((first, second) => second.units - first.units);
+  return Array.from(grouped.values()).sort(
+    (first, second) => second.units - first.units,
+  );
 }
-function parseSoles(value: string) { return Number(value.replace(',', '.')); }
-function syncStatus(): SyncStatus { return typeof navigator === 'undefined' || navigator.onLine ? 'SINCRONIZADA' : 'PENDIENTE'; }
-function movementLabel(kind: InventoryMovementKind, itemId?: RedemptionItemId, canjeProductId?: CanjeProductId) {
-  const itemSuffix = canjeProductId ? ` · ${canjeProducts.find(product => product.id === canjeProductId)?.label || 'Canje'}` : itemId ? ` · ${redemptionLabel(itemId)}` : '';
-  return `${kind === 'CANJE' ? 'Canje registrado' : kind === 'DEGUSTACION' ? 'Degustación declarada' : kind === 'AJUSTE_DEGUSTACION' ? 'Ajuste de degustación' : 'Ajuste de canjes'}${itemSuffix}`;
+function parseSoles(value: string) {
+  return Number(value.replace(",", "."));
+}
+function syncStatus(): SyncStatus {
+  return typeof navigator === "undefined" || navigator.onLine
+    ? "SINCRONIZADA"
+    : "PENDIENTE";
+}
+function movementLabel(
+  kind: InventoryMovementKind,
+  itemId?: RedemptionItemId,
+  canjeProductId?: CanjeProductId,
+) {
+  const itemSuffix = canjeProductId
+    ? ` · ${canjeProducts.find((product) => product.id === canjeProductId)?.label || "Canje"}`
+    : itemId
+      ? ` · ${redemptionLabel(itemId)}`
+      : "";
+  return `${kind === "CANJE" ? "Canje registrado" : kind === "DEGUSTACION" ? "Degustación declarada" : kind === "AJUSTE_DEGUSTACION" ? "Ajuste de degustación" : "Ajuste de canjes"}${itemSuffix}`;
 }
 function movementAmount(movement: InventoryMovement) {
-  if (movement.kind === 'CANJE' || movement.kind === 'DEGUSTACION') return -movement.quantity;
+  if (movement.kind === "CANJE" || movement.kind === "DEGUSTACION")
+    return -movement.quantity;
   return movement.quantity;
 }
 function redemptionLabel(itemId?: RedemptionItemId) {
-  return redemptionItems.find(item => item.id === itemId)?.label || 'Premio';
+  return redemptionItems.find((item) => item.id === itemId)?.label || "Premio";
 }
 function canjeProductLabel(canjeProductId?: CanjeProductId, fallback?: string) {
-  return canjeProducts.find(product => product.id === canjeProductId)?.label || fallback || 'Canje';
+  return (
+    canjeProducts.find((product) => product.id === canjeProductId)?.label ||
+    fallback ||
+    "Canje"
+  );
 }
 function parseBonusItems(bonus?: string): Partial<RedemptionStock> {
   if (!bonus) return {};
@@ -806,83 +1759,316 @@ function parseBonusItems(bonus?: string): Partial<RedemptionStock> {
     const found = text.match(pattern);
     if (found) requirements[itemId] = Number(found[1]);
   };
-  match('AVENA', /(\d+)\s+AVENA(?:S)?/);
-  match('BATEA', /(\d+)\s+BATEA(?:S)?/);
-  match('MANDIL', /(\d+)\s+MANDIL(?:ES)?/);
-  match('SPAGHETTI', /(\d+)\s+SPAGHETTI/);
+  match("AVENA", /(\d+)\s+AVENA(?:S)?/);
+  match("BATEA", /(\d+)\s+BATEA(?:S)?/);
+  match("MANDIL", /(\d+)\s+MANDIL(?:ES)?/);
+  match("SPAGHETTI", /(\d+)\s+SPAGHETTI/);
   return requirements;
 }
 function requiredRedemptionEntries(requirements: Partial<RedemptionStock>) {
-  return redemptionItems.filter(item => (requirements[item.id] || 0) > 0).map(item => [item.id, requirements[item.id] || 0] as const);
+  return redemptionItems
+    .filter((item) => (requirements[item.id] || 0) > 0)
+    .map((item) => [item.id, requirements[item.id] || 0] as const);
 }
-function multiplyRedemptionRequirements(requirements: Partial<RedemptionStock>, count: number) {
-  return redemptionItems.reduce((result, item) => ({ ...result, [item.id]: (requirements[item.id] || 0) * count }), {} as Partial<RedemptionStock>);
+function multiplyRedemptionRequirements(
+  requirements: Partial<RedemptionStock>,
+  count: number,
+) {
+  return redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: (requirements[item.id] || 0) * count,
+    }),
+    {} as Partial<RedemptionStock>,
+  );
 }
 function saleRedemptionRequirements(sale: Sale) {
   if (!sale.bonus) return {} as Partial<RedemptionStock>;
-  const storedRequirements = redemptionItems.reduce((result, item) => ({ ...result, [item.id]: Math.max(0, Number(sale.redemptionItems?.[item.id]) || 0) }), {} as Partial<RedemptionStock>);
-  if (redemptionItems.some(item => (storedRequirements[item.id] || 0) > 0)) return storedRequirements;
-  return multiplyRedemptionRequirements(parseBonusItems(sale.bonus), Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)));
+  const storedRequirements = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: Math.max(0, Number(sale.redemptionItems?.[item.id]) || 0),
+    }),
+    {} as Partial<RedemptionStock>,
+  );
+  if (redemptionItems.some((item) => (storedRequirements[item.id] || 0) > 0))
+    return storedRequirements;
+  return multiplyRedemptionRequirements(
+    parseBonusItems(sale.bonus),
+    Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)),
+  );
 }
-function bonusProductsFor(mode: 'UNIDADES' | 'PLANCHAS', total: number, planchas: number, stock: RedemptionStock, date = new Date()) {
+function bonusProductsFor(
+  mode: "UNIDADES" | "PLANCHAS",
+  total: number,
+  planchas: number,
+  stock: RedemptionStock,
+  date = new Date(),
+) {
   const activeProducts = activeCanjeProducts(date, stock);
-  if (mode === 'UNIDADES') return total >= 2 ? canjeProducts.filter(product => product.id === 'CANJE_AVENA_1') : [];
+  if (mode === "UNIDADES")
+    return total >= 2
+      ? canjeProducts.filter((product) => product.id === "CANJE_AVENA_1")
+      : [];
   if (planchas > 80) {
-    const fixed = canjeProducts.find(product => product.id === 'CANJE_AVENA_144_SPAGHETTI_100');
-    const seasonal = activeProducts.find(product => product.components.AVENA === 144);
-    return [fixed, seasonal].filter((product, index, products) => Boolean(product) && products.findIndex(item => item?.id === product?.id) === index) as typeof canjeProducts;
+    const fixed = canjeProducts.find(
+      (product) => product.id === "CANJE_AVENA_144_SPAGHETTI_100",
+    );
+    const seasonal = activeProducts.find(
+      (product) => product.components.AVENA === 144,
+    );
+    return [fixed, seasonal].filter(
+      (product, index, products) =>
+        Boolean(product) &&
+        products.findIndex((item) => item?.id === product?.id) === index,
+    ) as typeof canjeProducts;
   }
   if (planchas === 10) {
-    const fixed = canjeProducts.find(product => product.id === 'CANJE_AVENA_24_SPAGHETTI_10');
-    const seasonal = activeProducts.find(product => product.components.SPAGHETTI === 10 && product.id !== 'CANJE_AVENA_144_SPAGHETTI_100');
-    return [fixed, seasonal].filter((product, index, products) => Boolean(product) && products.findIndex(item => item?.id === product?.id) === index) as typeof canjeProducts;
+    const fixed = canjeProducts.find(
+      (product) => product.id === "CANJE_AVENA_24_SPAGHETTI_10",
+    );
+    const seasonal = activeProducts.find(
+      (product) =>
+        product.components.SPAGHETTI === 10 &&
+        product.id !== "CANJE_AVENA_144_SPAGHETTI_100",
+    );
+    return [fixed, seasonal].filter(
+      (product, index, products) =>
+        Boolean(product) &&
+        products.findIndex((item) => item?.id === product?.id) === index,
+    ) as typeof canjeProducts;
   }
-  const productId = planchas === 4 ? 'CANJE_AVENA_12_SPAGHETTI_3' : planchas === 1 ? 'CANJE_AVENA_3_SPAGHETTI_1' : undefined;
-  return activeProducts.filter(product => product.id === productId);
+  const productId =
+    planchas === 4
+      ? "CANJE_AVENA_12_SPAGHETTI_3"
+      : planchas === 1
+        ? "CANJE_AVENA_3_SPAGHETTI_1"
+        : undefined;
+  return activeProducts.filter((product) => product.id === productId);
 }
 
 function Logo({ compact = false }: { compact?: boolean }) {
-  return <img className={`logo ${compact ? 'logo-invert' : ''}`} src="/below-trade-logo.png" alt="Below Trade" data-testid="img-below-trade-logo" />;
+  return (
+    <img
+      className={`logo ${compact ? "logo-invert" : ""}`}
+      src="/below-trade-logo.png"
+      alt="Below Trade"
+      data-testid="img-below-trade-logo"
+    />
+  );
 }
-function Btn({ children, onClick, variant = 'primary', disabled = false, type = 'button', className = '', testId }: { children: ReactNode; onClick?: () => void; variant?: 'primary' | 'dark' | 'outline' | 'ghost' | 'danger'; disabled?: boolean; type?: 'button' | 'submit'; className?: string; testId?: string }) {
-  return <button type={type} disabled={disabled} onClick={onClick} className={`btn btn-${variant} ${className}`} data-testid={testId}>{children}</button>;
+function Btn({
+  children,
+  onClick,
+  variant = "primary",
+  disabled = false,
+  type = "button",
+  className = "",
+  testId,
+}: {
+  children: ReactNode;
+  onClick?: () => void;
+  variant?: "primary" | "dark" | "outline" | "ghost" | "danger";
+  disabled?: boolean;
+  type?: "button" | "submit";
+  className?: string;
+  testId?: string;
+}) {
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      onClick={onClick}
+      className={`btn btn-${variant} ${className}`}
+      data-testid={testId}
+    >
+      {children}
+    </button>
+  );
 }
-function CsvImportButton({ label, onImport, testId }: { label: string; onImport: (file: File) => Promise<void>; testId: string }) {
+function CsvImportButton({
+  label,
+  onImport,
+  testId,
+}: {
+  label: string;
+  onImport: (file: File) => Promise<void>;
+  testId: string;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const chooseFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    event.target.value = '';
+    event.target.value = "";
     if (!file) return;
     setLoading(true);
-    try { await onImport(file); } finally { setLoading(false); }
+    try {
+      await onImport(file);
+    } finally {
+      setLoading(false);
+    }
   };
-  return <><input ref={inputRef} className="csv-file-input" type="file" accept=".csv,text/csv" onChange={chooseFile} /><Btn variant="outline" onClick={() => inputRef.current?.click()} disabled={loading} testId={testId}>{loading ? <RefreshCw className="spin" /> : <Upload />}{loading ? 'Leyendo CSV...' : label}</Btn></>;
+  return (
+    <>
+      <input
+        ref={inputRef}
+        className="csv-file-input"
+        type="file"
+        accept=".csv,text/csv"
+        onChange={chooseFile}
+      />
+      <Btn
+        variant="outline"
+        onClick={() => inputRef.current?.click()}
+        disabled={loading}
+        testId={testId}
+      >
+        {loading ? <RefreshCw className="spin" /> : <Upload />}
+        {loading ? "Leyendo CSV..." : label}
+      </Btn>
+    </>
+  );
 }
-function CsvExampleButton({ onDownload, testId }: { onDownload: () => void; testId: string }) {
-  return <Btn variant="outline" onClick={onDownload} testId={testId}><Download /> Descargar ejemplo</Btn>;
+function CsvExampleButton({
+  onDownload,
+  testId,
+}: {
+  onDownload: () => void;
+  testId: string;
+}) {
+  return (
+    <Btn variant="outline" onClick={onDownload} testId={testId}>
+      <Download /> Descargar ejemplo
+    </Btn>
+  );
 }
-function Input({ value, onChange, placeholder, type = 'text', min, max, step, maxLength, autoComplete, readOnly = false, testId }: { value: string | number; onChange: (value: string) => void; placeholder?: string; type?: string; min?: number; max?: number; step?: number; maxLength?: number; autoComplete?: string; readOnly?: boolean; testId?: string }) {
-  return <input className="input" value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} type={type} min={min} max={max} step={step} maxLength={maxLength} autoComplete={autoComplete} readOnly={readOnly} data-testid={testId} />;
+function Input({
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  min,
+  max,
+  step,
+  maxLength,
+  autoComplete,
+  readOnly = false,
+  testId,
+}: {
+  value: string | number;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  maxLength?: number;
+  autoComplete?: string;
+  readOnly?: boolean;
+  testId?: string;
+}) {
+  return (
+    <input
+      className="input"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      type={type}
+      min={min}
+      max={max}
+      step={step}
+      maxLength={maxLength}
+      autoComplete={autoComplete}
+      readOnly={readOnly}
+      data-testid={testId}
+    />
+  );
 }
-function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
-  return <label className={`field ${className}`}><span className="form-label">{label}</span>{children}</label>;
+function Field({
+  label,
+  children,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={`field ${className}`}>
+      <span className="form-label">{label}</span>
+      {children}
+    </label>
+  );
 }
-function SelectField({ label, value, onChange, items, placeholder = 'Seleccionar' }: { label: string; value: string; onChange: (value: string) => void; items: { value: string; label: string }[]; placeholder?: string }) {
-  return <Field label={label}><select className="select" value={value} onChange={event => onChange(event.target.value)} data-testid={`select-${label.toLowerCase().replaceAll(' ', '-')}`}><option value="">{placeholder}</option>{items.map(item => <option value={item.value} key={item.value}>{item.label}</option>)}</select></Field>;
+function SelectField({
+  label,
+  value,
+  onChange,
+  items,
+  placeholder = "Seleccionar",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  items: { value: string; label: string }[];
+  placeholder?: string;
+}) {
+  return (
+    <Field label={label}>
+      <select
+        className="select"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        data-testid={`select-${label.toLowerCase().replaceAll(" ", "-")}`}
+      >
+        <option value="">{placeholder}</option>
+        {items.map((item) => (
+          <option value={item.value} key={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
 }
-function Empty({ title = 'Aún no hay ventas', detail = 'Los registros aparecerán aquí.' }: { title?: string; detail?: string }) {
-  return <div className="empty" data-testid="empty-state"><ShoppingBag /><h3>{title}</h3><p>{detail}</p></div>;
+function Empty({
+  title = "Aún no hay ventas",
+  detail = "Los registros aparecerán aquí.",
+}: {
+  title?: string;
+  detail?: string;
+}) {
+  return (
+    <div className="empty" data-testid="empty-state">
+      <ShoppingBag />
+      <h3>{title}</h3>
+      <p>{detail}</p>
+    </div>
+  );
 }
 function StatusPill({ status }: { status: string }) {
-  const className = status === 'PENDIENTE' ? 'pending' : status === 'INACTIVO' ? 'inactive' : status === 'SINCRONIZADA' ? 'synced' : 'active';
-  return <span className={`status ${className}`} data-testid={`status-${status.toLowerCase()}`}>{status}</span>;
+  const className =
+    status === "PENDIENTE"
+      ? "pending"
+      : status === "INACTIVO"
+        ? "inactive"
+        : status === "SINCRONIZADA"
+          ? "synced"
+          : "active";
+  return (
+    <span
+      className={`status ${className}`}
+      data-testid={`status-${status.toLowerCase()}`}
+    >
+      {status}
+    </span>
+  );
 }
 function driveFileId(value: string) {
   const filePath = value.match(/drive\.google\.com\/file\/d\/([^/?]+)/i);
   if (filePath?.[1]) return filePath[1];
   try {
-    const id = new URL(value).searchParams.get('id');
+    const id = new URL(value).searchParams.get("id");
     return id || null;
   } catch {
     return null;
@@ -893,131 +2079,1301 @@ function photoImageSource(value: string) {
   return id ? `/api/evidence-photos/drive/${encodeURIComponent(id)}` : value;
 }
 function photoExportLink(value?: string) {
-  if (!value) return '';
+  if (!value) return "";
   const source = photoImageSource(value);
   if (/^(https?:\/\/|data:image\/|blob:)/.test(source)) return source;
-  if (!source.startsWith('/')) return '';
-  return `${window.location.origin}${source.startsWith('/') ? source : `/${source}`}`;
+  if (!source.startsWith("/")) return "";
+  return `${window.location.origin}${source.startsWith("/") ? source : `/${source}`}`;
 }
 function PhotoThumbnail({ label, src }: { label: string; src?: string }) {
-  const isAvailable = Boolean(src && /^(https?:\/\/|\/|data:image\/|blob:)/.test(src));
+  const isAvailable = Boolean(
+    src && /^(https?:\/\/|\/|data:image\/|blob:)/.test(src),
+  );
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => setImageFailed(false), [src]);
   if (!src || !isAvailable) {
-    return <span className="photo-thumbnail pending" title={src ? 'Foto pendiente de sincronización' : 'Sin foto'}><Camera /><small>{label}<br />Pendiente</small></span>;
+    return (
+      <span
+        className="photo-thumbnail pending"
+        title={src ? "Foto pendiente de sincronización" : "Sin foto"}
+      >
+        <Camera />
+        <small>
+          {label}
+          <br />
+          Pendiente
+        </small>
+      </span>
+    );
   }
   if (imageFailed) {
-    return <a className="photo-thumbnail pending" href={photoImageSource(src)} target="_blank" rel="noreferrer" title={`Visualizar ${label}`}><Camera /><small>{label}<br />Ver foto</small></a>;
+    return (
+      <a
+        className="photo-thumbnail pending"
+        href={photoImageSource(src)}
+        target="_blank"
+        rel="noreferrer"
+        title={`Visualizar ${label}`}
+      >
+        <Camera />
+        <small>
+          {label}
+          <br />
+          Ver foto
+        </small>
+      </a>
+    );
   }
-  return <a className="photo-thumbnail" href={photoImageSource(src)} target="_blank" rel="noreferrer" title={`Visualizar ${label}`}><img src={photoImageSource(src)} alt={label} loading="lazy" onError={() => setImageFailed(true)} /><small>{label}</small></a>;
+  return (
+    <a
+      className="photo-thumbnail"
+      href={photoImageSource(src)}
+      target="_blank"
+      rel="noreferrer"
+      title={`Visualizar ${label}`}
+    >
+      <img
+        src={photoImageSource(src)}
+        alt={label}
+        loading="lazy"
+        onError={() => setImageFailed(true)}
+      />
+      <small>{label}</small>
+    </a>
+  );
 }
-function PhotoField({ label, hint, file, setFile, disabled = false, uploadedUrl, uploading = false, source = 'camera' }: { label: string; hint: string; file: File | null; setFile: (file: File | null) => void; disabled?: boolean; uploadedUrl?: string; uploading?: boolean; source?: 'camera' | 'gallery' }) {
-  return <label className={`photo-field ${uploadedUrl ? 'ready' : file ? 'pending' : ''} ${disabled ? 'disabled' : ''}`} data-testid={`photo-field-${label.toLowerCase().replaceAll(' ', '-')}`}>
-    <input type="file" accept="image/*" capture={source === 'camera' ? 'environment' : undefined} disabled={disabled} onChange={event => setFile(event.target.files?.[0] ?? null)} />
-    {uploadedUrl ? <img src={photoImageSource(uploadedUrl)} alt={label} loading="lazy" /> : <span>{source === 'gallery' ? <Upload /> : <Camera />}</span>}
-    <strong>{file ? file.name : label}</strong><small>{uploadedUrl ? 'Foto subida a DigitalOcean Spaces' : uploading ? 'Subiendo foto a DigitalOcean Spaces...' : file ? 'Esperando subida a DigitalOcean Spaces' : hint}</small>
-  </label>;
+function PhotoField({
+  label,
+  hint,
+  file,
+  setFile,
+  disabled = false,
+  uploadedUrl,
+  uploading = false,
+  source = "camera",
+}: {
+  label: string;
+  hint: string;
+  file: File | null;
+  setFile: (file: File | null) => void;
+  disabled?: boolean;
+  uploadedUrl?: string;
+  uploading?: boolean;
+  source?: "camera" | "gallery";
+}) {
+  return (
+    <label
+      className={`photo-field ${uploadedUrl ? "ready" : file ? "pending" : ""} ${disabled ? "disabled" : ""}`}
+      data-testid={`photo-field-${label.toLowerCase().replaceAll(" ", "-")}`}
+    >
+      <input
+        type="file"
+        accept="image/*"
+        capture={source === "camera" ? "environment" : undefined}
+        disabled={disabled}
+        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+      />
+      {uploadedUrl ? (
+        <img src={photoImageSource(uploadedUrl)} alt={label} loading="lazy" />
+      ) : (
+        <span>{source === "gallery" ? <Upload /> : <Camera />}</span>
+      )}
+      <strong>{file ? file.name : label}</strong>
+      <small>
+        {uploadedUrl
+          ? "Foto subida a DigitalOcean Spaces"
+          : uploading
+            ? "Subiendo foto a DigitalOcean Spaces..."
+            : file
+              ? "Esperando subida a DigitalOcean Spaces"
+              : hint}
+      </small>
+    </label>
+  );
 }
 
-function ToastView({ toast, clear }: { toast: Toast | null; clear: () => void }) {
-  useEffect(() => { if (!toast) return undefined; const timer = window.setTimeout(clear, 3200); return () => window.clearTimeout(timer); }, [toast, clear]);
-  return toast ? <div className={`toast ${toast.error ? 'error' : ''}`} role="status" data-testid="status-feedback">{toast.message}</div> : null;
+function ToastView({
+  toast,
+  clear,
+}: {
+  toast: Toast | null;
+  clear: () => void;
+}) {
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(clear, 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast, clear]);
+  return toast ? (
+    <div
+      className={`toast ${toast.error ? "error" : ""}`}
+      role="status"
+      data-testid="status-feedback"
+    >
+      {toast.message}
+    </div>
+  ) : null;
 }
-function Modal({ title, detail, children, close, className = '' }: { className?: string; title: string; detail: string; children: ReactNode; close: () => void }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) close(); }}>
-    <section className={`modal ${className}`} role="dialog" aria-modal="true" aria-label={title}><div className="modal-head"><div><h2>{title}</h2><p>{detail}</p></div><button className="icon-button" onClick={close} aria-label="Cerrar" data-testid="button-close-modal"><X /></button></div>{children}</section>
-  </div>;
+function Modal({
+  title,
+  detail,
+  children,
+  close,
+  className = "",
+}: {
+  className?: string;
+  title: string;
+  detail: string;
+  children: ReactNode;
+  close: () => void;
+}) {
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) close();
+      }}
+    >
+      <section
+        className={`modal ${className}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="modal-head">
+          <div>
+            <h2>{title}</h2>
+            <p>{detail}</p>
+          </div>
+          <button
+            className="icon-button"
+            onClick={close}
+            aria-label="Cerrar"
+            data-testid="button-close-modal"
+          >
+            <X />
+          </button>
+        </div>
+        {children}
+      </section>
+    </div>
+  );
 }
 
-function Login({ users, onLogin, notify }: { users: AppUser[]; onLogin: (user: AppUser) => void; notify: (message: string, error?: boolean) => void }) {
-  const [dni, setDni] = useState(''); const [password, setPassword] = useState(''); const [loading, setLoading] = useState(false);
+function Login({
+  users,
+  onLogin,
+  notify,
+}: {
+  users: AppUser[];
+  onLogin: (user: AppUser) => void;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [dni, setDni] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const submit = async () => {
     setLoading(true);
     try {
       if (navigator.onLine) {
-        const response = await fetch(APP_STORAGE_LOGIN, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dni, password }) });
-        const payload = await response.json() as { user?: AppUser; message?: string };
-        if (!response.ok || !payload.user) { notify(payload.message || 'DNI o clave incorrectos', true); return; }
+        const response = await fetch(APP_STORAGE_LOGIN, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dni, password }),
+        });
+        const payload = (await response.json()) as {
+          user?: AppUser;
+          message?: string;
+        };
+        if (!response.ok || !payload.user) {
+          notify(payload.message || "DNI o clave incorrectos", true);
+          return;
+        }
         const user = { ...payload.user, password };
-        writeStore('bt-session', user); onLogin(user); return;
+        writeStore("bt-session", user);
+        onLogin(user);
+        return;
       }
-      const user = users.find(item => item.dni === dni && item.password === password && item.status === 'ACTIVO') || null;
-      if (!user) { notify('Sin conexión: usa una cuenta que ya haya ingresado en este dispositivo', true); return; }
-      writeStore('bt-session', user); onLogin(user);
+      const user =
+        users.find(
+          (item) =>
+            item.dni === dni &&
+            item.password === password &&
+            item.status === "ACTIVO",
+        ) || null;
+      if (!user) {
+        notify(
+          "Sin conexión: usa una cuenta que ya haya ingresado en este dispositivo",
+          true,
+        );
+        return;
+      }
+      writeStore("bt-session", user);
+      onLogin(user);
     } catch {
-      notify('No se pudo validar el acceso con el servidor', true);
+      notify("No se pudo validar el acceso con el servidor", true);
     } finally {
       setLoading(false);
     }
   };
-  return <main className="login-shell">
-    <section className="login-hero"><Logo compact /><div className="hero-copy"><span className="eyebrow">CAMPAÑA 2026</span><h1>Panetones Molitalia</h1><p>Ventas, clientes, dinámicas y evidencias en una sola aplicación.</p></div><div className="hero-foot"><span /> Captura segura para trabajo en campo</div></section>
-    <section className="login-panel"><form className="login-card" onSubmit={event => { event.preventDefault(); submit(); }}><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><ShieldCheck /></span><div><h2>Bienvenido</h2><p>Ingresa con tu DNI y clave.</p></div></div>
-       <Field label="DNI"><Input value={dni} onChange={value => setDni(value.replace(/\D/g, ''))} placeholder="12345678" maxLength={8} autoComplete="username" testId="input-dni" /></Field>
-       <Field label="Clave"><Input value={password} onChange={setPassword} placeholder="Ingresa tu clave" type="password" autoComplete="current-password" testId="input-password" /></Field>
-        <Btn className="primary full" type="submit" disabled={loading} testId="button-login">{loading ? 'Validando...' : 'Ingresar'}</Btn>
-      <div className="login-note"><Smartphone /> Instalable en iPhone y Android</div>
-     </form></section>
-  </main>;
+  return (
+    <main className="login-shell">
+      <section className="login-hero">
+        <Logo compact />
+        <div className="hero-copy">
+          <span className="eyebrow">CAMPAÑA 2026</span>
+          <h1>Panetones Molitalia</h1>
+          <p>
+            Ventas, clientes, dinámicas y evidencias en una sola aplicación.
+          </p>
+        </div>
+        <div className="hero-foot">
+          <span /> Captura segura para trabajo en campo
+        </div>
+      </section>
+      <section className="login-panel">
+        <form
+          className="login-card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <div className="mobile-logo">
+            <Logo />
+          </div>
+          <div className="login-heading">
+            <span className="icon-disc">
+              <ShieldCheck />
+            </span>
+            <div>
+              <h2>Bienvenido</h2>
+              <p>Ingresa con tu DNI y clave.</p>
+            </div>
+          </div>
+          <Field label="DNI">
+            <Input
+              value={dni}
+              onChange={(value) => setDni(value.replace(/\D/g, ""))}
+              placeholder="12345678"
+              maxLength={8}
+              autoComplete="username"
+              testId="input-dni"
+            />
+          </Field>
+          <Field label="Clave">
+            <Input
+              value={password}
+              onChange={setPassword}
+              placeholder="Ingresa tu clave"
+              type="password"
+              autoComplete="current-password"
+              testId="input-password"
+            />
+          </Field>
+          <Btn
+            className="primary full"
+            type="submit"
+            disabled={loading}
+            testId="button-login"
+          >
+            {loading ? "Validando..." : "Ingresar"}
+          </Btn>
+          <div className="login-note">
+            <Smartphone /> Instalable en iPhone y Android
+          </div>
+        </form>
+      </section>
+    </main>
+  );
 }
 
-function Shell({ user, logout, theme, toggleTheme, children }: { user: AppUser; logout: () => void; theme: 'light' | 'dark'; toggleTheme: () => void; children: ReactNode }) {
-  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
-  useEffect(() => { const update = () => setOnline(navigator.onLine); update(); window.addEventListener('online', update); window.addEventListener('offline', update); return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); }; }, []);
-  return <div className="bt-app"><header className="topbar"><Logo compact /><div className="campaign"><small>Campaña</small><strong>Panetones Molitalia</strong></div><div className="top-user"><Btn variant="ghost" className="theme-toggle" onClick={toggleTheme} testId="button-toggle-theme">{theme === 'dark' ? <Sun /> : <Moon />}<span>{theme === 'dark' ? 'Día' : 'Noche'}</span></Btn><div className="top-user-info"><strong>{user.name}</strong><small>{user.roleLabel || user.role}</small></div>{!isPromoterRole(user.role) && <Btn variant="ghost" onClick={logout} testId="button-logout"><LogOut /> Salir</Btn>}</div></header>{!online && <div className="offline-bar" role="status" aria-live="polite" data-testid="status-offline"><WifiOff /> Sin conexión · cambios guardados en este dispositivo</div>}{children}</div>;
+function Shell({
+  user,
+  logout,
+  theme,
+  toggleTheme,
+  children,
+}: {
+  user: AppUser;
+  logout: () => void;
+  theme: "light" | "dark";
+  toggleTheme: () => void;
+  children: ReactNode;
+}) {
+  const [online, setOnline] = useState(
+    () => typeof navigator === "undefined" || navigator.onLine,
+  );
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+  return (
+    <div className="bt-app">
+      <header className="topbar">
+        <Logo compact />
+        <div className="campaign">
+          <small>Campaña</small>
+          <strong>Panetones Molitalia</strong>
+        </div>
+        <div className="top-user">
+          <Btn
+            variant="ghost"
+            className="theme-toggle"
+            onClick={toggleTheme}
+            testId="button-toggle-theme"
+          >
+            {theme === "dark" ? <Sun /> : <Moon />}
+            <span>{theme === "dark" ? "Día" : "Noche"}</span>
+          </Btn>
+          <div className="top-user-info">
+            <strong>{user.name}</strong>
+            <small>{user.roleLabel || user.role}</small>
+          </div>
+          {!isPromoterRole(user.role) && (
+            <Btn variant="ghost" onClick={logout} testId="button-logout">
+              <LogOut /> Salir
+            </Btn>
+          )}
+        </div>
+      </header>
+      {!online && (
+        <div
+          className="offline-bar"
+          role="status"
+          aria-live="polite"
+          data-testid="status-offline"
+        >
+          <WifiOff /> Sin conexión · cambios guardados en este dispositivo
+        </div>
+      )}
+      {children}
+    </div>
+  );
 }
 
-function Stat({ icon, label, value, note }: { icon: ReactNode; label: string; value: number; note: string }) {
-  return <article className="stat" data-testid={`metric-${label.toLowerCase().replaceAll(' ', '-')}`}><span className="stat-icon">{icon}</span><div><p>{label}</p><strong>{value.toLocaleString('es-PE')}</strong><small>{note}</small></div></article>;
+function Stat({
+  icon,
+  label,
+  value,
+  note,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  note: string;
+}) {
+  return (
+    <article
+      className="stat"
+      data-testid={`metric-${label.toLowerCase().replaceAll(" ", "-")}`}
+    >
+      <span className="stat-icon">{icon}</span>
+      <div>
+        <p>{label}</p>
+        <strong>{value.toLocaleString("es-PE")}</strong>
+        <small>{note}</small>
+      </div>
+    </article>
+  );
 }
-function DownloadCard({ title, detail, onClick }: { title: string; detail: string; onClick: () => void }) {
-  return <article className="download-card"><span><Download /></span><div><strong>{title}</strong><small>{detail}</small></div><Btn variant="outline" onClick={onClick} testId={`button-download-${title.toLowerCase()}`}><Download /> Descargar</Btn></article>;
+function DownloadCard({
+  title,
+  detail,
+  onClick,
+}: {
+  title: string;
+  detail: string;
+  onClick: () => void;
+}) {
+  return (
+    <article className="download-card">
+      <span>
+        <Download />
+      </span>
+      <div>
+        <strong>{title}</strong>
+        <small>{detail}</small>
+      </div>
+      <Btn
+        variant="outline"
+        onClick={onClick}
+        testId={`button-download-${title.toLowerCase()}`}
+      >
+        <Download /> Descargar
+      </Btn>
+    </article>
+  );
 }
 
-type EditableRecord = { collection: 'markets' | 'users' | 'attendance' | 'movements'; record: Record<string, unknown> };
-function RecordEditModal({ target, markets, users, clients, close, save }: { target: EditableRecord; markets: Market[]; users: AppUser[]; clients: Client[]; close: () => void; save: (record: Record<string, unknown>, photo: File | null) => Promise<boolean> }) {
-  const [draft, setDraft] = useState<Record<string, unknown>>(() => ({ ...target.record, promoterId: target.record.promoterId || target.record.actorId, password: '' }));
+type EditableRecord = {
+  collection: "markets" | "users" | "attendance" | "movements";
+  record: Record<string, unknown>;
+};
+function RecordEditModal({
+  target,
+  markets,
+  users,
+  clients,
+  close,
+  save,
+}: {
+  target: EditableRecord;
+  markets: Market[];
+  users: AppUser[];
+  clients: Client[];
+  close: () => void;
+  save: (
+    record: Record<string, unknown>,
+    photo: File | null,
+  ) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState<Record<string, unknown>>(() => ({
+    ...target.record,
+    promoterId: target.record.promoterId || target.record.actorId,
+    password: "",
+  }));
   const [photo, setPhoto] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
-  const set = (key: string, value: unknown) => setDraft(current => ({ ...current, [key]: value }));
-  const textField = (key: string, label: string, type = 'text') => <Field key={key} label={label}><Input type={type} value={String(draft[key] ?? '')} onChange={value => set(key, type === 'number' ? Number(value) : value)} /></Field>;
-  const select = (key: string, label: string, items: {value:string;label:string}[]) => <SelectField key={key} label={label} value={String(draft[key] || '')} onChange={value => set(key,value)} items={items} />;
-  const status = select('status','Estado',[{value:'ACTIVO',label:'ACTIVO'},{value:'INACTIVO',label:'INACTIVO'}]);
-  const market = select('marketId','Mercado',markets.map(x => ({value:x.id,label:x.name})));
-  const promoter = select('promoterId','Promotor',users.filter(x => isPromoterRole(x.role)).map(x => ({value:x.id,label:x.name})));
-  const date = <Field label="Fecha y hora"><input className="input" type="datetime-local" value={draft.date ? new Date(new Date(String(draft.date)).getTime() - new Date(String(draft.date)).getTimezoneOffset()*60000).toISOString().slice(0,16) : ''} onChange={e => { if (e.target.value) set('date',new Date(e.target.value).toISOString()); }} /></Field>;
-  return <Modal title="Editar registro" detail={`Código: ${target.record.id}. Los cambios se guardan al confirmar.`} close={close}><div className="form-grid">
-    {target.collection === 'markets' && <>{textField('name','Nombre')}{textField('region','Región')}{textField('department','Departamento')}{textField('province','Provincia')}{textField('district','Distrito')}{status}</>}
-    {target.collection === 'users' && <>{textField('dni','DNI')}{textField('name','Nombre completo')}{select('role','Rol',['PROMOTOR',...selectablePromoterRoles,'COORDINADOR','SUPERVISOR','ANALISTA','TRADE','ADMIN','CLIENTE'].map(x => ({value:x,label:x})))}{market}{select('clientId','Cliente vinculado',[{value:'',label:'Sin cliente'},...clients.map(x => ({value:x.id,label:x.name}))])}{status}{textField('password','Nueva clave (vacío conserva la actual)','password')}<p className="modal-hint">El stock se corrige desde los movimientos de Canjes y Degustación.</p></>}
-    {target.collection === 'attendance' && <>{market}{select('clientId','Cliente',clients.filter(x => x.marketId === draft.marketId).map(x => ({value:x.id,label:x.name})))}{promoter}{select('type','Evento',[{value:'ENTRADA',label:'Entrada'},{value:'SALIDA',label:'Salida'}])}{date}<PhotoField label="Reemplazar evidencia" hint="Opcional; conserva la fotografía actual si no adjuntas otra." file={photo} setFile={setPhoto} /></>}
-    {target.collection === 'movements' && <>{market}{promoter}{select('actorId','Responsable',users.map(x => ({value:x.id,label:x.name})))}{textField('quantity','Cantidad','number')}{date}{String(draft.kind).includes('CANJE') && <SelectField label="Producto" value={String(draft.canjeProductId || draft.itemId || '')} onChange={value => { const product = canjeProducts.find(x => x.id === value); setDraft(current => ({...current,itemId:product ? '' : value,canjeProductId:product?.id,canjeProductLabel:product?.label,canjeComponents:product?.components})); }} items={[...redemptionItems.map(x => ({value:x.id,label:x.label})),...canjeProducts.map(x => ({value:x.id,label:x.label}))]} />}</>}
-  </div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={saving} onClick={async () => { setSaving(true); const actor = users.find(x => x.id === draft.actorId); const ok = await save({...draft, ...(target.collection === 'users' ? {roleLabel:draft.role} : {}), ...(actor ? {actorName:actor.name} : {})},photo); setSaving(false); if(ok) close(); }}>{saving ? 'Guardando...' : 'Guardar cambios'}</Btn></div></Modal>;
+  const set = (key: string, value: unknown) =>
+    setDraft((current) => ({ ...current, [key]: value }));
+  const textField = (key: string, label: string, type = "text") => (
+    <Field key={key} label={label}>
+      <Input
+        type={type}
+        value={String(draft[key] ?? "")}
+        onChange={(value) =>
+          set(key, type === "number" ? Number(value) : value)
+        }
+      />
+    </Field>
+  );
+  const select = (
+    key: string,
+    label: string,
+    items: { value: string; label: string }[],
+  ) => (
+    <SelectField
+      key={key}
+      label={label}
+      value={String(draft[key] || "")}
+      onChange={(value) => set(key, value)}
+      items={items}
+    />
+  );
+  const status = select("status", "Estado", [
+    { value: "ACTIVO", label: "ACTIVO" },
+    { value: "INACTIVO", label: "INACTIVO" },
+  ]);
+  const market = select(
+    "marketId",
+    "Mercado",
+    markets.map((x) => ({ value: x.id, label: x.name })),
+  );
+  const promoter = select(
+    "promoterId",
+    "Promotor",
+    users
+      .filter((x) => isPromoterRole(x.role))
+      .map((x) => ({ value: x.id, label: x.name })),
+  );
+  const date = (
+    <Field label="Fecha y hora">
+      <input
+        className="input"
+        type="datetime-local"
+        value={
+          draft.date
+            ? new Date(
+                new Date(String(draft.date)).getTime() -
+                  new Date(String(draft.date)).getTimezoneOffset() * 60000,
+              )
+                .toISOString()
+                .slice(0, 16)
+            : ""
+        }
+        onChange={(e) => {
+          if (e.target.value)
+            set("date", new Date(e.target.value).toISOString());
+        }}
+      />
+    </Field>
+  );
+  return (
+    <Modal
+      title="Editar registro"
+      detail={`Código: ${target.record.id}. Los cambios se guardan al confirmar.`}
+      close={close}
+    >
+      <div className="form-grid">
+        {target.collection === "markets" && (
+          <>
+            {textField("name", "Nombre")}
+            {textField("region", "Región")}
+            {textField("department", "Departamento")}
+            {textField("province", "Provincia")}
+            {textField("district", "Distrito")}
+            {status}
+          </>
+        )}
+        {target.collection === "users" && (
+          <>
+            {textField("dni", "DNI")}
+            {textField("name", "Nombre completo")}
+            {select(
+              "role",
+              "Rol",
+              [
+                "PROMOTOR",
+                ...selectablePromoterRoles,
+                "COORDINADOR",
+                "SUPERVISOR",
+                "ANALISTA",
+                "TRADE",
+                "ADMIN",
+                "CLIENTE",
+              ].map((x) => ({ value: x, label: x })),
+            )}
+            {market}
+            {select("clientId", "Cliente vinculado", [
+              { value: "", label: "Sin cliente" },
+              ...clients.map((x) => ({ value: x.id, label: x.name })),
+            ])}
+            {status}
+            {textField(
+              "password",
+              "Nueva clave (vacío conserva la actual)",
+              "password",
+            )}
+            <p className="modal-hint">
+              El stock se corrige desde los movimientos de Canjes y Degustación.
+            </p>
+          </>
+        )}
+        {target.collection === "attendance" && (
+          <>
+            {market}
+            {select(
+              "clientId",
+              "Cliente",
+              clients
+                .filter((x) => x.marketId === draft.marketId)
+                .map((x) => ({ value: x.id, label: x.name })),
+            )}
+            {promoter}
+            {select("type", "Evento", [
+              { value: "ENTRADA", label: "Entrada" },
+              { value: "SALIDA", label: "Salida" },
+            ])}
+            {date}
+            <PhotoField
+              label="Reemplazar evidencia"
+              hint="Opcional; conserva la fotografía actual si no adjuntas otra."
+              file={photo}
+              setFile={setPhoto}
+            />
+          </>
+        )}
+        {target.collection === "movements" && (
+          <>
+            {market}
+            {promoter}
+            {select(
+              "actorId",
+              "Responsable",
+              users.map((x) => ({ value: x.id, label: x.name })),
+            )}
+            {textField("quantity", "Cantidad", "number")}
+            {date}
+            {String(draft.kind).includes("CANJE") && (
+              <SelectField
+                label="Producto"
+                value={String(draft.canjeProductId || draft.itemId || "")}
+                onChange={(value) => {
+                  const product = canjeProducts.find((x) => x.id === value);
+                  setDraft((current) => ({
+                    ...current,
+                    itemId: product ? "" : value,
+                    canjeProductId: product?.id,
+                    canjeProductLabel: product?.label,
+                    canjeComponents: product?.components,
+                  }));
+                }}
+                items={[
+                  ...redemptionItems.map((x) => ({
+                    value: x.id,
+                    label: x.label,
+                  })),
+                  ...canjeProducts.map((x) => ({
+                    value: x.id,
+                    label: x.label,
+                  })),
+                ]}
+              />
+            )}
+          </>
+        )}
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true);
+            const actor = users.find((x) => x.id === draft.actorId);
+            const ok = await save(
+              {
+                ...draft,
+                ...(target.collection === "users"
+                  ? { roleLabel: draft.role }
+                  : {}),
+                ...(actor ? { actorName: actor.name } : {}),
+              },
+              photo,
+            );
+            setSaving(false);
+            if (ok) close();
+          }}
+        >
+          {saving ? "Guardando..." : "Guardar cambios"}
+        </Btn>
+      </div>
+    </Modal>
+  );
 }
 
-function NewUserModal({ markets, clients, onSave, close }: { markets: { value: string; label: string }[]; clients: Client[]; onSave: (user: AppUser) => void; close: () => void }) {
-  const [dni, setDni] = useState(''); const [name, setName] = useState(''); const [marketId, setMarketId] = useState(''); const [clientId, setClientId] = useState(''); const [password, setPassword] = useState(''); const [role, setRole] = useState<Role>('PROMOTOR ROTATIVO');
+function NewUserModal({
+  markets,
+  clients,
+  onSave,
+  close,
+}: {
+  markets: { value: string; label: string }[];
+  clients: Client[];
+  onSave: (user: AppUser) => void;
+  close: () => void;
+}) {
+  const [dni, setDni] = useState("");
+  const [name, setName] = useState("");
+  const [marketId, setMarketId] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<Role>("PROMOTOR ROTATIVO");
   const save = () => {
-    if (dni.length !== 8 || !name.trim() || password.length < 8 || (isZoneManagerRole(role) && !marketId) || (role === 'CLIENTE' && !clientId)) return;
-    onSave({ id: `USR-${Date.now()}`, dni, name: name.trim(), role, roleLabel: role, marketId: isZoneManagerRole(role) ? marketId : undefined, clientId: role === 'CLIENTE' ? clientId : undefined, password, status: 'ACTIVO', ...(isPromoterRole(role) ? { tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK, redemptionStock: emptyRedemptionStock() } : {}) }); close();
+    if (
+      dni.length !== 8 ||
+      !name.trim() ||
+      password.length < 8 ||
+      (isZoneManagerRole(role) && !marketId) ||
+      (role === "CLIENTE" && !clientId)
+    )
+      return;
+    onSave({
+      id: `USR-${Date.now()}`,
+      dni,
+      name: name.trim(),
+      role,
+      roleLabel: role,
+      marketId: isZoneManagerRole(role) ? marketId : undefined,
+      clientId: role === "CLIENTE" ? clientId : undefined,
+      password,
+      status: "ACTIVO",
+      ...(isPromoterRole(role)
+        ? {
+            tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK,
+            redemptionStock: emptyRedemptionStock(),
+          }
+        : {}),
+    });
+    close();
   };
-  return <Modal title="Crear usuario" detail="Define su acceso y rol. Los promotores inician con stock base y las recargas se suman desde Canjes." close={close}><div className="form-grid"><Field label="DNI *"><Input value={dni} onChange={value => setDni(value.replace(/\D/g, ''))} maxLength={8} testId="input-new-user-dni" /></Field><Field label="Nombre completo *"><Input value={name} onChange={setName} testId="input-new-user-name" /></Field><SelectField label="Rol *" value={role} onChange={value => setRole(value as Role)} items={['PROMOTOR', ...selectablePromoterRoles, 'COORDINADOR', 'SUPERVISOR', 'ANALISTA', 'TRADE', 'ADMIN', 'CLIENTE'].map(value => ({ value, label: value }))} />{isZoneManagerRole(role) && <SelectField label="Mercado asignado *" value={marketId} onChange={setMarketId} items={markets} />}{role === 'CLIENTE' && <SelectField label="Cliente vinculado *" value={clientId} onChange={setClientId} items={clients.filter(client => client.status === 'ACTIVO').map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} placeholder="Seleccionar cliente" />}<Field label="Clave temporal *"><Input value={password} onChange={value => setPassword(value)} type="password" testId="input-new-user-password" /></Field></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-user">Crear usuario</Btn></div></Modal>;
+  return (
+    <Modal
+      title="Crear usuario"
+      detail="Define su acceso y rol. Los promotores inician con stock base y las recargas se suman desde Canjes."
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="DNI *">
+          <Input
+            value={dni}
+            onChange={(value) => setDni(value.replace(/\D/g, ""))}
+            maxLength={8}
+            testId="input-new-user-dni"
+          />
+        </Field>
+        <Field label="Nombre completo *">
+          <Input value={name} onChange={setName} testId="input-new-user-name" />
+        </Field>
+        <SelectField
+          label="Rol *"
+          value={role}
+          onChange={(value) => setRole(value as Role)}
+          items={[
+            "PROMOTOR",
+            ...selectablePromoterRoles,
+            "COORDINADOR",
+            "SUPERVISOR",
+            "ANALISTA",
+            "TRADE",
+            "ADMIN",
+            "CLIENTE",
+          ].map((value) => ({ value, label: value }))}
+        />
+        {isZoneManagerRole(role) && (
+          <SelectField
+            label="Mercado asignado *"
+            value={marketId}
+            onChange={setMarketId}
+            items={markets}
+          />
+        )}
+        {role === "CLIENTE" && (
+          <SelectField
+            label="Cliente vinculado *"
+            value={clientId}
+            onChange={setClientId}
+            items={clients
+              .filter((client) => client.status === "ACTIVO")
+              .map((client) => ({
+                value: client.id,
+                label: `${client.code} · ${client.name}`,
+              }))}
+            placeholder="Seleccionar cliente"
+          />
+        )}
+        <Field label="Clave temporal *">
+          <Input
+            value={password}
+            onChange={(value) => setPassword(value)}
+            type="password"
+            testId="input-new-user-password"
+          />
+        </Field>
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn onClick={save} testId="button-create-user">
+          Crear usuario
+        </Btn>
+      </div>
+    </Modal>
+  );
 }
-function NewMarketModal({ onSave, close }: { onSave: (market: Market) => void | Promise<void>; close: () => void }) {
-  const [name, setName] = useState(''); const [region, setRegion] = useState(''); const [department, setDepartment] = useState(''); const [province, setProvince] = useState(''); const [district, setDistrict] = useState('');
-  const save = async () => { if (!name.trim() || !department.trim() || !province.trim() || !district.trim()) return; await onSave({ id: `MKT-${Date.now()}`, name: name.trim().toUpperCase(), region: region.trim().toUpperCase() || department.trim().toUpperCase(), department: department.trim().toUpperCase(), province: province.trim().toUpperCase(), district: district.trim().toUpperCase(), status: 'ACTIVO' }); close(); };
-  return <Modal title="Crear mercado" detail="Ingresa manualmente un mercado para la campaña." close={close}><div className="form-grid"><Field label="Nombre del mercado *"><Input value={name} onChange={setName} testId="input-new-market-name" /></Field><Field label="Región"><Input value={region} onChange={setRegion} placeholder="LIMA" testId="input-new-market-region" /></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment} testId="input-new-market-department" /></Field><Field label="Provincia *"><Input value={province} onChange={setProvince} testId="input-new-market-province" /></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict} testId="input-new-market-district" /></Field></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-market">Guardar mercado</Btn></div></Modal>;
+function NewMarketModal({
+  onSave,
+  close,
+}: {
+  onSave: (market: Market) => void | Promise<void>;
+  close: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [region, setRegion] = useState("");
+  const [department, setDepartment] = useState("");
+  const [province, setProvince] = useState("");
+  const [district, setDistrict] = useState("");
+  const save = async () => {
+    if (
+      !name.trim() ||
+      !department.trim() ||
+      !province.trim() ||
+      !district.trim()
+    )
+      return;
+    await onSave({
+      id: `MKT-${Date.now()}`,
+      name: name.trim().toUpperCase(),
+      region: region.trim().toUpperCase() || department.trim().toUpperCase(),
+      department: department.trim().toUpperCase(),
+      province: province.trim().toUpperCase(),
+      district: district.trim().toUpperCase(),
+      status: "ACTIVO",
+    });
+    close();
+  };
+  return (
+    <Modal
+      title="Crear mercado"
+      detail="Ingresa manualmente un mercado para la campaña."
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="Nombre del mercado *">
+          <Input
+            value={name}
+            onChange={setName}
+            testId="input-new-market-name"
+          />
+        </Field>
+        <Field label="Región">
+          <Input
+            value={region}
+            onChange={setRegion}
+            placeholder="LIMA"
+            testId="input-new-market-region"
+          />
+        </Field>
+        <Field label="Departamento *">
+          <Input
+            value={department}
+            onChange={setDepartment}
+            testId="input-new-market-department"
+          />
+        </Field>
+        <Field label="Provincia *">
+          <Input
+            value={province}
+            onChange={setProvince}
+            testId="input-new-market-province"
+          />
+        </Field>
+        <Field label="Distrito *">
+          <Input
+            value={district}
+            onChange={setDistrict}
+            testId="input-new-market-district"
+          />
+        </Field>
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn onClick={save} testId="button-create-market">
+          Guardar mercado
+        </Btn>
+      </div>
+    </Modal>
+  );
 }
-function NewClientModal({ markets, count, onSave, close }: { markets: { value: string; label: string }[]; count: number; onSave: (client: Client) => void | Promise<void>; close: () => void }) {
-  const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [category, setCategory] = useState<ClientCategory>('MIXTO'); const [marketId, setMarketId] = useState('');
-  const save = async () => { if (!name.trim() || !marketId) return; await onSave({ id: `${Date.now()}`, code: `CLI-${String(count + 1).padStart(6, '0')}`, name: name.trim(), phone: phone || undefined, category, marketId, status: 'ACTIVO' }); close(); };
-  return <Modal title="Crear cliente" detail="El código y estado se generan automáticamente." close={close}><div className="form-grid"><Field label="Nombre del cliente *"><Input value={name} onChange={setName} testId="input-new-client-name" /></Field><Field label="Celular (opcional)"><Input value={phone} onChange={setPhone} testId="input-new-client-phone" /></Field><SelectField label="Categoría *" value={category} onChange={value => setCategory(value as ClientCategory)} items={[{ value: 'MIXTO', label: 'MIXTO' }, { value: 'CONFETI', label: 'CONFETI' }]} /><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save} testId="button-create-client">Guardar cliente</Btn></div></Modal>;
+function CatalogProductModal({
+  product,
+  onSave,
+  close,
+}: {
+  product?: ProductPrice;
+  onSave: (product: ProductPrice) => Promise<boolean>;
+  close: () => void;
+}) {
+  const [sku, setSku] = useState(product?.sku || "");
+  const [name, setName] = useState(product?.product || "");
+  const [brand, setBrand] = useState(product?.brand || "");
+  const [weight, setWeight] = useState(String(product?.weightKg || ""));
+  const [price, setPrice] = useState(String(product?.unitPrice || ""));
+  const [unitsPerPackage, setUnitsPerPackage] = useState(
+    String(product?.unitsPerPackage || 1),
+  );
+  const [saleModes, setSaleModes] = useState<SaleMode[]>(
+    product?.saleModes?.length ? product.saleModes : ["UNIDADES"],
+  );
+  const [status, setStatus] = useState<Status>(product?.status || "ACTIVO");
+  const [saving, setSaving] = useState(false);
+  const toggleMode = (mode: SaleMode) =>
+    setSaleModes((current) =>
+      current.includes(mode)
+        ? current.filter((item) => item !== mode)
+        : [...current, mode],
+    );
+  const save = async () => {
+    if (
+      !sku.trim() ||
+      !name.trim() ||
+      !brand.trim() ||
+      Number(weight) <= 0 ||
+      Number(price) <= 0 ||
+      !saleModes.length ||
+      saving
+    )
+      return;
+    setSaving(true);
+    const packageUnits = Math.max(1, Math.floor(Number(unitsPerPackage) || 1));
+    const saved = await onSave({
+      sku: sku.trim().toUpperCase(),
+      product: name.trim(),
+      brand: brand.trim().toUpperCase(),
+      weightKg: Number(weight),
+      unitPrice: Number(price),
+      unitsPerPackage: packageUnits,
+      totalPrice: Number(price) * packageUnits,
+      saleModes,
+      status,
+      updatedAt: new Date().toISOString(),
+    });
+    setSaving(false);
+    if (saved) close();
+  };
+  return (
+    <Modal
+      title={product ? "Editar producto" : "Nuevo producto"}
+      detail="Define cómo aparecerá en las ventas unitarias y por planchas."
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="SKU *">
+          <Input value={sku} onChange={setSku} readOnly={Boolean(product)} />
+        </Field>
+        <Field label="Producto *">
+          <Input value={name} onChange={setName} />
+        </Field>
+        <Field label="Marca *">
+          <Input value={brand} onChange={setBrand} />
+        </Field>
+        <Field label="Peso por unidad (kg) *">
+          <Input
+            type="number"
+            value={weight}
+            onChange={setWeight}
+            min={0.001}
+            step={0.001}
+          />
+        </Field>
+        <Field label="Precio unitario (S/) *">
+          <Input
+            type="number"
+            value={price}
+            onChange={setPrice}
+            min={0.01}
+            step={0.01}
+          />
+        </Field>
+        <Field label="Unidades por empaque">
+          <Input
+            type="number"
+            value={unitsPerPackage}
+            onChange={setUnitsPerPackage}
+            min={1}
+          />
+        </Field>
+        <Field label="Disponible en *">
+          <div className="catalog-checks">
+            <label>
+              <input
+                type="checkbox"
+                checked={saleModes.includes("UNIDADES")}
+                onChange={() => toggleMode("UNIDADES")}
+              />{" "}
+              Unidades
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={saleModes.includes("PLANCHAS")}
+                onChange={() => toggleMode("PLANCHAS")}
+              />{" "}
+              Planchas
+            </label>
+          </div>
+        </Field>
+        <SelectField
+          label="Estado *"
+          value={status}
+          onChange={(value) => setStatus(value as Status)}
+          items={[
+            { value: "ACTIVO", label: "ACTIVO" },
+            { value: "INACTIVO", label: "INACTIVO" },
+          ]}
+        />
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn
+          disabled={
+            saving ||
+            !sku.trim() ||
+            !name.trim() ||
+            !brand.trim() ||
+            Number(weight) <= 0 ||
+            Number(price) <= 0 ||
+            !saleModes.length
+          }
+          onClick={save}
+        >
+          {saving ? "Guardando..." : "Guardar producto"}
+        </Btn>
+      </div>
+    </Modal>
+  );
 }
-function EditClientModal({ client, markets, onSave, close }: { client: Client; markets: { value: string; label: string }[]; onSave: (client: Client) => Promise<boolean>; close: () => void }) {
-  const [code, setCode] = useState(client.code); const [name, setName] = useState(client.name); const [phone, setPhone] = useState(client.phone || ''); const [category, setCategory] = useState<ClientCategory>(client.category || 'MIXTO'); const [marketId, setMarketId] = useState(client.marketId); const [status, setStatus] = useState<Status>(client.status); const [saving, setSaving] = useState(false);
-  const save = async () => { if (!code.trim() || !name.trim() || !marketId || saving) return; setSaving(true); const saved = await onSave({ ...client, code: code.trim().toUpperCase(), name: name.trim(), phone: phone.trim() || undefined, category, marketId, status }); setSaving(false); if (saved) close(); };
-  return <Modal title="Editar cliente" detail="Modifica los datos de la fila seleccionada. El cambio se guardará en DigitalOcean." close={close}><div className="form-grid"><Field label="Código *"><Input value={code} onChange={setCode} testId="input-edit-client-code" /></Field><Field label="Nombre del cliente *"><Input value={name} onChange={setName} testId="input-edit-client-name" /></Field><Field label="Celular"><Input value={phone} onChange={setPhone} testId="input-edit-client-phone" /></Field><SelectField label="Categoría *" value={category} onChange={value => setCategory(value as ClientCategory)} items={[{ value: 'MIXTO', label: 'MIXTO' }, { value: 'CONFETI', label: 'CONFETI' }]} /><SelectField label="Mercado *" value={marketId} onChange={setMarketId} items={markets} /><SelectField label="Estado *" value={status} onChange={value => setStatus(value as Status)} items={[{ value: 'ACTIVO', label: 'ACTIVO' }, { value: 'INACTIVO', label: 'INACTIVO' }]} /></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!code.trim() || !name.trim() || !marketId || saving} onClick={save} testId="button-save-client-edit">{saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}{saving ? 'Guardando...' : 'Guardar cambios'}</Btn></div></Modal>;
+function CatalogCategoryModal({
+  category,
+  onSave,
+  close,
+}: {
+  category?: Category;
+  onSave: (category: Category) => Promise<boolean>;
+  close: () => void;
+}) {
+  const [id, setId] = useState(category?.id || "");
+  const [name, setName] = useState(category?.name || "");
+  const [status, setStatus] = useState<Status>(category?.status || "ACTIVO");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!id.trim() || !name.trim() || saving) return;
+    setSaving(true);
+    const saved = await onSave({
+      id: id
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9_-]/g, "_"),
+      name: name.trim().toUpperCase(),
+      status,
+      updatedAt: new Date().toISOString(),
+    });
+    setSaving(false);
+    if (saved) close();
+  };
+  return (
+    <Modal
+      title={category ? "Editar categoría" : "Nueva categoría"}
+      detail="Las categorías activas aparecerán en el registro de clientes."
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="Código *">
+          <Input value={id} onChange={setId} readOnly={Boolean(category)} />
+        </Field>
+        <Field label="Nombre *">
+          <Input value={name} onChange={setName} />
+        </Field>
+        <SelectField
+          label="Estado *"
+          value={status}
+          onChange={(value) => setStatus(value as Status)}
+          items={[
+            { value: "ACTIVO", label: "ACTIVO" },
+            { value: "INACTIVO", label: "INACTIVO" },
+          ]}
+        />
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn disabled={saving || !id.trim() || !name.trim()} onClick={save}>
+          {saving ? "Guardando..." : "Guardar categoría"}
+        </Btn>
+      </div>
+    </Modal>
+  );
 }
-function SaleEditModal({ sale, clients, promoter, onSave, close }: { sale: Sale; clients: Client[]; promoter?: AppUser; onSave: (sale: Sale, photos: { receipt: File | null; exchange: File | null }) => Promise<boolean>; close: () => void }) {
+function NewClientModal({
+  markets,
+  categories,
+  count,
+  onSave,
+  close,
+}: {
+  markets: { value: string; label: string }[];
+  categories: Category[];
+  count: number;
+  onSave: (client: Client) => void | Promise<void>;
+  close: () => void;
+}) {
+  const activeCategories = categories.filter(
+    (item) => item.status === "ACTIVO",
+  );
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [category, setCategory] = useState<ClientCategory>(
+    activeCategories[0]?.id || "",
+  );
+  const [marketId, setMarketId] = useState("");
+  const save = async () => {
+    if (!name.trim() || !marketId) return;
+    await onSave({
+      id: `${Date.now()}`,
+      code: `CLI-${String(count + 1).padStart(6, "0")}`,
+      name: name.trim(),
+      phone: phone || undefined,
+      category,
+      marketId,
+      status: "ACTIVO",
+    });
+    close();
+  };
+  return (
+    <Modal
+      title="Crear cliente"
+      detail="El código y estado se generan automáticamente."
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="Nombre del cliente *">
+          <Input
+            value={name}
+            onChange={setName}
+            testId="input-new-client-name"
+          />
+        </Field>
+        <Field label="Celular (opcional)">
+          <Input
+            value={phone}
+            onChange={setPhone}
+            testId="input-new-client-phone"
+          />
+        </Field>
+        <SelectField
+          label="Categoría *"
+          value={category}
+          onChange={setCategory}
+          items={activeCategories.map((item) => ({
+            value: item.id,
+            label: item.name,
+          }))}
+        />
+        <SelectField
+          label="Mercado *"
+          value={marketId}
+          onChange={setMarketId}
+          items={markets}
+        />
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn disabled={!category} onClick={save} testId="button-create-client">
+          Guardar cliente
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+function EditClientModal({
+  client,
+  markets,
+  categories,
+  onSave,
+  close,
+}: {
+  client: Client;
+  markets: { value: string; label: string }[];
+  categories: Category[];
+  onSave: (client: Client) => Promise<boolean>;
+  close: () => void;
+}) {
+  const [code, setCode] = useState(client.code);
+  const [name, setName] = useState(client.name);
+  const [phone, setPhone] = useState(client.phone || "");
+  const [category, setCategory] = useState<ClientCategory>(
+    client.category || "MIXTO",
+  );
+  const [marketId, setMarketId] = useState(client.marketId);
+  const [status, setStatus] = useState<Status>(client.status);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!code.trim() || !name.trim() || !marketId || saving) return;
+    setSaving(true);
+    const saved = await onSave({
+      ...client,
+      code: code.trim().toUpperCase(),
+      name: name.trim(),
+      phone: phone.trim() || undefined,
+      category,
+      marketId,
+      status,
+    });
+    setSaving(false);
+    if (saved) close();
+  };
+  const categoryOptions = categories
+    .filter((item) => item.status === "ACTIVO" || item.id === category)
+    .map((item) => ({ value: item.id, label: item.name }));
+  return (
+    <Modal
+      title="Editar cliente"
+      detail="Modifica los datos de la fila seleccionada. El cambio se guardará en DigitalOcean."
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="Código *">
+          <Input
+            value={code}
+            onChange={setCode}
+            testId="input-edit-client-code"
+          />
+        </Field>
+        <Field label="Nombre del cliente *">
+          <Input
+            value={name}
+            onChange={setName}
+            testId="input-edit-client-name"
+          />
+        </Field>
+        <Field label="Celular">
+          <Input
+            value={phone}
+            onChange={setPhone}
+            testId="input-edit-client-phone"
+          />
+        </Field>
+        <SelectField
+          label="Categoría *"
+          value={category}
+          onChange={setCategory}
+          items={categoryOptions}
+        />
+        <SelectField
+          label="Mercado *"
+          value={marketId}
+          onChange={setMarketId}
+          items={markets}
+        />
+        <SelectField
+          label="Estado *"
+          value={status}
+          onChange={(value) => setStatus(value as Status)}
+          items={[
+            { value: "ACTIVO", label: "ACTIVO" },
+            { value: "INACTIVO", label: "INACTIVO" },
+          ]}
+        />
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn
+          disabled={!code.trim() || !name.trim() || !marketId || saving}
+          onClick={save}
+          testId="button-save-client-edit"
+        >
+          {saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}
+          {saving ? "Guardando..." : "Guardar cambios"}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+function SaleEditModal({
+  sale,
+  clients,
+  promoter,
+  onSave,
+  close,
+}: {
+  sale: Sale;
+  clients: Client[];
+  promoter?: AppUser;
+  onSave: (
+    sale: Sale,
+    photos: { receipt: File | null; exchange: File | null },
+  ) => Promise<boolean>;
+  close: () => void;
+}) {
   const [clientId, setClientId] = useState(sale.clientId);
   const [amountSoles, setAmountSoles] = useState(String(sale.amountSoles));
   const [saleDate, setSaleDate] = useState(() => {
@@ -1025,374 +3381,2847 @@ function SaleEditModal({ sale, clients, promoter, onSave, close }: { sale: Sale;
     const offset = date.getTimezoneOffset() * 60_000;
     return new Date(date.getTime() - offset).toISOString().slice(0, 16);
   });
-  const [comment, setComment] = useState(sale.comment || '');
-  const originalCount = sale.bonus ? Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)) : 0;
+  const [comment, setComment] = useState(sale.comment || "");
+  const originalCount = sale.bonus
+    ? Math.max(1, Math.floor(Number(sale.redemptionCount) || 1))
+    : 0;
   const originalRequirements = sale.redemptionItems
-    ? redemptionItems.reduce((result, item) => ({ ...result, [item.id]: Math.max(0, Number(sale.redemptionItems?.[item.id]) || 0) }), {} as RedemptionStock)
-    : multiplyRedemptionRequirements(parseBonusItems(sale.bonus), originalCount);
-  const currentStock = userRedemptionStock(promoter || { id: '', dni: '', name: '', role: 'PROMOTOR', status: 'ACTIVO' });
-  const restoredStock = redemptionItems.reduce((result, item) => ({ ...result, [item.id]: currentStock[item.id] + (originalRequirements[item.id] || 0) }), {} as RedemptionStock);
-  const availableCanjes = bonusProductsFor(sale.mode, sale.units, sale.planchas || 0, restoredStock);
-  const [canjeProductId, setCanjeProductId] = useState<CanjeProductId | ''>(availableCanjes.find(product => product.label === sale.bonus)?.id || '');
+    ? redemptionItems.reduce(
+        (result, item) => ({
+          ...result,
+          [item.id]: Math.max(0, Number(sale.redemptionItems?.[item.id]) || 0),
+        }),
+        {} as RedemptionStock,
+      )
+    : multiplyRedemptionRequirements(
+        parseBonusItems(sale.bonus),
+        originalCount,
+      );
+  const currentStock = userRedemptionStock(
+    promoter || {
+      id: "",
+      dni: "",
+      name: "",
+      role: "PROMOTOR",
+      status: "ACTIVO",
+    },
+  );
+  const restoredStock = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: currentStock[item.id] + (originalRequirements[item.id] || 0),
+    }),
+    {} as RedemptionStock,
+  );
+  const availableCanjes = bonusProductsFor(
+    sale.mode,
+    sale.units,
+    sale.planchas || 0,
+    restoredStock,
+  );
+  const [canjeProductId, setCanjeProductId] = useState<CanjeProductId | "">(
+    availableCanjes.find((product) => product.label === sale.bonus)?.id || "",
+  );
   const [redemptionCount, setRedemptionCount] = useState(originalCount || 1);
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
-  const marketClients = clients.filter(client => client.marketId === sale.marketId && (client.status === 'ACTIVO' || client.id === sale.clientId));
+  const marketClients = clients.filter(
+    (client) =>
+      client.marketId === sale.marketId &&
+      (client.status === "ACTIVO" || client.id === sale.clientId),
+  );
   const parsedAmount = Number(amountSoles);
   const parsedDate = new Date(saleDate);
-  const selectedCanje = availableCanjes.find(product => product.id === canjeProductId);
-  const newRequirements = selectedCanje ? multiplyRedemptionRequirements(parseBonusItems(selectedCanje.label), redemptionCount) : emptyRedemptionStock();
-  const missingStock = requiredRedemptionEntries(newRequirements).find(([itemId, quantity]) => restoredStock[itemId] < quantity);
-  const exchangeEvidenceReady = !selectedCanje || Boolean(exchange || sale.exchangePhoto);
+  const selectedCanje = availableCanjes.find(
+    (product) => product.id === canjeProductId,
+  );
+  const newRequirements = selectedCanje
+    ? multiplyRedemptionRequirements(
+        parseBonusItems(selectedCanje.label),
+        redemptionCount,
+      )
+    : emptyRedemptionStock();
+  const missingStock = requiredRedemptionEntries(newRequirements).find(
+    ([itemId, quantity]) => restoredStock[itemId] < quantity,
+  );
+  const exchangeEvidenceReady =
+    !selectedCanje || Boolean(exchange || sale.exchangePhoto);
   const save = async () => {
-    if (!clientId || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || Number.isNaN(parsedDate.getTime()) || missingStock || !exchangeEvidenceReady || saving) return;
+    if (
+      !clientId ||
+      !Number.isFinite(parsedAmount) ||
+      parsedAmount <= 0 ||
+      Number.isNaN(parsedDate.getTime()) ||
+      missingStock ||
+      !exchangeEvidenceReady ||
+      saving
+    )
+      return;
     setSaving(true);
     try {
-      const saved = await onSave({
-        ...sale,
-        clientId,
-        amountSoles: parsedAmount,
-        date: parsedDate.toISOString(),
-        comment: comment.trim() || undefined,
-        bonus: selectedCanje?.label,
-        redemptionCount: selectedCanje ? redemptionCount : 0,
-        redemptionItems: selectedCanje ? newRequirements : undefined,
-        receiptPhoto: receipt ? `BOLETA - ${sale.id}.jpg` : sale.receiptPhoto,
-        exchangePhoto: selectedCanje ? (exchange ? `${selectedCanje.label} - CLIENTE - ${sale.id}.jpg` : sale.exchangePhoto) : undefined,
-      }, { receipt, exchange });
+      const saved = await onSave(
+        {
+          ...sale,
+          clientId,
+          amountSoles: parsedAmount,
+          date: parsedDate.toISOString(),
+          comment: comment.trim() || undefined,
+          bonus: selectedCanje?.label,
+          redemptionCount: selectedCanje ? redemptionCount : 0,
+          redemptionItems: selectedCanje ? newRequirements : undefined,
+          receiptPhoto: receipt ? `BOLETA - ${sale.id}.jpg` : sale.receiptPhoto,
+          exchangePhoto: selectedCanje
+            ? exchange
+              ? `${selectedCanje.label} - CLIENTE - ${sale.id}.jpg`
+              : sale.exchangePhoto
+            : undefined,
+        },
+        { receipt, exchange },
+      );
       if (saved) close();
     } finally {
       setSaving(false);
     }
   };
-  return <Modal title="Editar venta" detail={`${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`} close={close}><div className="form-grid"><SelectField label="Cliente *" value={clientId} onChange={setClientId} items={marketClients.map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} /><Field label="Importe total (S/) *"><Input type="number" value={amountSoles} onChange={setAmountSoles} min={0.01} step={0.01} testId="input-edit-sale-amount" /></Field><Field label="Fecha y hora de venta *"><Input type="datetime-local" value={saleDate} onChange={setSaleDate} testId="input-edit-sale-date" /></Field><SelectField label="Canje" value={canjeProductId} onChange={value => setCanjeProductId(value as CanjeProductId | '')} items={[{ value: '', label: 'Sin canje' }, ...availableCanjes.map(product => ({ value: product.id, label: product.label }))]} />{selectedCanje && <Field label="Número de canjes *"><select className="select" value={redemptionCount} onChange={event => setRedemptionCount(Number(event.target.value))} data-testid="select-edit-redemption-count"><option value={1}>1 canje</option><option value={2}>2 canjes</option><option value={3}>3 canjes</option></select></Field>}<Field label="Comentario" className="full-field"><textarea className="input textarea" value={comment} onChange={event => setComment(event.target.value)} maxLength={300} rows={3} data-testid="input-edit-sale-comment" /></Field></div>{missingStock && <div className="stock-warning"><PackageCheck /> Stock insuficiente de {redemptionLabel(missingStock[0])}. El canje anterior se devuelve antes de aplicar el nuevo.</div>}<div className="evidence-grid"><div><PhotoThumbnail label="Boleta actual" src={sale.receiptPhoto} /><PhotoField label="Reemplazar boleta" hint="Déjalo vacío para conservar la actual" file={receipt} setFile={setReceipt} /></div><div>{sale.exchangePhoto && <PhotoThumbnail label="Canje actual" src={sale.exchangePhoto} />}<PhotoField label="Reemplazar foto de canje" hint={selectedCanje ? 'Obligatoria si el canje no tenía evidencia' : 'No requerida sin canje'} file={exchange} setFile={setExchange} disabled={!selectedCanje} /></div></div><p className="modal-hint">Los productos y cantidades vendidas se conservan. El inventario personal del promotor se recalcula al guardar.</p><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!clientId || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || Number.isNaN(parsedDate.getTime()) || Boolean(missingStock) || !exchangeEvidenceReady || saving} onClick={save} testId="button-save-sale-edit">{saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}{saving ? 'Guardando...' : 'Guardar cambios'}</Btn></div></Modal>;
+  return (
+    <Modal
+      title="Editar venta"
+      detail={`${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
+      close={close}
+    >
+      <div className="form-grid">
+        <SelectField
+          label="Cliente *"
+          value={clientId}
+          onChange={setClientId}
+          items={marketClients.map((client) => ({
+            value: client.id,
+            label: `${client.code} · ${client.name}`,
+          }))}
+        />
+        <Field label="Importe total (S/) *">
+          <Input
+            type="number"
+            value={amountSoles}
+            onChange={setAmountSoles}
+            min={0.01}
+            step={0.01}
+            testId="input-edit-sale-amount"
+          />
+        </Field>
+        <Field label="Fecha y hora de venta *">
+          <Input
+            type="datetime-local"
+            value={saleDate}
+            onChange={setSaleDate}
+            testId="input-edit-sale-date"
+          />
+        </Field>
+        <SelectField
+          label="Canje"
+          value={canjeProductId}
+          onChange={(value) => setCanjeProductId(value as CanjeProductId | "")}
+          items={[
+            { value: "", label: "Sin canje" },
+            ...availableCanjes.map((product) => ({
+              value: product.id,
+              label: product.label,
+            })),
+          ]}
+        />
+        {selectedCanje && (
+          <Field label="Número de canjes *">
+            <select
+              className="select"
+              value={redemptionCount}
+              onChange={(event) =>
+                setRedemptionCount(Number(event.target.value))
+              }
+              data-testid="select-edit-redemption-count"
+            >
+              <option value={1}>1 canje</option>
+              <option value={2}>2 canjes</option>
+              <option value={3}>3 canjes</option>
+            </select>
+          </Field>
+        )}
+        <Field label="Comentario" className="full-field">
+          <textarea
+            className="input textarea"
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            maxLength={300}
+            rows={3}
+            data-testid="input-edit-sale-comment"
+          />
+        </Field>
+      </div>
+      {missingStock && (
+        <div className="stock-warning">
+          <PackageCheck /> Stock insuficiente de{" "}
+          {redemptionLabel(missingStock[0])}. El canje anterior se devuelve
+          antes de aplicar el nuevo.
+        </div>
+      )}
+      <div className="evidence-grid">
+        <div>
+          <PhotoThumbnail label="Boleta actual" src={sale.receiptPhoto} />
+          <PhotoField
+            label="Reemplazar boleta"
+            hint="Déjalo vacío para conservar la actual"
+            file={receipt}
+            setFile={setReceipt}
+          />
+        </div>
+        <div>
+          {sale.exchangePhoto && (
+            <PhotoThumbnail label="Canje actual" src={sale.exchangePhoto} />
+          )}
+          <PhotoField
+            label="Reemplazar foto de canje"
+            hint={
+              selectedCanje
+                ? "Obligatoria si el canje no tenía evidencia"
+                : "No requerida sin canje"
+            }
+            file={exchange}
+            setFile={setExchange}
+            disabled={!selectedCanje}
+          />
+        </div>
+      </div>
+      <p className="modal-hint">
+        Los productos y cantidades vendidas se conservan. El inventario personal
+        del promotor se recalcula al guardar.
+      </p>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn
+          disabled={
+            !clientId ||
+            !Number.isFinite(parsedAmount) ||
+            parsedAmount <= 0 ||
+            Number.isNaN(parsedDate.getTime()) ||
+            Boolean(missingStock) ||
+            !exchangeEvidenceReady ||
+            saving
+          }
+          onClick={save}
+          testId="button-save-sale-edit"
+        >
+          {saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}
+          {saving ? "Guardando..." : "Guardar cambios"}
+        </Btn>
+      </div>
+    </Modal>
+  );
 }
-function NewCanjeModal({ users, user, onSave, close }: { users: AppUser[]; user: AppUser; onSave: (canjes: InventoryMovement[]) => void | Promise<void>; close: () => void }) {
-  const promoters = users.filter(current => !current.sheetArchived && current.status === 'ACTIVO' && isPromoterRole(current.role));
-  const [promoterId, setPromoterId] = useState('');
-  const [tastingQuantity, setTastingQuantity] = useState('');
-  const [quantities, setQuantities] = useState<Record<RedemptionItemId, string>>(() => Object.fromEntries(redemptionItems.map(item => [item.id, ''])) as Record<RedemptionItemId, string>);
-  const selectedPromoter = promoters.find(current => current.id === promoterId);
-  const parsedTastingQuantity = tastingQuantity.trim() === '' ? 0 : Number(tastingQuantity);
+function NewCanjeModal({
+  users,
+  user,
+  onSave,
+  close,
+}: {
+  users: AppUser[];
+  user: AppUser;
+  onSave: (canjes: InventoryMovement[]) => void | Promise<void>;
+  close: () => void;
+}) {
+  const promoters = users.filter(
+    (current) =>
+      !current.sheetArchived &&
+      current.status === "ACTIVO" &&
+      isPromoterRole(current.role),
+  );
+  const [promoterId, setPromoterId] = useState("");
+  const [tastingQuantity, setTastingQuantity] = useState("");
+  const [quantities, setQuantities] = useState<
+    Record<RedemptionItemId, string>
+  >(
+    () =>
+      Object.fromEntries(
+        redemptionItems.map((item) => [item.id, ""]),
+      ) as Record<RedemptionItemId, string>,
+  );
+  const selectedPromoter = promoters.find(
+    (current) => current.id === promoterId,
+  );
+  const parsedTastingQuantity =
+    tastingQuantity.trim() === "" ? 0 : Number(tastingQuantity);
   const parsedQuantities = redemptionItems.reduce((result, item) => {
     const raw = quantities[item.id].trim();
-    result[item.id] = raw === '' ? 0 : Number(raw);
+    result[item.id] = raw === "" ? 0 : Number(raw);
     return result;
   }, {} as RedemptionStock);
-  const hasInvalidQuantity = !Number.isInteger(parsedTastingQuantity) || parsedTastingQuantity < 0 || redemptionItems.some(item => !Number.isInteger(parsedQuantities[item.id]) || parsedQuantities[item.id] < 0);
-  const hasQuantity = parsedTastingQuantity > 0 || redemptionItems.some(item => parsedQuantities[item.id] > 0);
+  const hasInvalidQuantity =
+    !Number.isInteger(parsedTastingQuantity) ||
+    parsedTastingQuantity < 0 ||
+    redemptionItems.some(
+      (item) =>
+        !Number.isInteger(parsedQuantities[item.id]) ||
+        parsedQuantities[item.id] < 0,
+    );
+  const hasQuantity =
+    parsedTastingQuantity > 0 ||
+    redemptionItems.some((item) => parsedQuantities[item.id] > 0);
   const save = async () => {
     if (!selectedPromoter || hasInvalidQuantity || !hasQuantity) return;
     const date = new Date().toISOString();
     const canjes: InventoryMovement[] = redemptionItems
-      .filter(item => parsedQuantities[item.id] > 0)
-      .map(item => ({
+      .filter((item) => parsedQuantities[item.id] > 0)
+      .map((item) => ({
         id: `ABAST-CANJE-${Date.now()}-${item.id}`,
-        marketId: selectedPromoter.marketId || `PERSONAL:${selectedPromoter.id}`,
+        marketId:
+          selectedPromoter.marketId || `PERSONAL:${selectedPromoter.id}`,
         promoterId: selectedPromoter.id,
-        kind: 'AJUSTE_CANJES' as const,
+        kind: "AJUSTE_CANJES" as const,
         itemId: item.id,
         quantity: parsedQuantities[item.id],
         actorId: user.id,
         actorName: user.name,
         date,
-        status: 'PENDIENTE' as const,
+        status: "PENDIENTE" as const,
       }));
     if (parsedTastingQuantity > 0) {
       canjes.push({
         id: `ABAST-DEGUSTACION-${Date.now()}`,
-        marketId: selectedPromoter.marketId || `PERSONAL:${selectedPromoter.id}`,
+        marketId:
+          selectedPromoter.marketId || `PERSONAL:${selectedPromoter.id}`,
         promoterId: selectedPromoter.id,
-        kind: 'AJUSTE_DEGUSTACION' as const,
-        degustacionProductId: 'PANETON',
-        degustacionProductLabel: 'Panetón',
+        kind: "AJUSTE_DEGUSTACION" as const,
+        degustacionProductId: "PANETON",
+        degustacionProductLabel: "Panetón",
         quantity: parsedTastingQuantity,
         actorId: user.id,
         actorName: user.name,
         date,
-        status: 'PENDIENTE' as const,
+        status: "PENDIENTE" as const,
       });
     }
     await onSave(canjes);
     close();
   };
-  return <Modal title="Actualizar stock promotor" detail="Selecciona un promotor e ingresa las cantidades a recargar. Todo lo que coloques se suma al stock actual del promotor." close={close}><div className="form-grid"><SelectField label="Promotor *" value={promoterId} onChange={setPromoterId} items={promoters.map(current => ({ value: current.id, label: `${current.name} · DNI ${current.dni}` }))} placeholder="Seleccionar promotor" /><Field label="Panetón para degustación"><Input type="number" value={tastingQuantity} onChange={setTastingQuantity} min={0} step={1} placeholder="0" testId="input-new-degustacion-quantity" /></Field>{redemptionItems.map(item => <Field key={item.id} label={`${item.label} recibida`}><Input type="number" value={quantities[item.id]} onChange={value => setQuantities(current => ({ ...current, [item.id]: value }))} min={0} step={1} placeholder="0" testId={`input-new-canje-${item.id.toLowerCase()}`} /></Field>)}</div>{selectedPromoter && <p className="modal-hint">Stock actual: {userTastingStock(selectedPromoter)} panetones · {redemptionStockText(userRedemptionStock(selectedPromoter))}</p>}{hasInvalidQuantity && <p className="modal-error">Las cantidades deben ser números enteros iguales o mayores que cero.</p>}<div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!selectedPromoter || hasInvalidQuantity || !hasQuantity} onClick={save} testId="button-create-canje">Sumar al stock</Btn></div></Modal>;
+  return (
+    <Modal
+      title="Actualizar stock promotor"
+      detail="Selecciona un promotor e ingresa las cantidades a recargar. Todo lo que coloques se suma al stock actual del promotor."
+      close={close}
+    >
+      <div className="form-grid">
+        <SelectField
+          label="Promotor *"
+          value={promoterId}
+          onChange={setPromoterId}
+          items={promoters.map((current) => ({
+            value: current.id,
+            label: `${current.name} · DNI ${current.dni}`,
+          }))}
+          placeholder="Seleccionar promotor"
+        />
+        <Field label="Panetón para degustación">
+          <Input
+            type="number"
+            value={tastingQuantity}
+            onChange={setTastingQuantity}
+            min={0}
+            step={1}
+            placeholder="0"
+            testId="input-new-degustacion-quantity"
+          />
+        </Field>
+        {redemptionItems.map((item) => (
+          <Field key={item.id} label={`${item.label} recibida`}>
+            <Input
+              type="number"
+              value={quantities[item.id]}
+              onChange={(value) =>
+                setQuantities((current) => ({ ...current, [item.id]: value }))
+              }
+              min={0}
+              step={1}
+              placeholder="0"
+              testId={`input-new-canje-${item.id.toLowerCase()}`}
+            />
+          </Field>
+        ))}
+      </div>
+      {selectedPromoter && (
+        <p className="modal-hint">
+          Stock actual: {userTastingStock(selectedPromoter)} panetones ·{" "}
+          {redemptionStockText(userRedemptionStock(selectedPromoter))}
+        </p>
+      )}
+      {hasInvalidQuantity && (
+        <p className="modal-error">
+          Las cantidades deben ser números enteros iguales o mayores que cero.
+        </p>
+      )}
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn
+          disabled={!selectedPromoter || hasInvalidQuantity || !hasQuantity}
+          onClick={save}
+          testId="button-create-canje"
+        >
+          Sumar al stock
+        </Btn>
+      </div>
+    </Modal>
+  );
 }
-function matchesTableSearch(query: string, fields: (string | number | undefined | null)[]) {
-  const normalize = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-PE').replace(/\s+/g, ' ').trim();
-  const text = normalize(fields.filter(value => value != null).join(' '));
-  return normalize(query).split(' ').filter(Boolean).every(term => text.includes(term));
+function matchesTableSearch(
+  query: string,
+  fields: (string | number | undefined | null)[],
+) {
+  const normalize = (text: string) =>
+    text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase("es-PE")
+      .replace(/\s+/g, " ")
+      .trim();
+  const text = normalize(fields.filter((value) => value != null).join(" "));
+  return normalize(query)
+    .split(" ")
+    .filter(Boolean)
+    .every((term) => text.includes(term));
 }
-function TableSearch({ value, onChange, fields, count, total }: { value: string; onChange: (value: string) => void; fields: string; count: number; total: number }) {
-  return <div className="table-search"><label className="table-search-label">Buscar en todos los campos<Input value={value} onChange={onChange} placeholder="Escribe una o varias palabras…" /></label><div className="table-search-detail"><small>{fields}</small>{value && <Btn variant="ghost" onClick={() => onChange('')}>Limpiar</Btn>}</div><small role="status" aria-live="polite">{count} de {total} registros{count === 0 ? ' · No hay coincidencias' : ''}</small></div>;
-}
-
-function AdminCanjesModule({ onEdit, canjes, marketMap, users, onCreate, onDelete, onCleanup, canCleanup, notify }: { onEdit: (record: AdminCanje) => void; canjes: AdminCanje[]; marketMap: Record<string, Market>; users: AppUser[]; onCreate: () => void; onDelete: (canje: AdminCanje) => void; onCleanup: () => void; canCleanup: boolean; notify: (message: string, error?: boolean) => void }) {
-  const [search, setSearch] = useState('');
-  const visibleCanjes = canjes.filter(canje => { const promoter = canje.promoterId ? users.find(current => current.id === canje.promoterId) : undefined; return matchesTableSearch(search,[canje.canjeId, canje.status, canje.kind, canje.source === 'sale' ? 'Venta' : 'Abastecimiento', canje.quantity, 'unidades', formatDate(canje.date), canje.date, promoter?.name || canje.actorName, promoter?.dni, canje.actorName, marketMap[canje.marketId]?.name || 'Mercado no identificado', canjeProductLabel(canje.canjeProductId, canje.canjeProductLabel || canje.degustacionProductLabel || canje.sale?.bonus || (canje.itemId ? redemptionLabel(canje.itemId) : undefined))]); });
-  const exportCanjes = () => {
-     downloadCsv(`canjes-${new Date().toISOString().slice(0, 10)}.csv`, ['Fecha', 'Origen', 'Mercado', 'Producto', 'Cantidad', 'Responsable'], canjes.map(canje => [formatDate(canje.date), canje.source === 'sale' ? 'Venta' : 'Movimiento', marketMap[canje.marketId]?.name || 'Mercado', canjeProductLabel(canje.canjeProductId, canje.canjeProductLabel || canje.degustacionProductLabel || canje.sale?.bonus || (canje.itemId ? redemptionLabel(canje.itemId) : undefined)), canje.quantity, canje.actorName]));
-    notify('Reporte de canjes descargado');
-  };
-  return <section className="admin-module">
-    <div className="admin-intro"><div><span className="eyebrow">GESTIÓN MANUAL</span><h2>Canjes</h2><p>Actualiza el stock personal de los promotores y consulta los canjes asociados a ventas.</p></div><div className="page-actions"><Btn variant="outline" onClick={exportCanjes}><Download /> Descargar</Btn><Btn onClick={onCreate}><Plus /> Actualizar stock promotor</Btn></div></div>
-     <section className="panel"><div className="panel-header"><div><h2>{canjes.length} canjes registrados</h2><p>Solo se muestran canjes usados en ventas. Las recargas de stock no aparecen como canjes asignados.</p></div></div><div className="panel-body sales-panel-body"><TableSearch value={search} onChange={setSearch} fields="Código, producto, responsable, DNI, mercado, origen, cantidad, fecha y estado." count={visibleCanjes.length} total={canjes.length} />{visibleCanjes.length ? <div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-7"><span>Código</span><span>Producto</span><span>Responsable</span><span>Origen</span><span>Cantidad</span><span>Fecha</span><span>Acciones</span></div>{visibleCanjes.map(canje => { const promoter = canje.promoterId ? users.find(current => current.id === canje.promoterId) : undefined; return <article className="module-table-row cols-7" key={`${canje.source}-${canje.canjeId}`}><span><b className="module-table-id">{canje.canjeId}</b><small>{canje.status}</small></span><span><strong>{canjeProductLabel(canje.canjeProductId, canje.canjeProductLabel || canje.degustacionProductLabel || canje.sale?.bonus || (canje.itemId ? redemptionLabel(canje.itemId) : undefined))}</strong><small>{marketMap[canje.marketId]?.name || 'Mercado no identificado'}</small></span><span><strong>{promoter?.name || canje.actorName}</strong><small>{promoter?.dni ? `DNI ${promoter.dni}` : canje.actorName}</small></span><span><strong>Venta</strong><small>{canje.kind}</small></span><span><strong>{canje.quantity}</strong><small>unidades</small></span><span><strong>{formatDate(canje.date)}</strong></span><span className="module-table-actions"><Btn variant="outline" onClick={() => onEdit(canje)}><Pencil /> Editar</Btn><Btn variant="danger" onClick={() => onDelete(canje)} testId={`button-delete-canje-${canje.canjeId}`}><Trash2 /> Eliminar</Btn></span></article>; })}</div></div> : <Empty title={canjes.length ? 'No hay coincidencias' : 'Aún no hay canjes'} detail="Los canjes aparecerán cuando una venta utilice stock de promotor." />}</div></section>
-  </section>;
-}
-
-function AdminDegustacionesModule({ onEdit, consumos, users, marketMap, onDeleteConsumo }: { onEdit: (record: InventoryMovement) => void; consumos: InventoryMovement[]; users: AppUser[]; marketMap: Record<string, Market>; onDeleteConsumo: (consumo: InventoryMovement) => void }) {
-  const [search, setSearch] = useState('');
-  const visibleConsumos = consumos.filter(consumo => { const promoter = users.find(current => current.id === (consumo.promoterId || consumo.actorId)); const market = marketMap[consumo.marketId]; return matchesTableSearch(search,[consumo.id, promoter?.name || consumo.actorName || 'Promotor no identificado', promoter?.dni, promoter?.roleLabel || promoter?.role, market?.name || 'Mercado no identificado', market?.district, market?.province, market?.department, consumo.marketId, consumo.quantity, 'unidades utilizadas', formatDate(consumo.date), consumo.date, consumo.status]); });
-  return <section className="admin-module">
-    <div className="admin-intro"><div><span className="eyebrow">CONTROL DE CAMPO</span><h2>Degustaciones registradas</h2><p>Consulta quién declaró cada degustación, dónde la realizó y cuántas unidades utilizó.</p></div></div>
-    <section className="panel"><div className="panel-header"><div><h2>{consumos.length} consumos registrados</h2><p>Ordenados desde el más reciente hasta el más antiguo.</p></div></div><div className="panel-body sales-panel-body"><TableSearch value={search} onChange={setSearch} fields="Código, promotor, DNI, rol, mercado, ubicación, cantidad, fecha y estado." count={visibleConsumos.length} total={consumos.length} />{visibleConsumos.length ? <div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-7"><span>Código</span><span>Promotor</span><span>Mercado</span><span>Ubicación</span><span>Cantidad</span><span>Fecha y estado</span><span>Acciones</span></div>{visibleConsumos.map(consumo => {
-      const promoter = users.find(current => current.id === (consumo.promoterId || consumo.actorId));
-      const market = marketMap[consumo.marketId];
-      return <article className="module-table-row cols-7" key={consumo.id}>
-        <span><b className="module-table-id">{consumo.id}</b></span><span><strong>{promoter?.name || consumo.actorName || 'Promotor no identificado'}</strong><small>DNI {promoter?.dni || '—'} · {promoter?.roleLabel || promoter?.role || 'Promotor'}</small></span><span><strong>{market?.name || 'Mercado no identificado'}</strong></span><span><strong>{market?.district || '—'}</strong><small>{market ? `${market.province} · ${market.department}` : consumo.marketId}</small></span><span><strong>{consumo.quantity}</strong><small>unidades utilizadas</small></span><span><strong>{formatDate(consumo.date)}</strong><small>{consumo.status}</small></span><span className="module-table-actions"><Btn variant="outline" onClick={() => onEdit(consumo)}><Pencil /> Editar</Btn><Btn variant="danger" onClick={() => onDeleteConsumo(consumo)} testId={`button-delete-tasting-consumption-${consumo.id}`}><Trash2 /> Eliminar</Btn></span>
-      </article>;
-    })}</div></div> : <Empty title={consumos.length ? 'No hay coincidencias' : 'Aún no hay degustaciones utilizadas'} detail="Las cantidades declaradas por los promotores aparecerán aquí." />}</div></section>
-  </section>;
-}
-
-function TastingExitModal({ available, onConfirm, close }: { available: number; onConfirm: (tastingUsed: number) => void; close: () => void }) {
-  const [quantity, setQuantity] = useState('0');
-  const parsedQuantity = quantity === '' ? NaN : Number(quantity);
-  const valid = Number.isInteger(parsedQuantity) && parsedQuantity >= 0 && parsedQuantity <= available;
-  return <Modal title="Registrar salida del cliente" detail="Indica la degustación utilizada durante esta visita antes de confirmar la salida." close={close}>
-    <div className="logout-declaration">
-       <div className="stock-callout"><PackageCheck /><div><strong>{available} disponibles</strong><small>Tu stock personal de degustación</small></div></div>
-      <Field label="Panetones utilizados en degustación *"><Input type="number" value={quantity} onChange={value => setQuantity(value.replace(/\D/g, ''))} min={0} max={available} step={1} placeholder="0" testId="input-tasting-usage" /></Field>
-      {Number.isFinite(parsedQuantity) && parsedQuantity > available && <p className="modal-error">La cantidad ingresada supera el stock disponible ({available}).</p>}
-       <p className="modal-hint">{available > 0 ? 'Si no utilizaste degustación, registra 0. La cantidad indicada se descontará al confirmar la salida del cliente.' : 'No tienes stock personal disponible. Registra 0 para confirmar la salida.'}</p>
+function TableSearch({
+  value,
+  onChange,
+  fields,
+  count,
+  total,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  fields: string;
+  count: number;
+  total: number;
+}) {
+  return (
+    <div className="table-search">
+      <label className="table-search-label">
+        Buscar en todos los campos
+        <Input
+          value={value}
+          onChange={onChange}
+          placeholder="Escribe una o varias palabras…"
+        />
+      </label>
+      <div className="table-search-detail">
+        <small>{fields}</small>
+        {value && (
+          <Btn variant="ghost" onClick={() => onChange("")}>
+            Limpiar
+          </Btn>
+        )}
+      </div>
+      <small role="status" aria-live="polite">
+        {count} de {total} registros
+        {count === 0 ? " · No hay coincidencias" : ""}
+      </small>
     </div>
-    <div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!valid} onClick={() => onConfirm(parsedQuantity)} testId="button-confirm-client-exit"><CheckCircle2 /> Confirmar salida</Btn></div>
-  </Modal>;
+  );
 }
 
-function AssignmentModule({ markets, users, clients, assignments, setAssignments, setUsers, notify }: { markets: Market[]; users: AppUser[]; clients: Client[]; assignments: PromoterAssignment[]; setAssignments: (value: PromoterAssignment[]) => void; setUsers: (value: AppUser[]) => void; notify: (message: string, error?: boolean) => void }) {
-  const promoters = users.filter(user => (isZoneManagerRole(user.role)) && user.status === 'ACTIVO');
-  const activeMarkets = markets.filter(market => market.status === 'ACTIVO');
-  const [selectedPromoterId, setSelectedPromoterId] = useState('');
+function AdminCanjesModule({
+  onEdit,
+  canjes,
+  marketMap,
+  users,
+  onCreate,
+  onDelete,
+  onCleanup,
+  canCleanup,
+  notify,
+}: {
+  onEdit: (record: AdminCanje) => void;
+  canjes: AdminCanje[];
+  marketMap: Record<string, Market>;
+  users: AppUser[];
+  onCreate: () => void;
+  onDelete: (canje: AdminCanje) => void;
+  onCleanup: () => void;
+  canCleanup: boolean;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const visibleCanjes = canjes.filter((canje) => {
+    const promoter = canje.promoterId
+      ? users.find((current) => current.id === canje.promoterId)
+      : undefined;
+    return matchesTableSearch(search, [
+      canje.canjeId,
+      canje.status,
+      canje.kind,
+      canje.source === "sale" ? "Venta" : "Abastecimiento",
+      canje.quantity,
+      "unidades",
+      formatDate(canje.date),
+      canje.date,
+      promoter?.name || canje.actorName,
+      promoter?.dni,
+      canje.actorName,
+      marketMap[canje.marketId]?.name || "Mercado no identificado",
+      canjeProductLabel(
+        canje.canjeProductId,
+        canje.canjeProductLabel ||
+          canje.degustacionProductLabel ||
+          canje.sale?.bonus ||
+          (canje.itemId ? redemptionLabel(canje.itemId) : undefined),
+      ),
+    ]);
+  });
+  const exportCanjes = () => {
+    downloadCsv(
+      `canjes-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Fecha", "Origen", "Mercado", "Producto", "Cantidad", "Responsable"],
+      canjes.map((canje) => [
+        formatDate(canje.date),
+        canje.source === "sale" ? "Venta" : "Movimiento",
+        marketMap[canje.marketId]?.name || "Mercado",
+        canjeProductLabel(
+          canje.canjeProductId,
+          canje.canjeProductLabel ||
+            canje.degustacionProductLabel ||
+            canje.sale?.bonus ||
+            (canje.itemId ? redemptionLabel(canje.itemId) : undefined),
+        ),
+        canje.quantity,
+        canje.actorName,
+      ]),
+    );
+    notify("Reporte de canjes descargado");
+  };
+  return (
+    <section className="admin-module">
+      <div className="admin-intro">
+        <div>
+          <span className="eyebrow">GESTIÓN MANUAL</span>
+          <h2>Canjes</h2>
+          <p>
+            Actualiza el stock personal de los promotores y consulta los canjes
+            asociados a ventas.
+          </p>
+        </div>
+        <div className="page-actions">
+          <Btn variant="outline" onClick={exportCanjes}>
+            <Download /> Descargar
+          </Btn>
+          <Btn onClick={onCreate}>
+            <Plus /> Actualizar stock promotor
+          </Btn>
+        </div>
+      </div>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>{canjes.length} canjes registrados</h2>
+            <p>
+              Solo se muestran canjes usados en ventas. Las recargas de stock no
+              aparecen como canjes asignados.
+            </p>
+          </div>
+        </div>
+        <div className="panel-body sales-panel-body">
+          <TableSearch
+            value={search}
+            onChange={setSearch}
+            fields="Código, producto, responsable, DNI, mercado, origen, cantidad, fecha y estado."
+            count={visibleCanjes.length}
+            total={canjes.length}
+          />
+          {visibleCanjes.length ? (
+            <div className="module-table-wrap">
+              <div className="module-table">
+                <div className="module-table-row module-table-header cols-7">
+                  <span>Código</span>
+                  <span>Producto</span>
+                  <span>Responsable</span>
+                  <span>Origen</span>
+                  <span>Cantidad</span>
+                  <span>Fecha</span>
+                  <span>Acciones</span>
+                </div>
+                {visibleCanjes.map((canje) => {
+                  const promoter = canje.promoterId
+                    ? users.find((current) => current.id === canje.promoterId)
+                    : undefined;
+                  return (
+                    <article
+                      className="module-table-row cols-7"
+                      key={`${canje.source}-${canje.canjeId}`}
+                    >
+                      <span>
+                        <b className="module-table-id">{canje.canjeId}</b>
+                        <small>{canje.status}</small>
+                      </span>
+                      <span>
+                        <strong>
+                          {canjeProductLabel(
+                            canje.canjeProductId,
+                            canje.canjeProductLabel ||
+                              canje.degustacionProductLabel ||
+                              canje.sale?.bonus ||
+                              (canje.itemId
+                                ? redemptionLabel(canje.itemId)
+                                : undefined),
+                          )}
+                        </strong>
+                        <small>
+                          {marketMap[canje.marketId]?.name ||
+                            "Mercado no identificado"}
+                        </small>
+                      </span>
+                      <span>
+                        <strong>{promoter?.name || canje.actorName}</strong>
+                        <small>
+                          {promoter?.dni
+                            ? `DNI ${promoter.dni}`
+                            : canje.actorName}
+                        </small>
+                      </span>
+                      <span>
+                        <strong>Venta</strong>
+                        <small>{canje.kind}</small>
+                      </span>
+                      <span>
+                        <strong>{canje.quantity}</strong>
+                        <small>unidades</small>
+                      </span>
+                      <span>
+                        <strong>{formatDate(canje.date)}</strong>
+                      </span>
+                      <span className="module-table-actions">
+                        <Btn variant="outline" onClick={() => onEdit(canje)}>
+                          <Pencil /> Editar
+                        </Btn>
+                        <Btn
+                          variant="danger"
+                          onClick={() => onDelete(canje)}
+                          testId={`button-delete-canje-${canje.canjeId}`}
+                        >
+                          <Trash2 /> Eliminar
+                        </Btn>
+                      </span>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <Empty
+              title={
+                canjes.length ? "No hay coincidencias" : "Aún no hay canjes"
+              }
+              detail="Los canjes aparecerán cuando una venta utilice stock de promotor."
+            />
+          )}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function AdminDegustacionesModule({
+  onEdit,
+  consumos,
+  users,
+  marketMap,
+  onDeleteConsumo,
+}: {
+  onEdit: (record: InventoryMovement) => void;
+  consumos: InventoryMovement[];
+  users: AppUser[];
+  marketMap: Record<string, Market>;
+  onDeleteConsumo: (consumo: InventoryMovement) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const visibleConsumos = consumos.filter((consumo) => {
+    const promoter = users.find(
+      (current) => current.id === (consumo.promoterId || consumo.actorId),
+    );
+    const market = marketMap[consumo.marketId];
+    return matchesTableSearch(search, [
+      consumo.id,
+      promoter?.name || consumo.actorName || "Promotor no identificado",
+      promoter?.dni,
+      promoter?.roleLabel || promoter?.role,
+      market?.name || "Mercado no identificado",
+      market?.district,
+      market?.province,
+      market?.department,
+      consumo.marketId,
+      consumo.quantity,
+      "unidades utilizadas",
+      formatDate(consumo.date),
+      consumo.date,
+      consumo.status,
+    ]);
+  });
+  return (
+    <section className="admin-module">
+      <div className="admin-intro">
+        <div>
+          <span className="eyebrow">CONTROL DE CAMPO</span>
+          <h2>Degustaciones registradas</h2>
+          <p>
+            Consulta quién declaró cada degustación, dónde la realizó y cuántas
+            unidades utilizó.
+          </p>
+        </div>
+      </div>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>{consumos.length} consumos registrados</h2>
+            <p>Ordenados desde el más reciente hasta el más antiguo.</p>
+          </div>
+        </div>
+        <div className="panel-body sales-panel-body">
+          <TableSearch
+            value={search}
+            onChange={setSearch}
+            fields="Código, promotor, DNI, rol, mercado, ubicación, cantidad, fecha y estado."
+            count={visibleConsumos.length}
+            total={consumos.length}
+          />
+          {visibleConsumos.length ? (
+            <div className="module-table-wrap">
+              <div className="module-table">
+                <div className="module-table-row module-table-header cols-7">
+                  <span>Código</span>
+                  <span>Promotor</span>
+                  <span>Mercado</span>
+                  <span>Ubicación</span>
+                  <span>Cantidad</span>
+                  <span>Fecha y estado</span>
+                  <span>Acciones</span>
+                </div>
+                {visibleConsumos.map((consumo) => {
+                  const promoter = users.find(
+                    (current) =>
+                      current.id === (consumo.promoterId || consumo.actorId),
+                  );
+                  const market = marketMap[consumo.marketId];
+                  return (
+                    <article
+                      className="module-table-row cols-7"
+                      key={consumo.id}
+                    >
+                      <span>
+                        <b className="module-table-id">{consumo.id}</b>
+                      </span>
+                      <span>
+                        <strong>
+                          {promoter?.name ||
+                            consumo.actorName ||
+                            "Promotor no identificado"}
+                        </strong>
+                        <small>
+                          DNI {promoter?.dni || "—"} ·{" "}
+                          {promoter?.roleLabel || promoter?.role || "Promotor"}
+                        </small>
+                      </span>
+                      <span>
+                        <strong>
+                          {market?.name || "Mercado no identificado"}
+                        </strong>
+                      </span>
+                      <span>
+                        <strong>{market?.district || "—"}</strong>
+                        <small>
+                          {market
+                            ? `${market.province} · ${market.department}`
+                            : consumo.marketId}
+                        </small>
+                      </span>
+                      <span>
+                        <strong>{consumo.quantity}</strong>
+                        <small>unidades utilizadas</small>
+                      </span>
+                      <span>
+                        <strong>{formatDate(consumo.date)}</strong>
+                        <small>{consumo.status}</small>
+                      </span>
+                      <span className="module-table-actions">
+                        <Btn variant="outline" onClick={() => onEdit(consumo)}>
+                          <Pencil /> Editar
+                        </Btn>
+                        <Btn
+                          variant="danger"
+                          onClick={() => onDeleteConsumo(consumo)}
+                          testId={`button-delete-tasting-consumption-${consumo.id}`}
+                        >
+                          <Trash2 /> Eliminar
+                        </Btn>
+                      </span>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <Empty
+              title={
+                consumos.length
+                  ? "No hay coincidencias"
+                  : "Aún no hay degustaciones utilizadas"
+              }
+              detail="Las cantidades declaradas por los promotores aparecerán aquí."
+            />
+          )}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function TastingExitModal({
+  available,
+  onConfirm,
+  close,
+}: {
+  available: number;
+  onConfirm: (tastingUsed: number) => void;
+  close: () => void;
+}) {
+  const [quantity, setQuantity] = useState("0");
+  const parsedQuantity = quantity === "" ? NaN : Number(quantity);
+  const valid =
+    Number.isInteger(parsedQuantity) &&
+    parsedQuantity >= 0 &&
+    parsedQuantity <= available;
+  return (
+    <Modal
+      title="Registrar salida del cliente"
+      detail="Indica la degustación utilizada durante esta visita antes de confirmar la salida."
+      close={close}
+    >
+      <div className="logout-declaration">
+        <div className="stock-callout">
+          <PackageCheck />
+          <div>
+            <strong>{available} disponibles</strong>
+            <small>Tu stock personal de degustación</small>
+          </div>
+        </div>
+        <Field label="Panetones utilizados en degustación *">
+          <Input
+            type="number"
+            value={quantity}
+            onChange={(value) => setQuantity(value.replace(/\D/g, ""))}
+            min={0}
+            max={available}
+            step={1}
+            placeholder="0"
+            testId="input-tasting-usage"
+          />
+        </Field>
+        {Number.isFinite(parsedQuantity) && parsedQuantity > available && (
+          <p className="modal-error">
+            La cantidad ingresada supera el stock disponible ({available}).
+          </p>
+        )}
+        <p className="modal-hint">
+          {available > 0
+            ? "Si no utilizaste degustación, registra 0. La cantidad indicada se descontará al confirmar la salida del cliente."
+            : "No tienes stock personal disponible. Registra 0 para confirmar la salida."}
+        </p>
+      </div>
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn
+          disabled={!valid}
+          onClick={() => onConfirm(parsedQuantity)}
+          testId="button-confirm-client-exit"
+        >
+          <CheckCircle2 /> Confirmar salida
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function AssignmentModule({
+  markets,
+  users,
+  clients,
+  assignments,
+  setAssignments,
+  setUsers,
+  notify,
+}: {
+  markets: Market[];
+  users: AppUser[];
+  clients: Client[];
+  assignments: PromoterAssignment[];
+  setAssignments: (value: PromoterAssignment[]) => void;
+  setUsers: (value: AppUser[]) => void;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const promoters = users.filter(
+    (user) => isZoneManagerRole(user.role) && user.status === "ACTIVO",
+  );
+  const activeMarkets = markets.filter((market) => market.status === "ACTIVO");
+  const [selectedPromoterId, setSelectedPromoterId] = useState("");
   const [selectedMarketIds, setSelectedMarketIds] = useState<string[]>([]);
   const [selectedClientIds, setSelectedClientIds] = useState<string[]>([]);
-  const [employeeSearch, setEmployeeSearch] = useState('');
-  const [marketSearch, setMarketSearch] = useState('');
-  const selectedPromoter = promoters.find(promoter => promoter.id === selectedPromoterId);
-  const filteredPromoters = promoters.filter(promoter => `${promoter.name} ${promoter.dni}`.toLowerCase().includes(employeeSearch.toLowerCase()));
-  const filteredMarkets = activeMarkets.filter(market => `${market.name} ${market.region || ''} ${market.department} ${market.province} ${market.district}`.toLowerCase().includes(marketSearch.toLowerCase()));
-  const promoterOptions = selectedPromoter && !filteredPromoters.some(promoter => promoter.id === selectedPromoter.id) ? [selectedPromoter, ...filteredPromoters] : filteredPromoters;
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [marketSearch, setMarketSearch] = useState("");
+  const selectedPromoter = promoters.find(
+    (promoter) => promoter.id === selectedPromoterId,
+  );
+  const filteredPromoters = promoters.filter((promoter) =>
+    `${promoter.name} ${promoter.dni}`
+      .toLowerCase()
+      .includes(employeeSearch.toLowerCase()),
+  );
+  const filteredMarkets = activeMarkets.filter((market) =>
+    `${market.name} ${market.region || ""} ${market.department} ${market.province} ${market.district}`
+      .toLowerCase()
+      .includes(marketSearch.toLowerCase()),
+  );
+  const promoterOptions =
+    selectedPromoter &&
+    !filteredPromoters.some((promoter) => promoter.id === selectedPromoter.id)
+      ? [selectedPromoter, ...filteredPromoters]
+      : filteredPromoters;
   const assignmentFor = (promoterId: string) => {
-    const promoter = promoters.find(item => item.id === promoterId);
-    return promoter ? assignments.find(assignment => assignmentMatchesUser(assignment, promoter)) : undefined;
+    const promoter = promoters.find((item) => item.id === promoterId);
+    return promoter
+      ? assignments.find((assignment) =>
+          assignmentMatchesUser(assignment, promoter),
+        )
+      : undefined;
   };
-  const relationshipRows = promoters.flatMap<AssignmentRelationship>(promoter => {
-    const saved = assignmentFor(promoter.id);
-    const marketIds = saved ? saved.marketIds : promoter.marketId ? [promoter.marketId] : [];
-    return marketIds.flatMap<AssignmentRelationship>(marketId => {
-      const marketClients = clients.filter(client => client.marketId === marketId && client.status === 'ACTIVO' && (!saved || saved.clientIds.includes(client.id)));
-      return marketClients.length ? marketClients.map(client => ({ key: `${promoter.id}-${marketId}-${client.id}`, promoter, marketId, client })) : [{ key: `${promoter.id}-${marketId}-empty`, promoter, marketId, client: null }];
-    });
-  });
+  const relationshipRows = promoters.flatMap<AssignmentRelationship>(
+    (promoter) => {
+      const saved = assignmentFor(promoter.id);
+      const marketIds = saved
+        ? saved.marketIds
+        : promoter.marketId
+          ? [promoter.marketId]
+          : [];
+      return marketIds.flatMap<AssignmentRelationship>((marketId) => {
+        const marketClients = clients.filter(
+          (client) =>
+            client.marketId === marketId &&
+            client.status === "ACTIVO" &&
+            (!saved || saved.clientIds.includes(client.id)),
+        );
+        return marketClients.length
+          ? marketClients.map((client) => ({
+              key: `${promoter.id}-${marketId}-${client.id}`,
+              promoter,
+              marketId,
+              client,
+            }))
+          : [
+              {
+                key: `${promoter.id}-${marketId}-empty`,
+                promoter,
+                marketId,
+                client: null,
+              },
+            ];
+      });
+    },
+  );
   const selectPromoter = (promoterId: string) => {
     setSelectedPromoterId(promoterId);
-    const promoter = promoters.find(item => item.id === promoterId);
+    const promoter = promoters.find((item) => item.id === promoterId);
     const saved = assignmentFor(promoterId);
-    const marketIds = saved?.marketIds || (promoter?.marketId ? [promoter.marketId] : []);
-    setSelectedMarketIds(marketIds.filter(marketId => activeMarkets.some(market => market.id === marketId)));
-    setSelectedClientIds(saved?.clientIds || clients.filter(client => marketIds.includes(client.marketId) && client.status === 'ACTIVO').map(client => client.id));
+    const marketIds =
+      saved?.marketIds || (promoter?.marketId ? [promoter.marketId] : []);
+    setSelectedMarketIds(
+      marketIds.filter((marketId) =>
+        activeMarkets.some((market) => market.id === marketId),
+      ),
+    );
+    setSelectedClientIds(
+      saved?.clientIds ||
+        clients
+          .filter(
+            (client) =>
+              marketIds.includes(client.marketId) && client.status === "ACTIVO",
+          )
+          .map((client) => client.id),
+    );
   };
   const toggleMarket = (marketId: string) => {
     const enabled = selectedMarketIds.includes(marketId);
-    setSelectedMarketIds(enabled ? selectedMarketIds.filter(id => id !== marketId) : [...selectedMarketIds, marketId]);
-    if (enabled) setSelectedClientIds(selectedClientIds.filter(clientId => clients.find(client => client.id === clientId)?.marketId !== marketId));
+    setSelectedMarketIds(
+      enabled
+        ? selectedMarketIds.filter((id) => id !== marketId)
+        : [...selectedMarketIds, marketId],
+    );
+    if (enabled)
+      setSelectedClientIds(
+        selectedClientIds.filter(
+          (clientId) =>
+            clients.find((client) => client.id === clientId)?.marketId !==
+            marketId,
+        ),
+      );
   };
-  const toggleClient = (clientId: string) => setSelectedClientIds(selectedClientIds.includes(clientId) ? selectedClientIds.filter(id => id !== clientId) : [...selectedClientIds, clientId]);
+  const toggleClient = (clientId: string) =>
+    setSelectedClientIds(
+      selectedClientIds.includes(clientId)
+        ? selectedClientIds.filter((id) => id !== clientId)
+        : [...selectedClientIds, clientId],
+    );
   const toggleAllClients = (marketId: string) => {
-    const marketClientIds = clients.filter(client => client.marketId === marketId && client.status === 'ACTIVO').map(client => client.id);
-    const allSelected = marketClientIds.length > 0 && marketClientIds.every(clientId => selectedClientIds.includes(clientId));
-    setSelectedClientIds(allSelected ? selectedClientIds.filter(clientId => !marketClientIds.includes(clientId)) : Array.from(new Set([...selectedClientIds, ...marketClientIds])));
+    const marketClientIds = clients
+      .filter(
+        (client) => client.marketId === marketId && client.status === "ACTIVO",
+      )
+      .map((client) => client.id);
+    const allSelected =
+      marketClientIds.length > 0 &&
+      marketClientIds.every((clientId) => selectedClientIds.includes(clientId));
+    setSelectedClientIds(
+      allSelected
+        ? selectedClientIds.filter(
+            (clientId) => !marketClientIds.includes(clientId),
+          )
+        : Array.from(new Set([...selectedClientIds, ...marketClientIds])),
+    );
   };
   const saveAssignment = async () => {
-    if (!selectedPromoterId) { notify('Selecciona un promotor o coordinador para asignar', true); return; }
-    if (!selectedMarketIds.length) { notify('Selecciona al menos un mercado', true); return; }
-    if (!selectedClientIds.length) { notify('Selecciona al menos un cliente', true); return; }
-     const assignment: PromoterAssignment = { promoterId: selectedPromoterId, promoterDni: selectedPromoter?.dni, marketIds: selectedMarketIds, clientIds: selectedClientIds, updatedAt: new Date().toISOString() };
-     const next = [...assignments.filter(item => !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter)), assignment];
+    if (!selectedPromoterId) {
+      notify("Selecciona un promotor o coordinador para asignar", true);
+      return;
+    }
+    if (!selectedMarketIds.length) {
+      notify("Selecciona al menos un mercado", true);
+      return;
+    }
+    if (!selectedClientIds.length) {
+      notify("Selecciona al menos un cliente", true);
+      return;
+    }
+    const assignment: PromoterAssignment = {
+      promoterId: selectedPromoterId,
+      promoterDni: selectedPromoter?.dni,
+      marketIds: selectedMarketIds,
+      clientIds: selectedClientIds,
+      updatedAt: new Date().toISOString(),
+    };
+    const next = [
+      ...assignments.filter(
+        (item) =>
+          !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter),
+      ),
+      assignment,
+    ];
     setAssignments(next);
-     writeStore('bt-promoter-assignments', next);
-    setUsers(users.map(user => user.id === selectedPromoterId ? { ...user, marketId: selectedMarketIds[0] } : user));
-     try {
-        const response = await fetch(APP_STORAGE_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
-       if (!response.ok) throw new Error('No se pudo sincronizar');
-       const payload = await response.json() as { assignments?: PromoterAssignment[] };
-       if (Array.isArray(payload.assignments)) {
-         const merged = mergeAssignments(next, payload.assignments);
-         setAssignments(merged); writeStore('bt-promoter-assignments', merged);
-       }
-        notify(`Asignación sincronizada para ${selectedPromoter?.name || 'el usuario'}`);
-     } catch {
-       notify('Asignación guardada en este dispositivo, pero pendiente de sincronizar. Intenta guardar nuevamente.', true);
-     }
+    writeStore("bt-promoter-assignments", next);
+    setUsers(
+      users.map((user) =>
+        user.id === selectedPromoterId
+          ? { ...user, marketId: selectedMarketIds[0] }
+          : user,
+      ),
+    );
+    try {
+      const response = await fetch(APP_STORAGE_ASSIGNMENTS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignment }),
+      });
+      if (!response.ok) throw new Error("No se pudo sincronizar");
+      const payload = (await response.json()) as {
+        assignments?: PromoterAssignment[];
+      };
+      if (Array.isArray(payload.assignments)) {
+        const merged = mergeAssignments(next, payload.assignments);
+        setAssignments(merged);
+        writeStore("bt-promoter-assignments", merged);
+      }
+      notify(
+        `Asignación sincronizada para ${selectedPromoter?.name || "el usuario"}`,
+      );
+    } catch {
+      notify(
+        "Asignación guardada en este dispositivo, pero pendiente de sincronizar. Intenta guardar nuevamente.",
+        true,
+      );
+    }
   };
   const clearAssignment = async () => {
-     if (!selectedPromoterId) { notify('Selecciona un promotor o coordinador para quitar su asignación', true); return; }
-     const assignment: PromoterAssignment = { promoterId: selectedPromoterId, promoterDni: selectedPromoter?.dni, marketIds: [], clientIds: [], updatedAt: new Date().toISOString() };
-     const next = [...assignments.filter(item => !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter)), assignment];
+    if (!selectedPromoterId) {
+      notify(
+        "Selecciona un promotor o coordinador para quitar su asignación",
+        true,
+      );
+      return;
+    }
+    const assignment: PromoterAssignment = {
+      promoterId: selectedPromoterId,
+      promoterDni: selectedPromoter?.dni,
+      marketIds: [],
+      clientIds: [],
+      updatedAt: new Date().toISOString(),
+    };
+    const next = [
+      ...assignments.filter(
+        (item) =>
+          !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter),
+      ),
+      assignment,
+    ];
     setAssignments(next);
-     writeStore('bt-promoter-assignments', next);
-    setUsers(users.map(user => user.id === selectedPromoterId ? { ...user, marketId: undefined } : user));
-    setSelectedMarketIds([]); setSelectedClientIds([]);
-     try {
-        const response = await fetch(APP_STORAGE_ASSIGNMENTS, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assignment }) });
-       if (!response.ok) throw new Error('No se pudo sincronizar');
-       notify(`Asignación retirada para ${selectedPromoter?.name || 'el promotor'}`);
-     } catch {
-       notify('La asignación se retiró localmente, pero falta sincronizar el cambio.', true);
-     }
+    writeStore("bt-promoter-assignments", next);
+    setUsers(
+      users.map((user) =>
+        user.id === selectedPromoterId
+          ? { ...user, marketId: undefined }
+          : user,
+      ),
+    );
+    setSelectedMarketIds([]);
+    setSelectedClientIds([]);
+    try {
+      const response = await fetch(APP_STORAGE_ASSIGNMENTS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignment }),
+      });
+      if (!response.ok) throw new Error("No se pudo sincronizar");
+      notify(
+        `Asignación retirada para ${selectedPromoter?.name || "el promotor"}`,
+      );
+    } catch {
+      notify(
+        "La asignación se retiró localmente, pero falta sincronizar el cambio.",
+        true,
+      );
+    }
   };
-  return <section className="assignment-module">
-     <div className="assignment-intro"><div><span className="eyebrow">COBERTURA DE CAMPO</span><h2>Asignar mercados y clientes</h2><p>Define exactamente qué puede visitar cada promotor. La asignación se guarda localmente y se sincroniza con la BBDD central.</p></div><div className="assignment-counter"><strong>{assignments.filter(assignment => assignment.marketIds.length > 0).length}</strong><small>promotores con asignación</small></div></div>
-    <div className="assignment-grid">
-      <section className="panel assignment-card"><div className="panel-header"><div><h2>1. Elige un promotor</h2><p>{promoters.length} promotores activos disponibles.</p></div><Users /></div><div className="panel-body"><div className="assignment-search"><label>Buscar empleado</label><div className="search-wrap"><Search /><Input value={employeeSearch} onChange={setEmployeeSearch} placeholder="Nombre o DNI" testId="input-search-employees" /></div></div><SelectField label="Promotor *" value={selectedPromoterId} onChange={selectPromoter} items={promoterOptions.map(promoter => ({ value: promoter.id, label: `${promoter.name} · DNI ${promoter.dni}` }))} placeholder={filteredPromoters.length ? 'Seleccionar promotor' : 'No hay coincidencias'} />{selectedPromoter && <div className="assignment-person"><span className="record-icon"><UserRound /></span><div><strong>{selectedPromoter.name}</strong><small>{selectedPromoter.dni} · {selectedPromoter.role}</small></div><StatusPill status={selectedPromoter.status} /></div>}<div className="assignment-subtitle"><strong>Mercados asignados</strong><small>Puede trabajar en uno o varios mercados.</small></div>{activeMarkets.length ? <details className="assignment-dropdown"><summary><span>Seleccionar mercados</span><strong>{selectedMarketIds.length ? `${selectedMarketIds.length} mercado${selectedMarketIds.length === 1 ? '' : 's'} seleccionado${selectedMarketIds.length === 1 ? '' : 's'}` : 'Ningún mercado seleccionado'}</strong></summary><div className="assignment-dropdown-menu"><div className="assignment-search"><label>Buscar mercado</label><div className="search-wrap"><Search /><Input value={marketSearch} onChange={setMarketSearch} placeholder="Nombre, región o distrito" testId="input-search-markets-assignment" /></div></div><div className="assignment-dropdown-head"><small>{filteredMarkets.length} de {activeMarkets.length} mercados activos</small><button type="button" className="text-button" onClick={() => setSelectedMarketIds(Array.from(new Set([...selectedMarketIds, ...filteredMarkets.map(market => market.id)])))} disabled={!filteredMarkets.length}>Seleccionar resultados</button></div><div className="assignment-check-list">{filteredMarkets.length ? filteredMarkets.map(market => <label className={`assignment-check ${selectedMarketIds.includes(market.id) ? 'selected' : ''}`} key={market.id}><input type="checkbox" checked={selectedMarketIds.includes(market.id)} onChange={() => toggleMarket(market.id)} /><span><strong>{market.name}</strong><small>{market.region || market.department} · {market.district}</small></span></label>) : <p className="assignment-empty">No hay mercados que coincidan con la búsqueda.</p>}</div></div></details> : <Empty title="No hay mercados activos" detail="Actualiza primero la hoja de Mercados." />}</div></section>
-      <section className="panel assignment-card"><div className="panel-header"><div><h2>2. Elige sus clientes</h2><p>{selectedClientIds.length} clientes seleccionados.</p></div><Store /></div><div className="panel-body">{selectedMarketIds.length ? <div className="assignment-client-groups">{selectedMarketIds.map(marketId => { const market = markets.find(item => item.id === marketId); const marketClients = clients.filter(client => client.marketId === marketId && client.status === 'ACTIVO'); const allSelected = marketClients.length > 0 && marketClients.every(client => selectedClientIds.includes(client.id)); return <div className="assignment-client-group" key={marketId}><div className="assignment-group-head"><div><strong>{market?.name || 'Mercado'}</strong><small>{marketClients.length} clientes activos · {marketClients.filter(client => selectedClientIds.includes(client.id)).length} seleccionados</small></div><button type="button" className="text-button" onClick={() => toggleAllClients(marketId)}>{allSelected ? 'Quitar todos' : 'Seleccionar todos'}</button></div>{marketClients.length ? marketClients.map(client => <label className="assignment-client" key={client.id}><input type="checkbox" checked={selectedClientIds.includes(client.id)} onChange={() => toggleClient(client.id)} /><span><strong>{client.name}</strong><small>{client.code}{client.phone ? ` · ${client.phone}` : ''}</small></span></label>) : <p className="assignment-empty">No hay clientes activos en este mercado.</p>}</div>; })}</div> : <Empty title="Selecciona un mercado" detail="Aquí aparecerán sus clientes para asignarlos al promotor." />}</div></section>
-    </div>
-    <div className="assignment-actions"><Btn variant="danger" onClick={clearAssignment} disabled={!selectedPromoterId}>Quitar asignación</Btn><Btn onClick={saveAssignment} disabled={!selectedPromoterId || !selectedMarketIds.length || !selectedClientIds.length} testId="button-save-assignment"><CheckCircle2 /> Guardar asignación</Btn></div>
-    <section className="panel assignment-summary"><div className="panel-header"><div><h2>Resumen de relaciones</h2><p>Tiendas y clientes vinculados a cada promotor por mercado.</p></div><div className="assignment-summary-count"><strong>{relationshipRows.filter(row => row.client).length}</strong><small>relaciones activas</small></div></div><div className="panel-body">{relationshipRows.length ? <div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-4"><span>Promotor</span><span>Mercado</span><span>Tienda / cliente</span><span>Estado</span></div>{relationshipRows.map(row => <div className="module-table-row cols-4" key={row.key}><span><strong>{row.promoter.name}</strong><small>DNI {row.promoter.dni} · {row.promoter.roleLabel || row.promoter.role}</small></span><span><strong>{markets.find(market => market.id === row.marketId)?.name || 'Mercado no identificado'}</strong><small>{markets.find(market => market.id === row.marketId)?.district || '—'}</small></span><span>{row.client ? <><strong>{row.client.name}</strong><small>{row.client.code}{row.client.phone ? ` · ${row.client.phone}` : ''}</small></> : <><strong className="assignment-unassigned">Sin clientes asignados</strong><small>Selecciona clientes para habilitar la visita.</small></>}</span><span><StatusPill status={row.client ? row.client.status : 'INACTIVO'} /></span></div>)}</div></div> : <Empty title="Aún no hay relaciones asignadas" detail="Selecciona un promotor, mercados y clientes para ver el resumen." />}</div></section>
-  </section>;
+  return (
+    <section className="assignment-module">
+      <div className="assignment-intro">
+        <div>
+          <span className="eyebrow">COBERTURA DE CAMPO</span>
+          <h2>Asignar mercados y clientes</h2>
+          <p>
+            Define exactamente qué puede visitar cada promotor. La asignación se
+            guarda localmente y se sincroniza con la BBDD central.
+          </p>
+        </div>
+        <div className="assignment-counter">
+          <strong>
+            {
+              assignments.filter(
+                (assignment) => assignment.marketIds.length > 0,
+              ).length
+            }
+          </strong>
+          <small>promotores con asignación</small>
+        </div>
+      </div>
+      <div className="assignment-grid">
+        <section className="panel assignment-card">
+          <div className="panel-header">
+            <div>
+              <h2>1. Elige un promotor</h2>
+              <p>{promoters.length} promotores activos disponibles.</p>
+            </div>
+            <Users />
+          </div>
+          <div className="panel-body">
+            <div className="assignment-search">
+              <label>Buscar empleado</label>
+              <div className="search-wrap">
+                <Search />
+                <Input
+                  value={employeeSearch}
+                  onChange={setEmployeeSearch}
+                  placeholder="Nombre o DNI"
+                  testId="input-search-employees"
+                />
+              </div>
+            </div>
+            <SelectField
+              label="Promotor *"
+              value={selectedPromoterId}
+              onChange={selectPromoter}
+              items={promoterOptions.map((promoter) => ({
+                value: promoter.id,
+                label: `${promoter.name} · DNI ${promoter.dni}`,
+              }))}
+              placeholder={
+                filteredPromoters.length
+                  ? "Seleccionar promotor"
+                  : "No hay coincidencias"
+              }
+            />
+            {selectedPromoter && (
+              <div className="assignment-person">
+                <span className="record-icon">
+                  <UserRound />
+                </span>
+                <div>
+                  <strong>{selectedPromoter.name}</strong>
+                  <small>
+                    {selectedPromoter.dni} · {selectedPromoter.role}
+                  </small>
+                </div>
+                <StatusPill status={selectedPromoter.status} />
+              </div>
+            )}
+            <div className="assignment-subtitle">
+              <strong>Mercados asignados</strong>
+              <small>Puede trabajar en uno o varios mercados.</small>
+            </div>
+            {activeMarkets.length ? (
+              <details className="assignment-dropdown">
+                <summary>
+                  <span>Seleccionar mercados</span>
+                  <strong>
+                    {selectedMarketIds.length
+                      ? `${selectedMarketIds.length} mercado${selectedMarketIds.length === 1 ? "" : "s"} seleccionado${selectedMarketIds.length === 1 ? "" : "s"}`
+                      : "Ningún mercado seleccionado"}
+                  </strong>
+                </summary>
+                <div className="assignment-dropdown-menu">
+                  <div className="assignment-search">
+                    <label>Buscar mercado</label>
+                    <div className="search-wrap">
+                      <Search />
+                      <Input
+                        value={marketSearch}
+                        onChange={setMarketSearch}
+                        placeholder="Nombre, región o distrito"
+                        testId="input-search-markets-assignment"
+                      />
+                    </div>
+                  </div>
+                  <div className="assignment-dropdown-head">
+                    <small>
+                      {filteredMarkets.length} de {activeMarkets.length}{" "}
+                      mercados activos
+                    </small>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() =>
+                        setSelectedMarketIds(
+                          Array.from(
+                            new Set([
+                              ...selectedMarketIds,
+                              ...filteredMarkets.map((market) => market.id),
+                            ]),
+                          ),
+                        )
+                      }
+                      disabled={!filteredMarkets.length}
+                    >
+                      Seleccionar resultados
+                    </button>
+                  </div>
+                  <div className="assignment-check-list">
+                    {filteredMarkets.length ? (
+                      filteredMarkets.map((market) => (
+                        <label
+                          className={`assignment-check ${selectedMarketIds.includes(market.id) ? "selected" : ""}`}
+                          key={market.id}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedMarketIds.includes(market.id)}
+                            onChange={() => toggleMarket(market.id)}
+                          />
+                          <span>
+                            <strong>{market.name}</strong>
+                            <small>
+                              {market.region || market.department} ·{" "}
+                              {market.district}
+                            </small>
+                          </span>
+                        </label>
+                      ))
+                    ) : (
+                      <p className="assignment-empty">
+                        No hay mercados que coincidan con la búsqueda.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </details>
+            ) : (
+              <Empty
+                title="No hay mercados activos"
+                detail="Actualiza primero la hoja de Mercados."
+              />
+            )}
+          </div>
+        </section>
+        <section className="panel assignment-card">
+          <div className="panel-header">
+            <div>
+              <h2>2. Elige sus clientes</h2>
+              <p>{selectedClientIds.length} clientes seleccionados.</p>
+            </div>
+            <Store />
+          </div>
+          <div className="panel-body">
+            {selectedMarketIds.length ? (
+              <div className="assignment-client-groups">
+                {selectedMarketIds.map((marketId) => {
+                  const market = markets.find((item) => item.id === marketId);
+                  const marketClients = clients.filter(
+                    (client) =>
+                      client.marketId === marketId &&
+                      client.status === "ACTIVO",
+                  );
+                  const allSelected =
+                    marketClients.length > 0 &&
+                    marketClients.every((client) =>
+                      selectedClientIds.includes(client.id),
+                    );
+                  return (
+                    <div className="assignment-client-group" key={marketId}>
+                      <div className="assignment-group-head">
+                        <div>
+                          <strong>{market?.name || "Mercado"}</strong>
+                          <small>
+                            {marketClients.length} clientes activos ·{" "}
+                            {
+                              marketClients.filter((client) =>
+                                selectedClientIds.includes(client.id),
+                              ).length
+                            }{" "}
+                            seleccionados
+                          </small>
+                        </div>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => toggleAllClients(marketId)}
+                        >
+                          {allSelected ? "Quitar todos" : "Seleccionar todos"}
+                        </button>
+                      </div>
+                      {marketClients.length ? (
+                        marketClients.map((client) => (
+                          <label className="assignment-client" key={client.id}>
+                            <input
+                              type="checkbox"
+                              checked={selectedClientIds.includes(client.id)}
+                              onChange={() => toggleClient(client.id)}
+                            />
+                            <span>
+                              <strong>{client.name}</strong>
+                              <small>
+                                {client.code}
+                                {client.phone ? ` · ${client.phone}` : ""}
+                              </small>
+                            </span>
+                          </label>
+                        ))
+                      ) : (
+                        <p className="assignment-empty">
+                          No hay clientes activos en este mercado.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty
+                title="Selecciona un mercado"
+                detail="Aquí aparecerán sus clientes para asignarlos al promotor."
+              />
+            )}
+          </div>
+        </section>
+      </div>
+      <div className="assignment-actions">
+        <Btn
+          variant="danger"
+          onClick={clearAssignment}
+          disabled={!selectedPromoterId}
+        >
+          Quitar asignación
+        </Btn>
+        <Btn
+          onClick={saveAssignment}
+          disabled={
+            !selectedPromoterId ||
+            !selectedMarketIds.length ||
+            !selectedClientIds.length
+          }
+          testId="button-save-assignment"
+        >
+          <CheckCircle2 /> Guardar asignación
+        </Btn>
+      </div>
+      <section className="panel assignment-summary">
+        <div className="panel-header">
+          <div>
+            <h2>Resumen de relaciones</h2>
+            <p>Tiendas y clientes vinculados a cada promotor por mercado.</p>
+          </div>
+          <div className="assignment-summary-count">
+            <strong>
+              {relationshipRows.filter((row) => row.client).length}
+            </strong>
+            <small>relaciones activas</small>
+          </div>
+        </div>
+        <div className="panel-body">
+          {relationshipRows.length ? (
+            <div className="module-table-wrap">
+              <div className="module-table">
+                <div className="module-table-row module-table-header cols-4">
+                  <span>Promotor</span>
+                  <span>Mercado</span>
+                  <span>Tienda / cliente</span>
+                  <span>Estado</span>
+                </div>
+                {relationshipRows.map((row) => (
+                  <div className="module-table-row cols-4" key={row.key}>
+                    <span>
+                      <strong>{row.promoter.name}</strong>
+                      <small>
+                        DNI {row.promoter.dni} ·{" "}
+                        {row.promoter.roleLabel || row.promoter.role}
+                      </small>
+                    </span>
+                    <span>
+                      <strong>
+                        {markets.find((market) => market.id === row.marketId)
+                          ?.name || "Mercado no identificado"}
+                      </strong>
+                      <small>
+                        {markets.find((market) => market.id === row.marketId)
+                          ?.district || "—"}
+                      </small>
+                    </span>
+                    <span>
+                      {row.client ? (
+                        <>
+                          <strong>{row.client.name}</strong>
+                          <small>
+                            {row.client.code}
+                            {row.client.phone ? ` · ${row.client.phone}` : ""}
+                          </small>
+                        </>
+                      ) : (
+                        <>
+                          <strong className="assignment-unassigned">
+                            Sin clientes asignados
+                          </strong>
+                          <small>
+                            Selecciona clientes para habilitar la visita.
+                          </small>
+                        </>
+                      )}
+                    </span>
+                    <span>
+                      <StatusPill
+                        status={row.client ? row.client.status : "INACTIVO"}
+                      />
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <Empty
+              title="Aún no hay relaciones asignadas"
+              detail="Selecciona un promotor, mercados y clientes para ver el resumen."
+            />
+          )}
+        </div>
+      </section>
+    </section>
+  );
 }
 
-function LegacySalesDashboard({ sales, markets, onViewSales, onExport }: { sales: Sale[]; markets: Market[]; onViewSales: () => void; onExport: () => void }) {
-  const rows = useMemo(() => aggregateSalesByRegionCity(sales, markets), [sales, markets]);
-  const totals = rows.reduce((result, row) => ({ soles: result.soles + row.soles, units: result.units + row.units, kilos: result.kilos + row.kilos }), { soles: 0, units: 0, kilos: 0 });
-  const maxSoles = Math.max(...rows.map(row => row.soles), 1);
-  return <div className="sales-dashboard">
-    <div className="dashboard-heading"><div><span className="eyebrow">RESUMEN DE VENTAS</span><h2>Ventas por región y ciudad</h2><p>Consolidado de todos los pedidos registrados en la campaña.</p></div><div className="page-actions"><Btn variant="outline" onClick={onExport}><Download /> Descargar resumen</Btn><Btn onClick={onViewSales}>Ver ventas</Btn></div></div>
-    <div className="dashboard-kpis">
-      <article className="dashboard-kpi"><span className="dashboard-kpi-icon orange"><ShoppingBag /></span><div><small>VENTAS EN SOLES</small><strong>{formatSoles(totals.soles)}</strong><p>{sales.length} pedidos registrados</p></div></article>
-      <article className="dashboard-kpi"><span className="dashboard-kpi-icon blue"><PackageCheck /></span><div><small>VENTAS EN UNIDADES</small><strong>{totals.units.toLocaleString('es-PE')}</strong><p>Unidades vendidas</p></div></article>
-      <article className="dashboard-kpi"><span className="dashboard-kpi-icon green"><MapPin /></span><div><small>VENTA EN KILOS</small><strong>{formatKilos(totals.kilos)}</strong><p>Peso estimado vendido</p></div></article>
-      <article className="dashboard-kpi"><span className="dashboard-kpi-icon navy"><Users /></span><div><small>REGIÓN · CIUDAD</small><strong>{rows.length}</strong><p>Zonas con ventas</p></div></article>
+function LegacySalesDashboard({
+  sales,
+  markets,
+  onViewSales,
+  onExport,
+}: {
+  sales: Sale[];
+  markets: Market[];
+  onViewSales: () => void;
+  onExport: () => void;
+}) {
+  const rows = useMemo(
+    () => aggregateSalesByRegionCity(sales, markets),
+    [sales, markets],
+  );
+  const totals = rows.reduce(
+    (result, row) => ({
+      soles: result.soles + row.soles,
+      units: result.units + row.units,
+      kilos: result.kilos + row.kilos,
+    }),
+    { soles: 0, units: 0, kilos: 0 },
+  );
+  const maxSoles = Math.max(...rows.map((row) => row.soles), 1);
+  return (
+    <div className="sales-dashboard">
+      <div className="dashboard-heading">
+        <div>
+          <span className="eyebrow">RESUMEN DE VENTAS</span>
+          <h2>Ventas por región y ciudad</h2>
+          <p>Consolidado de todos los pedidos registrados en la campaña.</p>
+        </div>
+        <div className="page-actions">
+          <Btn variant="outline" onClick={onExport}>
+            <Download /> Descargar resumen
+          </Btn>
+          <Btn onClick={onViewSales}>Ver ventas</Btn>
+        </div>
+      </div>
+      <div className="dashboard-kpis">
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon orange">
+            <ShoppingBag />
+          </span>
+          <div>
+            <small>VENTAS EN SOLES</small>
+            <strong>{formatSoles(totals.soles)}</strong>
+            <p>{sales.length} pedidos registrados</p>
+          </div>
+        </article>
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon blue">
+            <PackageCheck />
+          </span>
+          <div>
+            <small>VENTAS EN UNIDADES</small>
+            <strong>{totals.units.toLocaleString("es-PE")}</strong>
+            <p>Unidades vendidas</p>
+          </div>
+        </article>
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon green">
+            <MapPin />
+          </span>
+          <div>
+            <small>VENTA EN KILOS</small>
+            <strong>{formatKilos(totals.kilos)}</strong>
+            <p>Peso estimado vendido</p>
+          </div>
+        </article>
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon navy">
+            <Users />
+          </span>
+          <div>
+            <small>REGIÓN · CIUDAD</small>
+            <strong>{rows.length}</strong>
+            <p>Zonas con ventas</p>
+          </div>
+        </article>
+      </div>
+      <div className="sales-dashboard-grid">
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Ventas en soles por zona</h2>
+              <p>Las zonas están ordenadas de mayor a menor facturación.</p>
+            </div>
+          </div>
+          <div className="panel-body">
+            {rows.length ? (
+              <div className="sales-bars">
+                {rows.slice(0, 8).map((row) => (
+                  <div className="sales-bar" key={row.key}>
+                    <div className="sales-bar-label">
+                      <strong>
+                        {row.region} · {row.city}
+                      </strong>
+                      <b>{formatSoles(row.soles)}</b>
+                    </div>
+                    <div className="sales-bar-track">
+                      <span
+                        style={{
+                          width: `${Math.max(4, (row.soles / maxSoles) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <small>
+                      {row.units.toLocaleString("es-PE")} unidades ·{" "}
+                      {formatKilos(row.kilos)} · {row.salesCount} pedido
+                      {row.salesCount === 1 ? "" : "s"}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="Aún no hay ventas"
+                detail="El dashboard se actualizará al registrar el primer pedido."
+              />
+            )}
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Detalle por región · ciudad</h2>
+              <p>Ventas acumuladas por cada zona.</p>
+            </div>
+          </div>
+          <div className="panel-body dashboard-table-wrap">
+            {rows.length ? (
+              <div className="dashboard-table">
+                <div className="dashboard-table-row header">
+                  <span>Región · Ciudad</span>
+                  <span>Ventas (S/)</span>
+                  <span>Unidades</span>
+                  <span>Kilos</span>
+                </div>
+                {rows.map((row) => (
+                  <div className="dashboard-table-row" key={row.key}>
+                    <strong>
+                      {row.region} · {row.city}
+                    </strong>
+                    <b>{formatSoles(row.soles)}</b>
+                    <span>{row.units.toLocaleString("es-PE")}</span>
+                    <span>{formatKilos(row.kilos)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="Sin datos para mostrar"
+                detail="Registra ventas para ver el consolidado."
+              />
+            )}
+          </div>
+        </section>
+      </div>
     </div>
-    <div className="sales-dashboard-grid">
-      <section className="panel"><div className="panel-header"><div><h2>Ventas en soles por zona</h2><p>Las zonas están ordenadas de mayor a menor facturación.</p></div></div><div className="panel-body">{rows.length ? <div className="sales-bars">{rows.slice(0, 8).map(row => <div className="sales-bar" key={row.key}><div className="sales-bar-label"><strong>{row.region} · {row.city}</strong><b>{formatSoles(row.soles)}</b></div><div className="sales-bar-track"><span style={{ width: `${Math.max(4, (row.soles / maxSoles) * 100)}%` }} /></div><small>{row.units.toLocaleString('es-PE')} unidades · {formatKilos(row.kilos)} · {row.salesCount} pedido{row.salesCount === 1 ? '' : 's'}</small></div>)}</div> : <Empty title="Aún no hay ventas" detail="El dashboard se actualizará al registrar el primer pedido." />}</div></section>
-      <section className="panel"><div className="panel-header"><div><h2>Detalle por región · ciudad</h2><p>Ventas acumuladas por cada zona.</p></div></div><div className="panel-body dashboard-table-wrap">{rows.length ? <div className="dashboard-table"><div className="dashboard-table-row header"><span>Región · Ciudad</span><span>Ventas (S/)</span><span>Unidades</span><span>Kilos</span></div>{rows.map(row => <div className="dashboard-table-row" key={row.key}><strong>{row.region} · {row.city}</strong><b>{formatSoles(row.soles)}</b><span>{row.units.toLocaleString('es-PE')}</span><span>{formatKilos(row.kilos)}</span></div>)}</div> : <Empty title="Sin datos para mostrar" detail="Registra ventas para ver el consolidado." />}</div></section>
-    </div>
-  </div>;
+  );
 }
 
-function SalesDashboard({ sales, markets, users, movements, onViewSales, onExport }: { sales: Sale[]; markets: Market[]; users: AppUser[]; movements: InventoryMovement[]; onViewSales: () => void; onExport: () => void }) {
-  const regionRows = useMemo(() => aggregateSalesByRegion(sales, markets), [sales, markets]);
-  const marketRows = useMemo(() => aggregateSalesByMarket(sales, markets), [sales, markets]);
-  const stockRows = useMemo(() => users.filter(user => isPromoterRole(user.role) && user.status === 'ACTIVO').map(promoter => {
-    const { tastingStock, redemptionStock } = calculatedPromoterStock(promoter.id, sales, movements);
-    return { promoter, tastingStock, redemptionStock, lowStock: lowStockLabels(tastingStock, redemptionStock) };
-  }), [users, sales, movements]);
-  const lowStockRows = stockRows.filter(row => row.lowStock.length);
-  const promoterRows = useMemo(() => aggregateSalesByPromoter(sales, users), [sales, users]);
+function SalesDashboard({
+  sales,
+  markets,
+  users,
+  movements,
+  onViewSales,
+  onExport,
+}: {
+  sales: Sale[];
+  markets: Market[];
+  users: AppUser[];
+  movements: InventoryMovement[];
+  onViewSales: () => void;
+  onExport: () => void;
+}) {
+  const regionRows = useMemo(
+    () => aggregateSalesByRegion(sales, markets),
+    [sales, markets],
+  );
+  const marketRows = useMemo(
+    () => aggregateSalesByMarket(sales, markets),
+    [sales, markets],
+  );
+  const stockRows = useMemo(
+    () =>
+      users
+        .filter((user) => isPromoterRole(user.role) && user.status === "ACTIVO")
+        .map((promoter) => {
+          const { tastingStock, redemptionStock } = calculatedPromoterStock(
+            promoter.id,
+            sales,
+            movements,
+          );
+          return {
+            promoter,
+            tastingStock,
+            redemptionStock,
+            lowStock: lowStockLabels(tastingStock, redemptionStock),
+          };
+        }),
+    [users, sales, movements],
+  );
+  const lowStockRows = stockRows.filter((row) => row.lowStock.length);
+  const promoterRows = useMemo(
+    () => aggregateSalesByPromoter(sales, users),
+    [sales, users],
+  );
   const brandRows = useMemo(() => aggregateSalesByBrand(sales), [sales]);
-  const totals = sales.reduce((result, sale) => ({ soles: result.soles + (Number(sale.amountSoles) || 0), units: result.units + (Number(sale.units) || 0), kilos: result.kilos + saleWeightKg(sale) }), { soles: 0, units: 0, kilos: 0 });
-  const maxRegionSoles = Math.max(...regionRows.map(row => row.soles), 1);
+  const totals = sales.reduce(
+    (result, sale) => ({
+      soles: result.soles + (Number(sale.amountSoles) || 0),
+      units: result.units + (Number(sale.units) || 0),
+      kilos: result.kilos + saleWeightKg(sale),
+    }),
+    { soles: 0, units: 0, kilos: 0 },
+  );
+  const maxRegionSoles = Math.max(...regionRows.map((row) => row.soles), 1);
   const totalBrandUnits = brandRows.reduce((sum, row) => sum + row.units, 0);
   let pieOffset = 0;
-  const brandColors = ['#d85b2b', '#2b6d9c', '#3f9670', '#e4a83d', '#7565a8', '#8c9aa9'];
+  const brandColors = [
+    "#d85b2b",
+    "#2b6d9c",
+    "#3f9670",
+    "#e4a83d",
+    "#7565a8",
+    "#8c9aa9",
+  ];
   const pieSegments = brandRows.map((row, index) => {
     const start = pieOffset;
     pieOffset += totalBrandUnits ? (row.units / totalBrandUnits) * 100 : 0;
     return `${brandColors[index % brandColors.length]} ${start}% ${pieOffset}%`;
   });
-  const pieStyle = { background: pieSegments.length ? `conic-gradient(${pieSegments.join(', ')})` : 'conic-gradient(#dfe6ee 0 100%)' };
-  return <div className="sales-dashboard">
-    <div className="dashboard-heading"><div><span className="eyebrow">RESUMEN DE VENTAS</span><h2>Desempeño de la campaña</h2><p>Consolidado de todos los pedidos registrados por región, mercado, promotor y marca.</p></div><div className="page-actions"><Btn variant="outline" onClick={onExport}><Download /> Descargar resumen</Btn><Btn onClick={onViewSales}>Ver ventas</Btn></div></div>
-    <div className="dashboard-kpis">
-      <article className="dashboard-kpi"><span className="dashboard-kpi-icon orange"><ShoppingBag /></span><div><small>VENTA EN SOLES</small><strong>{formatSoles(totals.soles)}</strong><p>{sales.length} pedidos registrados</p></div></article>
-      <article className="dashboard-kpi"><span className="dashboard-kpi-icon blue"><PackageCheck /></span><div><small>VENTA EN UNIDADES</small><strong>{totals.units.toLocaleString('es-PE')}</strong><p>Unidades vendidas</p></div></article>
-      <article className="dashboard-kpi"><span className="dashboard-kpi-icon green"><MapPin /></span><div><small>VENTA EN KILOS</small><strong>{formatKilos(totals.kilos)}</strong><p>Peso estimado vendido</p></div></article>
+  const pieStyle = {
+    background: pieSegments.length
+      ? `conic-gradient(${pieSegments.join(", ")})`
+      : "conic-gradient(#dfe6ee 0 100%)",
+  };
+  return (
+    <div className="sales-dashboard">
+      <div className="dashboard-heading">
+        <div>
+          <span className="eyebrow">RESUMEN DE VENTAS</span>
+          <h2>Desempeño de la campaña</h2>
+          <p>
+            Consolidado de todos los pedidos registrados por región, mercado,
+            promotor y marca.
+          </p>
+        </div>
+        <div className="page-actions">
+          <Btn variant="outline" onClick={onExport}>
+            <Download /> Descargar resumen
+          </Btn>
+          <Btn onClick={onViewSales}>Ver ventas</Btn>
+        </div>
+      </div>
+      <div className="dashboard-kpis">
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon orange">
+            <ShoppingBag />
+          </span>
+          <div>
+            <small>VENTA EN SOLES</small>
+            <strong>{formatSoles(totals.soles)}</strong>
+            <p>{sales.length} pedidos registrados</p>
+          </div>
+        </article>
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon blue">
+            <PackageCheck />
+          </span>
+          <div>
+            <small>VENTA EN UNIDADES</small>
+            <strong>{totals.units.toLocaleString("es-PE")}</strong>
+            <p>Unidades vendidas</p>
+          </div>
+        </article>
+        <article className="dashboard-kpi">
+          <span className="dashboard-kpi-icon green">
+            <MapPin />
+          </span>
+          <div>
+            <small>VENTA EN KILOS</small>
+            <strong>{formatKilos(totals.kilos)}</strong>
+            <p>Peso estimado vendido</p>
+          </div>
+        </article>
+      </div>
+      <div className="summary-sections">
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Resumen por Región</h2>
+              <p>Ventas agrupadas por la región de cada mercado.</p>
+            </div>
+          </div>
+          <div className="panel-body">
+            {regionRows.length ? (
+              <div className="summary-list">
+                {regionRows.map((row, index) => (
+                  <div className="summary-row" key={row.key}>
+                    <div className="summary-row-head">
+                      <strong>
+                        {index + 1}. {row.label}
+                      </strong>
+                      <b>{formatSoles(row.soles)}</b>
+                    </div>
+                    <div className="summary-track">
+                      <span
+                        style={{
+                          width: `${Math.max(4, (row.soles / maxRegionSoles) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <small>
+                      {row.units.toLocaleString("es-PE")} unidades ·{" "}
+                      {formatKilos(row.kilos)} · {row.salesCount} pedido
+                      {row.salesCount === 1 ? "" : "s"}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="Aún no hay ventas"
+                detail="El resumen por región se actualizará con el primer pedido."
+              />
+            )}
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Resumen por Mercados</h2>
+              <p>Resultado acumulado de cada mercado.</p>
+            </div>
+          </div>
+          <div className="panel-body summary-table-wrap">
+            {marketRows.length ? (
+              <div className="summary-table">
+                <div className="summary-table-row header">
+                  <span>Mercado</span>
+                  <span>Ventas (S/)</span>
+                  <span>Unidades</span>
+                  <span>Kilos</span>
+                </div>
+                {marketRows.map((row) => (
+                  <div className="summary-table-row" key={row.key}>
+                    <div>
+                      <strong>{row.label}</strong>
+                      <small>{row.subtitle}</small>
+                    </div>
+                    <b>{formatSoles(row.soles)}</b>
+                    <span>{row.units.toLocaleString("es-PE")}</span>
+                    <span>{formatKilos(row.kilos)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="Sin mercados con ventas"
+                detail="Los mercados aparecerán aquí al registrar pedidos."
+              />
+            )}
+          </div>
+        </section>
+      </div>
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Stock por promotor</h2>
+            <p>
+              Existencias personales independientes de cada promotor. El mercado
+              solo conserva la ubicación histórica de los movimientos.
+            </p>
+          </div>
+        </div>
+        <div className="panel-body summary-table-wrap">
+          {lowStockRows.length > 0 && (
+            <div className="stock-callout stock-callout-alert">
+              <AlertTriangle />
+              <div>
+                <strong>
+                  {lowStockRows.length} promotor
+                  {lowStockRows.length === 1 ? "" : "es"} con stock menor o
+                  igual al 20%
+                </strong>
+                <small>
+                  Recarga stock para:{" "}
+                  {lowStockRows
+                    .map(
+                      (row) =>
+                        `${row.promoter.name} (${row.lowStock.join(", ")})`,
+                    )
+                    .join(" · ")}
+                </small>
+              </div>
+            </div>
+          )}
+          {stockRows.length ? (
+            <div className="stock-reconciliation-table">
+              <div className="stock-reconciliation-row header">
+                <span>Promotor</span>
+                <span>Degustación personal</span>
+                {redemptionItems.map((item) => (
+                  <span key={item.id}>{item.label}</span>
+                ))}
+              </div>
+              {stockRows.map((row) => (
+                <div
+                  className={`stock-reconciliation-row ${row.lowStock.length ? "needs-stock" : ""}`}
+                  key={row.promoter.id}
+                >
+                  <div>
+                    <strong>{row.promoter.name}</strong>
+                    <small>
+                      DNI {row.promoter.dni} ·{" "}
+                      {row.promoter.roleLabel || row.promoter.role}
+                    </small>
+                    {row.lowStock.length > 0 && (
+                      <small className="stock-alert-text">
+                        Recargar: {row.lowStock.join(", ")}
+                      </small>
+                    )}
+                  </div>
+                  <b>
+                    {row.tastingStock}
+                    <small>panetones</small>
+                  </b>
+                  {redemptionItems.map((item) => (
+                    <span
+                      key={item.id}
+                      className={
+                        isBelowStockThreshold(
+                          row.redemptionStock[item.id],
+                          DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM[item.id],
+                        )
+                          ? "stock-low-cell"
+                          : ""
+                      }
+                    >
+                      {row.redemptionStock[item.id]}
+                      <small>unidades</small>
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty
+              title="Sin promotores activos"
+              detail="Los saldos personales aparecerán al crear promotores."
+            />
+          )}
+        </div>
+      </section>
+      <div className="summary-sections">
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Mejores Promotores</h2>
+              <p>Ordenados por venta total en soles.</p>
+            </div>
+          </div>
+          <div className="panel-body">
+            {promoterRows.length ? (
+              <div className="promoter-ranking">
+                {promoterRows.slice(0, 5).map((row, index) => (
+                  <div className="promoter-ranking-row" key={row.key}>
+                    <span className="ranking-position">{index + 1}</span>
+                    <div>
+                      <strong>{row.label}</strong>
+                      <small>
+                        {row.subtitle} · {row.units.toLocaleString("es-PE")}{" "}
+                        unidades · {formatKilos(row.kilos)}
+                      </small>
+                    </div>
+                    <b>{formatSoles(row.soles)}</b>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="Aún no hay promotores con ventas"
+                detail="El ranking aparecerá con los primeros pedidos."
+              />
+            )}
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Detalle por Marcas</h2>
+              <p>Distribución de unidades vendidas por marca.</p>
+            </div>
+          </div>
+          <div className="panel-body brand-pie-layout">
+            {brandRows.length ? (
+              <>
+                <div
+                  className="brand-pie"
+                  style={pieStyle}
+                  aria-label="Distribución de ventas por marca"
+                >
+                  <span>
+                    {totalBrandUnits.toLocaleString("es-PE")}
+                    <small>unidades</small>
+                  </span>
+                </div>
+                <div className="brand-legend">
+                  {brandRows.map((row, index) => (
+                    <div className="brand-legend-row" key={row.key}>
+                      <span
+                        className="brand-swatch"
+                        style={{
+                          background: brandColors[index % brandColors.length],
+                        }}
+                      />
+                      <div>
+                        <strong>{row.label}</strong>
+                        <small>
+                          {row.units.toLocaleString("es-PE")} unidades ·{" "}
+                          {formatSoles(row.soles)}
+                        </small>
+                      </div>
+                      <b>
+                        {totalBrandUnits
+                          ? `${((row.units / totalBrandUnits) * 100).toFixed(1)}%`
+                          : "0%"}
+                      </b>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <Empty
+                title="Sin detalle por marcas"
+                detail="El pastel aparecerá al registrar ventas."
+              />
+            )}
+          </div>
+        </section>
+      </div>
     </div>
-    <div className="summary-sections">
-      <section className="panel"><div className="panel-header"><div><h2>Resumen por Región</h2><p>Ventas agrupadas por la región de cada mercado.</p></div></div><div className="panel-body">{regionRows.length ? <div className="summary-list">{regionRows.map((row, index) => <div className="summary-row" key={row.key}><div className="summary-row-head"><strong>{index + 1}. {row.label}</strong><b>{formatSoles(row.soles)}</b></div><div className="summary-track"><span style={{ width: `${Math.max(4, (row.soles / maxRegionSoles) * 100)}%` }} /></div><small>{row.units.toLocaleString('es-PE')} unidades · {formatKilos(row.kilos)} · {row.salesCount} pedido{row.salesCount === 1 ? '' : 's'}</small></div>)}</div> : <Empty title="Aún no hay ventas" detail="El resumen por región se actualizará con el primer pedido." />}</div></section>
-      <section className="panel"><div className="panel-header"><div><h2>Resumen por Mercados</h2><p>Resultado acumulado de cada mercado.</p></div></div><div className="panel-body summary-table-wrap">{marketRows.length ? <div className="summary-table"><div className="summary-table-row header"><span>Mercado</span><span>Ventas (S/)</span><span>Unidades</span><span>Kilos</span></div>{marketRows.map(row => <div className="summary-table-row" key={row.key}><div><strong>{row.label}</strong><small>{row.subtitle}</small></div><b>{formatSoles(row.soles)}</b><span>{row.units.toLocaleString('es-PE')}</span><span>{formatKilos(row.kilos)}</span></div>)}</div> : <Empty title="Sin mercados con ventas" detail="Los mercados aparecerán aquí al registrar pedidos." />}</div></section>
-    </div>
-      <section className="panel"><div className="panel-header"><div><h2>Stock por promotor</h2><p>Existencias personales independientes de cada promotor. El mercado solo conserva la ubicación histórica de los movimientos.</p></div></div><div className="panel-body summary-table-wrap">{lowStockRows.length > 0 && <div className="stock-callout stock-callout-alert"><AlertTriangle /><div><strong>{lowStockRows.length} promotor{lowStockRows.length === 1 ? '' : 'es'} con stock menor o igual al 20%</strong><small>Recarga stock para: {lowStockRows.map(row => `${row.promoter.name} (${row.lowStock.join(', ')})`).join(' · ')}</small></div></div>}{stockRows.length ? <div className="stock-reconciliation-table"><div className="stock-reconciliation-row header"><span>Promotor</span><span>Degustación personal</span>{redemptionItems.map(item => <span key={item.id}>{item.label}</span>)}</div>{stockRows.map(row => <div className={`stock-reconciliation-row ${row.lowStock.length ? 'needs-stock' : ''}`} key={row.promoter.id}><div><strong>{row.promoter.name}</strong><small>DNI {row.promoter.dni} · {row.promoter.roleLabel || row.promoter.role}</small>{row.lowStock.length > 0 && <small className="stock-alert-text">Recargar: {row.lowStock.join(', ')}</small>}</div><b>{row.tastingStock}<small>panetones</small></b>{redemptionItems.map(item => <span key={item.id} className={isBelowStockThreshold(row.redemptionStock[item.id], DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM[item.id]) ? 'stock-low-cell' : ''}>{row.redemptionStock[item.id]}<small>unidades</small></span>)}</div>)}</div> : <Empty title="Sin promotores activos" detail="Los saldos personales aparecerán al crear promotores." />}</div></section>
-    <div className="summary-sections">
-      <section className="panel"><div className="panel-header"><div><h2>Mejores Promotores</h2><p>Ordenados por venta total en soles.</p></div></div><div className="panel-body">{promoterRows.length ? <div className="promoter-ranking">{promoterRows.slice(0, 5).map((row, index) => <div className="promoter-ranking-row" key={row.key}><span className="ranking-position">{index + 1}</span><div><strong>{row.label}</strong><small>{row.subtitle} · {row.units.toLocaleString('es-PE')} unidades · {formatKilos(row.kilos)}</small></div><b>{formatSoles(row.soles)}</b></div>)}</div> : <Empty title="Aún no hay promotores con ventas" detail="El ranking aparecerá con los primeros pedidos." />}</div></section>
-      <section className="panel"><div className="panel-header"><div><h2>Detalle por Marcas</h2><p>Distribución de unidades vendidas por marca.</p></div></div><div className="panel-body brand-pie-layout">{brandRows.length ? <><div className="brand-pie" style={pieStyle} aria-label="Distribución de ventas por marca"><span>{totalBrandUnits.toLocaleString('es-PE')}<small>unidades</small></span></div><div className="brand-legend">{brandRows.map((row, index) => <div className="brand-legend-row" key={row.key}><span className="brand-swatch" style={{ background: brandColors[index % brandColors.length] }} /><div><strong>{row.label}</strong><small>{row.units.toLocaleString('es-PE')} unidades · {formatSoles(row.soles)}</small></div><b>{totalBrandUnits ? `${((row.units / totalBrandUnits) * 100).toFixed(1)}%` : '0%'}</b></div>)}</div></> : <Empty title="Sin detalle por marcas" detail="El pastel aparecerá al registrar ventas." />}</div></section>
-    </div>
-  </div>;
+  );
 }
 
-function CoordinatorApp({ user, markets, users, clients, sales, inventory, movements, assignments, notify }: { user: AppUser; markets: Market[]; users: AppUser[]; clients: Client[]; sales: Sale[]; inventory: MarketInventory[]; movements: InventoryMovement[]; assignments: PromoterAssignment[]; notify: (message: string, error?: boolean) => void }) {
-  const [tab, setTab] = useState('inicio');
-  const assignment = assignments.find(item => assignmentMatchesUser(item, user));
-  const allowedMarketIds = new Set(assignment?.marketIds?.length ? assignment.marketIds : user.marketId ? [user.marketId] : []);
-  const allowedMarkets = markets.filter(market => allowedMarketIds.has(market.id));
-  const allowedClientIds = new Set(assignment?.clientIds?.length ? assignment.clientIds : clients.filter(client => allowedMarketIds.has(client.marketId)).map(client => client.id));
-  const allowedClients = clients.filter(client => allowedMarketIds.has(client.marketId) && allowedClientIds.has(client.id));
+function CoordinatorApp({
+  user,
+  markets,
+  users,
+  clients,
+  sales,
+  inventory,
+  movements,
+  assignments,
+  notify,
+}: {
+  user: AppUser;
+  markets: Market[];
+  users: AppUser[];
+  clients: Client[];
+  sales: Sale[];
+  inventory: MarketInventory[];
+  movements: InventoryMovement[];
+  assignments: PromoterAssignment[];
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [tab, setTab] = useState("inicio");
+  const assignment = assignments.find((item) =>
+    assignmentMatchesUser(item, user),
+  );
+  const allowedMarketIds = new Set(
+    assignment?.marketIds?.length
+      ? assignment.marketIds
+      : user.marketId
+        ? [user.marketId]
+        : [],
+  );
+  const allowedMarkets = markets.filter((market) =>
+    allowedMarketIds.has(market.id),
+  );
+  const allowedClientIds = new Set(
+    assignment?.clientIds?.length
+      ? assignment.clientIds
+      : clients
+          .filter((client) => allowedMarketIds.has(client.marketId))
+          .map((client) => client.id),
+  );
+  const allowedClients = clients.filter(
+    (client) =>
+      allowedMarketIds.has(client.marketId) && allowedClientIds.has(client.id),
+  );
   const userMarketIds = (current: AppUser) => {
-    const currentAssignment = assignments.find(item => assignmentMatchesUser(item, current));
-    return currentAssignment?.marketIds?.length ? currentAssignment.marketIds : current.marketId ? [current.marketId] : [];
+    const currentAssignment = assignments.find((item) =>
+      assignmentMatchesUser(item, current),
+    );
+    return currentAssignment?.marketIds?.length
+      ? currentAssignment.marketIds
+      : current.marketId
+        ? [current.marketId]
+        : [];
   };
-  const allowedUsers = users.filter(current => !current.sheetArchived && (current.id === user.id || userMarketIds(current).some(marketId => allowedMarketIds.has(marketId))));
-  const allowedSales = sales.filter(sale => allowedMarketIds.has(sale.marketId) && allowedClientIds.has(sale.clientId));
-  const marketMap = Object.fromEntries(allowedMarkets.map(market => [market.id, market]));
-  const allowedTabs = [['inicio', 'Resumen'], ['mercados', 'Mercados'], ['clientes', 'Clientes'], ['usuarios', 'Usuarios'], ['ventas', 'Ventas'], ['inventario', 'Inventario']];
+  const allowedUsers = users.filter(
+    (current) =>
+      !current.sheetArchived &&
+      (current.id === user.id ||
+        userMarketIds(current).some((marketId) =>
+          allowedMarketIds.has(marketId),
+        )),
+  );
+  const allowedSales = sales.filter(
+    (sale) =>
+      allowedMarketIds.has(sale.marketId) &&
+      allowedClientIds.has(sale.clientId),
+  );
+  const marketMap = Object.fromEntries(
+    allowedMarkets.map((market) => [market.id, market]),
+  );
+  const allowedTabs = [
+    ["inicio", "Resumen"],
+    ["mercados", "Mercados"],
+    ["clientes", "Clientes"],
+    ["usuarios", "Usuarios"],
+    ["ventas", "Ventas"],
+    ["inventario", "Inventario"],
+  ];
   const exportSales = () => {
-    downloadCsv(`ventas-coordinador-${new Date().toISOString().slice(0, 10)}.csv`, ['Código', 'Fecha', 'Promotor', 'Rol', 'Cliente', 'Mercado', 'Unidades', 'Total', 'Link foto boleta', 'Link foto canje'], allowedSales.map(sale => {
-      const promoter = users.find(current => current.id === sale.promoterId);
-      return [sale.id, formatDate(sale.date), promoter?.name || 'No identificado', sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role || '', allowedClients.find(client => client.id === sale.clientId)?.name || '', marketMap[sale.marketId]?.name || '', sale.units, formatSoles(sale.amountSoles), photoExportLink(sale.receiptPhoto), photoExportLink(sale.exchangePhoto)];
-    }));
-    notify('Reporte de ventas de las zonas descargado');
+    downloadCsv(
+      `ventas-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        "Código",
+        "Fecha",
+        "Promotor",
+        "Rol",
+        "Cliente",
+        "Mercado",
+        "Unidades",
+        "Total",
+        "Link foto boleta",
+        "Link foto canje",
+      ],
+      allowedSales.map((sale) => {
+        const promoter = users.find(
+          (current) => current.id === sale.promoterId,
+        );
+        return [
+          sale.id,
+          formatDate(sale.date),
+          promoter?.name || "No identificado",
+          sale.promoterRoleLabel ||
+            promoter?.roleLabel ||
+            sale.promoterRole ||
+            promoter?.role ||
+            "",
+          allowedClients.find((client) => client.id === sale.clientId)?.name ||
+            "",
+          marketMap[sale.marketId]?.name || "",
+          sale.units,
+          formatSoles(sale.amountSoles),
+          photoExportLink(sale.receiptPhoto),
+          photoExportLink(sale.exchangePhoto),
+        ];
+      }),
+    );
+    notify("Reporte de ventas de las zonas descargado");
   };
-  return <main className="workspace">
-    <div className="page-head"><div><span className="eyebrow">PANEL DE COORDINACIÓN</span><h1>Hola, {user.name}</h1><p>Consulta la información de tus mercados y clientes asignados.</p></div></div>
-    <nav className="tabs" aria-label="Módulos">{allowedTabs.map(([value, label]) => <button key={value} className={`tab ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)} data-testid={`tab-coordinator-${value}`}>{label}</button>)}</nav>
-    {tab === 'inicio' && <SalesDashboard sales={allowedSales} markets={allowedMarkets} users={allowedUsers} movements={movements} onViewSales={() => setTab('ventas')} onExport={exportSales} />}
-    {tab === 'mercados' && <section className="panel"><div className="panel-header"><div><h2>Mercados asignados</h2><p>Solo se muestran las zonas asociadas a este coordinador.</p></div></div><div className="panel-body"><div className="data-table"><div className="table-row header"><span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span></div>{allowedMarkets.length ? allowedMarkets.map(market => <div className="table-row" key={market.id}><span><strong>{market.name}</strong><small>{market.id}</small></span><span>{market.region || '—'}</span><span>{market.department}</span><span>{market.province}</span><span>{market.district}</span></div>) : <Empty title="Sin mercados asignados" detail="Solicita al Analista una asignación de zonas." />}</div></div></section>}
-    {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes asignados</h2><p>Clientes activos dentro de tus mercados.</p></div></div><div className="panel-body"><div className="record-list">{allowedClients.length ? allowedClients.map(client => <article className="record" key={client.id}><span className="record-icon"><Store /></span><div className="record-main"><strong>{client.name}</strong><small>{client.code} · Categoría: {client.category || 'SIN CATEGORÍA'}</small><em><MapPin /> {marketMap[client.marketId]?.name || 'Mercado'}</em></div><StatusPill status={client.status} /></article>) : <Empty title="Sin clientes asignados" detail="No hay clientes registrados en tus zonas." />}</div></div></section>}
-     {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios de tus zonas</h2><p>Promotores y coordinadores vinculados a los mercados asignados.</p></div></div><div className="panel-body"><div className="record-list">{allowedUsers.length ? allowedUsers.map(current => <article className="record" key={current.id}><span className="record-icon"><UserRound /></span><div className="record-main"><strong>{current.name}</strong><small>DNI {current.dni} · {current.roleLabel || current.role}</small>{isPromoterRole(current.role) && <small>Stock personal: {userTastingStock(current)} degustación · {redemptionStockText(userRedemptionStock(current))}</small>}<em><MapPin /> {marketMap[current.marketId || '']?.name || 'Mercado asignado'}</em></div><StatusPill status={current.status} /></article>) : <Empty title="Sin usuarios asignados" detail="No hay usuarios vinculados a tus zonas." />}</div></div></section>}
-    {tab === 'ventas' && <section className="panel"><div className="panel-header"><div><h2>Ventas de tus zonas</h2><p>Registros asociados a los mercados y clientes asignados.</p></div><Btn variant="outline" onClick={exportSales}><Download /> Descargar</Btn></div><div className="panel-body">{allowedSales.length ? <div className="record-list">{allowedSales.map(sale => { const promoter = users.find(current => current.id === sale.promoterId); return <article className="record" key={sale.id}><span className="record-icon"><ShoppingBag /></span><div className="record-main"><strong>{allowedClients.find(client => client.id === sale.clientId)?.name || 'Cliente'}</strong><small>{promoter?.name || 'Promotor no identificado'} · Rol: {sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role || '—'}</small><em>{marketMap[sale.marketId]?.name || 'Mercado'} · {sale.units} unidades · {formatSoles(sale.amountSoles)} · {formatDate(sale.date)}</em><div className="record-photos"><PhotoThumbnail label="Boleta" src={sale.receiptPhoto} />{sale.exchangePhoto && <PhotoThumbnail label="Canje" src={sale.exchangePhoto} />}</div></div><StatusPill status={sale.status} /></article>; })}</div> : <Empty title="Sin ventas en tus zonas" detail="Los registros aparecerán cuando se registren ventas." />}</div></section>}
-    {tab === 'inventario' && <section className="panel"><div className="panel-header"><div><h2>Stock de promotores</h2><p>Consulta las existencias personales de los promotores de tus zonas.</p></div></div><div className="panel-body">{allowedUsers.filter(current => isPromoterRole(current.role)).length ? <div className="stock-reconciliation-table inventory-stock-table"><div className="stock-reconciliation-row header"><span>Promotor</span><span>Degustación personal</span>{redemptionItems.map(item => <span key={item.id}>{item.label}</span>)}</div>{allowedUsers.filter(current => isPromoterRole(current.role)).map(current => { const stock = calculatedPromoterStock(current.id, sales, movements); return <div className="stock-reconciliation-row" key={current.id}><div><strong>{current.name}</strong><small>DNI {current.dni} · {current.roleLabel || current.role}</small></div><b>{stock.tastingStock}<small>panetones</small></b>{redemptionItems.map(item => <span key={item.id}>{stock.redemptionStock[item.id]}<small>unidades</small></span>)}</div>; })}</div> : <Empty title="Sin promotores asignados" detail="No hay promotores vinculados a tus zonas." />}</div></section>}
-  </main>;
+  return (
+    <main className="workspace">
+      <div className="page-head">
+        <div>
+          <span className="eyebrow">PANEL DE COORDINACIÓN</span>
+          <h1>Hola, {user.name}</h1>
+          <p>Consulta la información de tus mercados y clientes asignados.</p>
+        </div>
+      </div>
+      <nav className="tabs" aria-label="Módulos">
+        {allowedTabs.map(([value, label]) => (
+          <button
+            key={value}
+            className={`tab ${tab === value ? "active" : ""}`}
+            onClick={() => setTab(value)}
+            data-testid={`tab-coordinator-${value}`}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {tab === "inicio" && (
+        <SalesDashboard
+          sales={allowedSales}
+          markets={allowedMarkets}
+          users={allowedUsers}
+          movements={movements}
+          onViewSales={() => setTab("ventas")}
+          onExport={exportSales}
+        />
+      )}
+      {tab === "mercados" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Mercados asignados</h2>
+              <p>Solo se muestran las zonas asociadas a este coordinador.</p>
+            </div>
+          </div>
+          <div className="panel-body">
+            <div className="data-table">
+              <div className="table-row header">
+                <span>Mercado</span>
+                <span>Región</span>
+                <span>Departamento</span>
+                <span>Provincia</span>
+                <span>Distrito</span>
+              </div>
+              {allowedMarkets.length ? (
+                allowedMarkets.map((market) => (
+                  <div className="table-row" key={market.id}>
+                    <span>
+                      <strong>{market.name}</strong>
+                      <small>{market.id}</small>
+                    </span>
+                    <span>{market.region || "—"}</span>
+                    <span>{market.department}</span>
+                    <span>{market.province}</span>
+                    <span>{market.district}</span>
+                  </div>
+                ))
+              ) : (
+                <Empty
+                  title="Sin mercados asignados"
+                  detail="Solicita al Analista una asignación de zonas."
+                />
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+      {tab === "clientes" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Clientes asignados</h2>
+              <p>Clientes activos dentro de tus mercados.</p>
+            </div>
+          </div>
+          <div className="panel-body">
+            <div className="record-list">
+              {allowedClients.length ? (
+                allowedClients.map((client) => (
+                  <article className="record" key={client.id}>
+                    <span className="record-icon">
+                      <Store />
+                    </span>
+                    <div className="record-main">
+                      <strong>{client.name}</strong>
+                      <small>
+                        {client.code} · Categoría:{" "}
+                        {client.category || "SIN CATEGORÍA"}
+                      </small>
+                      <em>
+                        <MapPin />{" "}
+                        {marketMap[client.marketId]?.name || "Mercado"}
+                      </em>
+                    </div>
+                    <StatusPill status={client.status} />
+                  </article>
+                ))
+              ) : (
+                <Empty
+                  title="Sin clientes asignados"
+                  detail="No hay clientes registrados en tus zonas."
+                />
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+      {tab === "usuarios" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Usuarios de tus zonas</h2>
+              <p>
+                Promotores y coordinadores vinculados a los mercados asignados.
+              </p>
+            </div>
+          </div>
+          <div className="panel-body">
+            <div className="record-list">
+              {allowedUsers.length ? (
+                allowedUsers.map((current) => (
+                  <article className="record" key={current.id}>
+                    <span className="record-icon">
+                      <UserRound />
+                    </span>
+                    <div className="record-main">
+                      <strong>{current.name}</strong>
+                      <small>
+                        DNI {current.dni} · {current.roleLabel || current.role}
+                      </small>
+                      {isPromoterRole(current.role) && (
+                        <small>
+                          Stock personal: {userTastingStock(current)}{" "}
+                          degustación ·{" "}
+                          {redemptionStockText(userRedemptionStock(current))}
+                        </small>
+                      )}
+                      <em>
+                        <MapPin />{" "}
+                        {marketMap[current.marketId || ""]?.name ||
+                          "Mercado asignado"}
+                      </em>
+                    </div>
+                    <StatusPill status={current.status} />
+                  </article>
+                ))
+              ) : (
+                <Empty
+                  title="Sin usuarios asignados"
+                  detail="No hay usuarios vinculados a tus zonas."
+                />
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+      {tab === "ventas" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Ventas de tus zonas</h2>
+              <p>Registros asociados a los mercados y clientes asignados.</p>
+            </div>
+            <Btn variant="outline" onClick={exportSales}>
+              <Download /> Descargar
+            </Btn>
+          </div>
+          <div className="panel-body">
+            {allowedSales.length ? (
+              <div className="record-list">
+                {allowedSales.map((sale) => {
+                  const promoter = users.find(
+                    (current) => current.id === sale.promoterId,
+                  );
+                  return (
+                    <article className="record" key={sale.id}>
+                      <span className="record-icon">
+                        <ShoppingBag />
+                      </span>
+                      <div className="record-main">
+                        <strong>
+                          {allowedClients.find(
+                            (client) => client.id === sale.clientId,
+                          )?.name || "Cliente"}
+                        </strong>
+                        <small>
+                          {promoter?.name || "Promotor no identificado"} · Rol:{" "}
+                          {sale.promoterRoleLabel ||
+                            promoter?.roleLabel ||
+                            sale.promoterRole ||
+                            promoter?.role ||
+                            "—"}
+                        </small>
+                        <em>
+                          {marketMap[sale.marketId]?.name || "Mercado"} ·{" "}
+                          {sale.units} unidades ·{" "}
+                          {formatSoles(sale.amountSoles)} ·{" "}
+                          {formatDate(sale.date)}
+                        </em>
+                        <div className="record-photos">
+                          <PhotoThumbnail
+                            label="Boleta"
+                            src={sale.receiptPhoto}
+                          />
+                          {sale.exchangePhoto && (
+                            <PhotoThumbnail
+                              label="Canje"
+                              src={sale.exchangePhoto}
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <StatusPill status={sale.status} />
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty
+                title="Sin ventas en tus zonas"
+                detail="Los registros aparecerán cuando se registren ventas."
+              />
+            )}
+          </div>
+        </section>
+      )}
+      {tab === "inventario" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Stock de promotores</h2>
+              <p>
+                Consulta las existencias personales de los promotores de tus
+                zonas.
+              </p>
+            </div>
+          </div>
+          <div className="panel-body">
+            {allowedUsers.filter((current) => isPromoterRole(current.role))
+              .length ? (
+              <div className="stock-reconciliation-table inventory-stock-table">
+                <div className="stock-reconciliation-row header">
+                  <span>Promotor</span>
+                  <span>Degustación personal</span>
+                  {redemptionItems.map((item) => (
+                    <span key={item.id}>{item.label}</span>
+                  ))}
+                </div>
+                {allowedUsers
+                  .filter((current) => isPromoterRole(current.role))
+                  .map((current) => {
+                    const stock = calculatedPromoterStock(
+                      current.id,
+                      sales,
+                      movements,
+                    );
+                    return (
+                      <div
+                        className="stock-reconciliation-row"
+                        key={current.id}
+                      >
+                        <div>
+                          <strong>{current.name}</strong>
+                          <small>
+                            DNI {current.dni} ·{" "}
+                            {current.roleLabel || current.role}
+                          </small>
+                        </div>
+                        <b>
+                          {stock.tastingStock}
+                          <small>panetones</small>
+                        </b>
+                        {redemptionItems.map((item) => (
+                          <span key={item.id}>
+                            {stock.redemptionStock[item.id]}
+                            <small>unidades</small>
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })}
+              </div>
+            ) : (
+              <Empty
+                title="Sin promotores asignados"
+                detail="No hay promotores vinculados a tus zonas."
+              />
+            )}
+          </div>
+        </section>
+      )}
+    </main>
+  );
 }
 
- function AnalystApp({ user, productPrices, markets, setMarkets, users, setUsers, clients, setClients, sales, setSales, attendance, setAttendance, inventory, movements, assignments, setAssignments, setInventory, setMovements, closures, setClosures, notify }: { user: AppUser; productPrices: ProductPrice[]; markets: Market[]; setMarkets: (value: Market[]) => void; users: AppUser[]; setUsers: (value: AppUser[]) => void; clients: Client[]; setClients: (value: Client[]) => void; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; movements: InventoryMovement[]; assignments: PromoterAssignment[]; setAssignments: (value: PromoterAssignment[]) => void; setInventory: (value: MarketInventory[]) => void; setMovements: (value: InventoryMovement[]) => void; closures: SessionClosure[]; setClosures: (value: SessionClosure[]) => void; notify: (message: string, error?: boolean) => void }) {
-   const [tab, setTab] = useState('inicio'); const [query, setQuery] = useState(''); const [salesQuery, setSalesQuery] = useState(''); const [modal, setModal] = useState<'user' | 'client' | 'market' | 'canje' | null>(null); const [editingSale, setEditingSale] = useState<Sale | null>(null); const [syncing, setSyncing] = useState(false);
-    const [newAdminSale, setNewAdminSale] = useState(false);
-    const [adminPromoterId, setAdminPromoterId] = useState('');
-    const [adminMarketId, setAdminMarketId] = useState('');
-    const [adminClientId, setAdminClientId] = useState('');
-    const [adminSaleDate, setAdminSaleDate] = useState(() => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0,16));
-    const [editingClient, setEditingClient] = useState<Client | null>(null);
-    const [recordEdit, setRecordEdit] = useState<EditableRecord | null>(null);
-    const [marketSearch, setMarketSearch] = useState(''); const [userSearch, setUserSearch] = useState(''); const [attendanceSearch, setAttendanceSearch] = useState('');
-    const adminPromoter = users.find(person => person.id === adminPromoterId);
-    const adminAssignment = adminPromoter ? assignments.find(item => assignmentMatchesUser(item, adminPromoter)) : undefined;
-    const adminMarketIds = adminAssignment?.marketIds || (adminPromoter?.marketId ? [adminPromoter.marketId] : []);
-    const adminMarkets = markets.filter(item => item.status === 'ACTIVO' && adminMarketIds.includes(item.id));
-    const adminClients = clients.filter(item => item.status === 'ACTIVO' && item.marketId === adminMarketId && adminMarketIds.includes(item.marketId) && (adminAssignment ? adminAssignment.clientIds.includes(item.id) : true));
-    const activeMarkets = markets.filter(market => market.status === 'ACTIVO'); const visibleUsers = users.filter(current => !current.sheetArchived); const marketMap = Object.fromEntries(markets.map(market => [market.id, market])); const marketAssignmentSummary = useMemo(() => Object.fromEntries(markets.map(market => [market.id, { clients: clients.filter(client => client.marketId === market.id && client.status === 'ACTIVO').length, promoters: users.filter(current => { if (current.sheetArchived || !isPromoterRole(current.role) || current.status !== 'ACTIVO') return false; const assignment = assignments.find(item => assignmentMatchesUser(item, current)); return assignment ? assignment.marketIds.includes(market.id) : current.marketId === market.id; }).length }])), [markets, clients, users, assignments]); const today = attendanceDay();
-     const orderedAttendance = useMemo(() => sortNewestByDate(attendance), [attendance]);
-     const automaticClosures = useMemo(() => sortNewestByDate(closures.filter(closure => closure.automatic || closure.closureType === 'AUTOMATICO')), [closures]);
-    const marketOptions = activeMarkets.map(market => ({ value: market.id, label: `${market.name} · ${market.region || market.department} · ${market.district}` }));
-    if (user.role === 'COORDINADOR') return <CoordinatorApp user={user} markets={markets} users={users} clients={clients} sales={sales} inventory={inventory} movements={movements} assignments={assignments} notify={notify} />;
-     const exportSales = () => { downloadCsv(`ventas-${today}.csv`, ['Código venta', 'Fecha', 'Promotor', 'Rol promotor', 'Cliente', 'Mercado', 'Región', 'Departamento', 'Provincia', 'Distrito', 'Tipo', 'Marca / producto', 'Unidades por marca', 'Monto unitario por marca (S/)', 'Unidades totales', 'Peso (kg)', 'Ingreso total (S/)', 'Bonificación', 'Número de canjes', 'Comentario', 'Stock degustación del promotor', 'Stock AVENA del promotor', 'Stock SPAGHETTI del promotor', 'Stock BATEA del promotor', 'Stock MANDIL del promotor', 'Estado', 'Link foto boleta', 'Link foto canje'], sales.map(sale => { const breakdown = saleExportBreakdown(sale); const promoter = users.find(user => user.id === sale.promoterId); const stock = userRedemptionStock(promoter || { id: '', dni: '', name: '', role: 'PROMOTOR', status: 'ACTIVO' }); const location = saleMarketLocation(sale, markets); return [sale.id, formatDate(sale.date), promoter?.name || 'PROMOTOR NO IDENTIFICADO', sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role || 'ROL NO IDENTIFICADO', clients.find(client => client.id === sale.clientId)?.name, marketMap[sale.marketId]?.name, location.region, location.department, location.province, location.district, sale.mode, breakdown.map(item => item.label).join(' | '), breakdown.map(item => item.units).join(' | '), breakdown.map(item => item.unitPrice.toFixed(2)).join(' | '), sale.units, (sale.weightKg ?? 0).toFixed(3), (sale.amountSoles ?? 0).toFixed(2), sale.bonus || 'Sin canje', sale.redemptionCount ?? (sale.bonus ? 1 : 0), sale.comment || '', userTastingStock(promoter || { id: '', dni: '', name: '', role: 'PROMOTOR', status: 'ACTIVO' }), stock.AVENA, stock.SPAGHETTI, stock.BATEA, stock.MANDIL, sale.status, photoExportLink(sale.receiptPhoto), photoExportLink(sale.exchangePhoto)]; })); notify('Reporte de ventas con ubicación, stock y links de fotos descargado'); };
-    const exportClients = () => { downloadCsv(`clientes-${today}.csv`, ['Código', 'Cliente', 'Celular', 'Categoría', 'Mercado', 'Distrito', 'Estado'], clients.map(client => [client.code, client.name, client.phone || '', client.category || '', marketMap[client.marketId]?.name, marketMap[client.marketId]?.district, client.status])); notify('Reporte de clientes descargado'); };
-    const exportUsers = () => { downloadCsv(`usuarios-${today}.csv`, ['ID', 'DNI', 'Nombre', 'Rol', 'Mercado', 'Stock degustación', 'Stock AVENA', 'Stock SPAGHETTI', 'Stock BATEA', 'Stock MANDIL', 'Estado'], visibleUsers.map(user => { const computed = isPromoterRole(user.role) ? calculatedPromoterStock(user.id, sales, movements) : { tastingStock: userTastingStock(user), redemptionStock: userRedemptionStock(user) }; const stock = computed.redemptionStock; return [user.id, user.dni, user.name, user.roleLabel || user.role, marketMap[user.marketId || '']?.name || '', computed.tastingStock, stock.AVENA, stock.SPAGHETTI, stock.BATEA, stock.MANDIL, user.status]; })); notify('Reporte de usuarios descargado'); };
-      const exportAttendance = () => { downloadCsv(`marcaciones-${today}.csv`, ['Código', 'Tipo', 'Fecha', 'Promotor', 'Rol promotor', 'Tienda', 'Departamento', 'Foto', 'Estado', 'Link foto marcación'], orderedAttendance.map(item => { const promoter = users.find(user => user.id === item.promoterId); const market = marketMap[item.marketId]; return [item.id, item.type, formatDate(item.date), promoter?.name || 'PROMOTOR NO IDENTIFICADO', item.promoterRoleLabel || promoter?.roleLabel || item.promoterRole || promoter?.role || 'ROL NO IDENTIFICADO', clients.find(client => client.id === item.clientId)?.name, market?.department || 'DEPARTAMENTO NO IDENTIFICADO', item.photo, item.status, photoExportLink(item.photo)]; })); notify('Marcaciones con links de fotos descargadas'); };
-       const exportSummary = () => { const summaryRows = aggregateSalesByRegionCity(sales, markets); downloadCsv(`resumen-${today}.csv`, ['Región', 'Ciudad', 'Ventas (S/)', 'Ventas (unidades)', 'Venta (kg)', 'Pedidos'], summaryRows.map(row => [row.region, row.city, row.soles.toFixed(2), row.units, row.kilos.toFixed(3), row.salesCount])); notify('Resumen por región y ciudad descargado'); };
+function AnalystApp({
+  user,
+  productPrices,
+  setProductPrices,
+  categories,
+  setCategories,
+  markets,
+  setMarkets,
+  users,
+  setUsers,
+  clients,
+  setClients,
+  sales,
+  setSales,
+  attendance,
+  setAttendance,
+  inventory,
+  movements,
+  assignments,
+  setAssignments,
+  setInventory,
+  setMovements,
+  closures,
+  setClosures,
+  notify,
+}: {
+  user: AppUser;
+  productPrices: ProductPrice[];
+  setProductPrices: (value: ProductPrice[]) => void;
+  categories: Category[];
+  setCategories: (value: Category[]) => void;
+  markets: Market[];
+  setMarkets: (value: Market[]) => void;
+  users: AppUser[];
+  setUsers: (value: AppUser[]) => void;
+  clients: Client[];
+  setClients: (value: Client[]) => void;
+  sales: Sale[];
+  setSales: (value: Sale[]) => void;
+  attendance: Attendance[];
+  setAttendance: (value: Attendance[]) => void;
+  inventory: MarketInventory[];
+  movements: InventoryMovement[];
+  assignments: PromoterAssignment[];
+  setAssignments: (value: PromoterAssignment[]) => void;
+  setInventory: (value: MarketInventory[]) => void;
+  setMovements: (value: InventoryMovement[]) => void;
+  closures: SessionClosure[];
+  setClosures: (value: SessionClosure[]) => void;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [tab, setTab] = useState("inicio");
+  const [query, setQuery] = useState("");
+  const [salesQuery, setSalesQuery] = useState("");
+  const [modal, setModal] = useState<
+    "user" | "client" | "market" | "canje" | "product" | "category" | null
+  >(null);
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [newAdminSale, setNewAdminSale] = useState(false);
+  const [adminPromoterId, setAdminPromoterId] = useState("");
+  const [adminMarketId, setAdminMarketId] = useState("");
+  const [adminClientId, setAdminClientId] = useState("");
+  const [adminSaleDate, setAdminSaleDate] = useState(() =>
+    new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 16),
+  );
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [editingProduct, setEditingProduct] = useState<ProductPrice | null>(
+    null,
+  );
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [productSearch, setProductSearch] = useState("");
+  const [categorySearch, setCategorySearch] = useState("");
+  const [recordEdit, setRecordEdit] = useState<EditableRecord | null>(null);
+  const [marketSearch, setMarketSearch] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [attendanceSearch, setAttendanceSearch] = useState("");
+  const adminPromoter = users.find((person) => person.id === adminPromoterId);
+  const adminAssignment = adminPromoter
+    ? assignments.find((item) => assignmentMatchesUser(item, adminPromoter))
+    : undefined;
+  const adminMarketIds =
+    adminAssignment?.marketIds ||
+    (adminPromoter?.marketId ? [adminPromoter.marketId] : []);
+  const adminMarkets = markets.filter(
+    (item) => item.status === "ACTIVO" && adminMarketIds.includes(item.id),
+  );
+  const adminClients = clients.filter(
+    (item) =>
+      item.status === "ACTIVO" &&
+      item.marketId === adminMarketId &&
+      adminMarketIds.includes(item.marketId) &&
+      (adminAssignment ? adminAssignment.clientIds.includes(item.id) : true),
+  );
+  const activeMarkets = markets.filter((market) => market.status === "ACTIVO");
+  const canManageCatalogs = user.role === "ANALISTA" || user.role === "ADMIN";
+  const visibleUsers = users.filter((current) => !current.sheetArchived);
+  const marketMap = Object.fromEntries(
+    markets.map((market) => [market.id, market]),
+  );
+  const marketAssignmentSummary = useMemo(
+    () =>
+      Object.fromEntries(
+        markets.map((market) => [
+          market.id,
+          {
+            clients: clients.filter(
+              (client) =>
+                client.marketId === market.id && client.status === "ACTIVO",
+            ).length,
+            promoters: users.filter((current) => {
+              if (
+                current.sheetArchived ||
+                !isPromoterRole(current.role) ||
+                current.status !== "ACTIVO"
+              )
+                return false;
+              const assignment = assignments.find((item) =>
+                assignmentMatchesUser(item, current),
+              );
+              return assignment
+                ? assignment.marketIds.includes(market.id)
+                : current.marketId === market.id;
+            }).length,
+          },
+        ]),
+      ),
+    [markets, clients, users, assignments],
+  );
+  const today = attendanceDay();
+  const orderedAttendance = useMemo(
+    () => sortNewestByDate(attendance),
+    [attendance],
+  );
+  const automaticClosures = useMemo(
+    () =>
+      sortNewestByDate(
+        closures.filter(
+          (closure) =>
+            closure.automatic || closure.closureType === "AUTOMATICO",
+        ),
+      ),
+    [closures],
+  );
+  const marketOptions = activeMarkets.map((market) => ({
+    value: market.id,
+    label: `${market.name} · ${market.region || market.department} · ${market.district}`,
+  }));
+  if (user.role === "COORDINADOR")
+    return (
+      <CoordinatorApp
+        user={user}
+        markets={markets}
+        users={users}
+        clients={clients}
+        sales={sales}
+        inventory={inventory}
+        movements={movements}
+        assignments={assignments}
+        notify={notify}
+      />
+    );
+  const exportSales = () => {
+    downloadCsv(
+      `ventas-${today}.csv`,
+      [
+        "Código venta",
+        "Fecha",
+        "Promotor",
+        "Rol promotor",
+        "Cliente",
+        "Mercado",
+        "Región",
+        "Departamento",
+        "Provincia",
+        "Distrito",
+        "Tipo",
+        "Marca / producto",
+        "Unidades por marca",
+        "Monto unitario por marca (S/)",
+        "Unidades totales",
+        "Peso (kg)",
+        "Ingreso total (S/)",
+        "Bonificación",
+        "Número de canjes",
+        "Comentario",
+        "Stock degustación del promotor",
+        "Stock AVENA del promotor",
+        "Stock SPAGHETTI del promotor",
+        "Stock BATEA del promotor",
+        "Stock MANDIL del promotor",
+        "Estado",
+        "Link foto boleta",
+        "Link foto canje",
+      ],
+      sales.map((sale) => {
+        const breakdown = saleExportBreakdown(sale);
+        const promoter = users.find((user) => user.id === sale.promoterId);
+        const stock = userRedemptionStock(
+          promoter || {
+            id: "",
+            dni: "",
+            name: "",
+            role: "PROMOTOR",
+            status: "ACTIVO",
+          },
+        );
+        const location = saleMarketLocation(sale, markets);
+        return [
+          sale.id,
+          formatDate(sale.date),
+          promoter?.name || "PROMOTOR NO IDENTIFICADO",
+          sale.promoterRoleLabel ||
+            promoter?.roleLabel ||
+            sale.promoterRole ||
+            promoter?.role ||
+            "ROL NO IDENTIFICADO",
+          clients.find((client) => client.id === sale.clientId)?.name,
+          marketMap[sale.marketId]?.name,
+          location.region,
+          location.department,
+          location.province,
+          location.district,
+          sale.mode,
+          breakdown.map((item) => item.label).join(" | "),
+          breakdown.map((item) => item.units).join(" | "),
+          breakdown.map((item) => item.unitPrice.toFixed(2)).join(" | "),
+          sale.units,
+          (sale.weightKg ?? 0).toFixed(3),
+          (sale.amountSoles ?? 0).toFixed(2),
+          sale.bonus || "Sin canje",
+          sale.redemptionCount ?? (sale.bonus ? 1 : 0),
+          sale.comment || "",
+          userTastingStock(
+            promoter || {
+              id: "",
+              dni: "",
+              name: "",
+              role: "PROMOTOR",
+              status: "ACTIVO",
+            },
+          ),
+          stock.AVENA,
+          stock.SPAGHETTI,
+          stock.BATEA,
+          stock.MANDIL,
+          sale.status,
+          photoExportLink(sale.receiptPhoto),
+          photoExportLink(sale.exchangePhoto),
+        ];
+      }),
+    );
+    notify(
+      "Reporte de ventas con ubicación, stock y links de fotos descargado",
+    );
+  };
+  const exportClients = () => {
+    downloadCsv(
+      `clientes-${today}.csv`,
+      [
+        "Código",
+        "Cliente",
+        "Celular",
+        "Categoría",
+        "Mercado",
+        "Distrito",
+        "Estado",
+      ],
+      clients.map((client) => [
+        client.code,
+        client.name,
+        client.phone || "",
+        client.category || "",
+        marketMap[client.marketId]?.name,
+        marketMap[client.marketId]?.district,
+        client.status,
+      ]),
+    );
+    notify("Reporte de clientes descargado");
+  };
+  const exportUsers = () => {
+    downloadCsv(
+      `usuarios-${today}.csv`,
+      [
+        "ID",
+        "DNI",
+        "Nombre",
+        "Rol",
+        "Mercado",
+        "Stock degustación",
+        "Stock AVENA",
+        "Stock SPAGHETTI",
+        "Stock BATEA",
+        "Stock MANDIL",
+        "Estado",
+      ],
+      visibleUsers.map((user) => {
+        const computed = isPromoterRole(user.role)
+          ? calculatedPromoterStock(user.id, sales, movements)
+          : {
+              tastingStock: userTastingStock(user),
+              redemptionStock: userRedemptionStock(user),
+            };
+        const stock = computed.redemptionStock;
+        return [
+          user.id,
+          user.dni,
+          user.name,
+          user.roleLabel || user.role,
+          marketMap[user.marketId || ""]?.name || "",
+          computed.tastingStock,
+          stock.AVENA,
+          stock.SPAGHETTI,
+          stock.BATEA,
+          stock.MANDIL,
+          user.status,
+        ];
+      }),
+    );
+    notify("Reporte de usuarios descargado");
+  };
+  const exportAttendance = () => {
+    downloadCsv(
+      `marcaciones-${today}.csv`,
+      [
+        "Código",
+        "Tipo",
+        "Fecha",
+        "Promotor",
+        "Rol promotor",
+        "Tienda",
+        "Departamento",
+        "Foto",
+        "Estado",
+        "Link foto marcación",
+      ],
+      orderedAttendance.map((item) => {
+        const promoter = users.find((user) => user.id === item.promoterId);
+        const market = marketMap[item.marketId];
+        return [
+          item.id,
+          item.type,
+          formatDate(item.date),
+          promoter?.name || "PROMOTOR NO IDENTIFICADO",
+          item.promoterRoleLabel ||
+            promoter?.roleLabel ||
+            item.promoterRole ||
+            promoter?.role ||
+            "ROL NO IDENTIFICADO",
+          clients.find((client) => client.id === item.clientId)?.name,
+          market?.department || "DEPARTAMENTO NO IDENTIFICADO",
+          item.photo,
+          item.status,
+          photoExportLink(item.photo),
+        ];
+      }),
+    );
+    notify("Marcaciones con links de fotos descargadas");
+  };
+  const exportSummary = () => {
+    const summaryRows = aggregateSalesByRegionCity(sales, markets);
+    downloadCsv(
+      `resumen-${today}.csv`,
+      [
+        "Región",
+        "Ciudad",
+        "Ventas (S/)",
+        "Ventas (unidades)",
+        "Venta (kg)",
+        "Pedidos",
+      ],
+      summaryRows.map((row) => [
+        row.region,
+        row.city,
+        row.soles.toFixed(2),
+        row.units,
+        row.kilos.toFixed(3),
+        row.salesCount,
+      ]),
+    );
+    notify("Resumen por región y ciudad descargado");
+  };
   const persistImportedSnapshot = async (snapshot: Partial<CloudSnapshot>) => {
-    let revision = localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined;
+    let revision =
+      localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = await fetch(APP_STORAGE_SYNC, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ snapshot, catalogRevision: revision }),
       });
-      const payload = await response.json() as { message?: string; catalogRevision?: string | null };
-      if (!response.ok) throw new Error(payload.message || 'No se pudo guardar la actualización');
+      const payload = (await response.json()) as {
+        message?: string;
+        catalogRevision?: string | null;
+      };
+      if (!response.ok)
+        throw new Error(
+          payload.message || "No se pudo guardar la actualización",
+        );
       if (payload.catalogRevision) {
-        localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
+        localStorage.setItem(
+          CATALOG_REVISION_STORE_KEY,
+          payload.catalogRevision,
+        );
         if (payload.catalogRevision !== revision && attempt === 0) {
           revision = payload.catalogRevision;
           continue;
@@ -1404,602 +6233,4360 @@ function CoordinatorApp({ user, markets, users, clients, sales, inventory, movem
   const importMarkets = async () => {
     setSyncing(true);
     try {
-      const response = await fetch(MARKETS_SHEET); if (!response.ok) throw new Error('No se pudo conectar');
-      const rows = parseCsvText(await response.text()); if (rows.length < 2) throw new Error('La hoja no contiene encabezados y filas de mercados'); const headers = rows[0].map(normalizeCsvHeader); const column = (aliases: string[], fallback: number) => aliases.map(normalizeCsvHeader).map(alias => headers.indexOf(alias)).find(index => index >= 0) ?? fallback; const idIndex = column(['idmerc', 'id', 'codigo'], 0); const departmentIndex = column(['departamento'], 1); const provinceIndex = column(['provincia', 'ciudad'], 2); const districtIndex = column(['distrito'], 3); const nameIndex = column(['nombredelmercado', 'mercado', 'nombre'], 4); const statusIndex = column(['estado', 'status'], 5); const regionIndex = column(['region'], 6); const lookupDepartmentIndex = headers.lastIndexOf('departamento'); const lookupRegionIndex = headers.lastIndexOf('region'); const hasRegionLookup = lookupDepartmentIndex >= 0 && lookupRegionIndex >= 0 && (lookupDepartmentIndex !== departmentIndex || lookupRegionIndex !== regionIndex); const regionLookup = new Map<string, string>(); if (hasRegionLookup) rows.slice(1).forEach(cells => { const lookupDepartment = (cells[lookupDepartmentIndex] || '').trim(); const lookupRegion = (cells[lookupRegionIndex] || '').trim(); if (lookupDepartment && lookupRegion && normalizeCsvHeader(lookupDepartment) !== 'departamento') regionLookup.set(normalizeCsvHeader(lookupDepartment), lookupRegion.toUpperCase()); }); const aliases = new Map<string, string>(); const imported: Market[] = rows.slice(1).map((cells, index) => { const rawName = (cells[nameIndex] || '').trim(); if (!rawName) return null; const sourceId = (cells[idIndex] || `SHEET-${index + 1}`).trim(); const department = (cells[departmentIndex] || 'LIMA').trim().toUpperCase(); const province = (cells[provinceIndex] || 'LIMA').trim().toUpperCase(); const district = (cells[districtIndex] || 'LIMA').trim().toUpperCase(); const name = rawName.toUpperCase(); const rawRegion = (cells[regionIndex] || '').trim(); const normalizedRegion = normalizeCsvHeader(rawRegion); const region = rawRegion && !['activo', 'inactivo', 'region'].includes(normalizedRegion) ? rawRegion.toUpperCase() : regionLookup.get(normalizeCsvHeader(department)) || department; const existing = markets.find(market => market.id === sourceId || market.id === `SHEET-${index + 1}` || (market.name === name && market.district === district && market.province === province)); if (existing && existing.id !== sourceId) aliases.set(existing.id, sourceId); return { id: sourceId, department, region, province, district, name, status: csvStatus(cells[statusIndex] || 'ACTIVO') }; }).filter(Boolean) as Market[];
-      if (!imported.length) throw new Error('La hoja no contiene mercados');
-       const nextMarkets = [...markets];
-       imported.forEach(importedMarket => {
-         const aliasedId = Array.from(aliases.entries()).find(([, sourceId]) => sourceId === importedMarket.id)?.[0];
-         const index = nextMarkets.findIndex(market => market.id === importedMarket.id || market.id === aliasedId);
-         if (index >= 0) nextMarkets[index] = { ...nextMarkets[index], ...importedMarket, id: nextMarkets[index].id };
-         else nextMarkets.push(importedMarket);
-       });
-       setMarkets(nextMarkets); writeStore('bt-markets', nextMarkets); await persistImportedSnapshot({ markets: nextMarkets }); notify(`${imported.length} mercados actualizados y guardados sin borrar información operativa`);
-    } catch { notify('No se pudo importar la hoja. Los mercados locales siguen disponibles.', true); } finally { setSyncing(false); }
+      const response = await fetch(MARKETS_SHEET);
+      if (!response.ok) throw new Error("No se pudo conectar");
+      const rows = parseCsvText(await response.text());
+      if (rows.length < 2)
+        throw new Error("La hoja no contiene encabezados y filas de mercados");
+      const headers = rows[0].map(normalizeCsvHeader);
+      const column = (aliases: string[], fallback: number) =>
+        aliases
+          .map(normalizeCsvHeader)
+          .map((alias) => headers.indexOf(alias))
+          .find((index) => index >= 0) ?? fallback;
+      const idIndex = column(["idmerc", "id", "codigo"], 0);
+      const departmentIndex = column(["departamento"], 1);
+      const provinceIndex = column(["provincia", "ciudad"], 2);
+      const districtIndex = column(["distrito"], 3);
+      const nameIndex = column(["nombredelmercado", "mercado", "nombre"], 4);
+      const statusIndex = column(["estado", "status"], 5);
+      const regionIndex = column(["region"], 6);
+      const lookupDepartmentIndex = headers.lastIndexOf("departamento");
+      const lookupRegionIndex = headers.lastIndexOf("region");
+      const hasRegionLookup =
+        lookupDepartmentIndex >= 0 &&
+        lookupRegionIndex >= 0 &&
+        (lookupDepartmentIndex !== departmentIndex ||
+          lookupRegionIndex !== regionIndex);
+      const regionLookup = new Map<string, string>();
+      if (hasRegionLookup)
+        rows.slice(1).forEach((cells) => {
+          const lookupDepartment = (cells[lookupDepartmentIndex] || "").trim();
+          const lookupRegion = (cells[lookupRegionIndex] || "").trim();
+          if (
+            lookupDepartment &&
+            lookupRegion &&
+            normalizeCsvHeader(lookupDepartment) !== "departamento"
+          )
+            regionLookup.set(
+              normalizeCsvHeader(lookupDepartment),
+              lookupRegion.toUpperCase(),
+            );
+        });
+      const aliases = new Map<string, string>();
+      const imported: Market[] = rows
+        .slice(1)
+        .map((cells, index) => {
+          const rawName = (cells[nameIndex] || "").trim();
+          if (!rawName) return null;
+          const sourceId = (cells[idIndex] || `SHEET-${index + 1}`).trim();
+          const department = (cells[departmentIndex] || "LIMA")
+            .trim()
+            .toUpperCase();
+          const province = (cells[provinceIndex] || "LIMA")
+            .trim()
+            .toUpperCase();
+          const district = (cells[districtIndex] || "LIMA")
+            .trim()
+            .toUpperCase();
+          const name = rawName.toUpperCase();
+          const rawRegion = (cells[regionIndex] || "").trim();
+          const normalizedRegion = normalizeCsvHeader(rawRegion);
+          const region =
+            rawRegion &&
+            !["activo", "inactivo", "region"].includes(normalizedRegion)
+              ? rawRegion.toUpperCase()
+              : regionLookup.get(normalizeCsvHeader(department)) || department;
+          const existing = markets.find(
+            (market) =>
+              market.id === sourceId ||
+              market.id === `SHEET-${index + 1}` ||
+              (market.name === name &&
+                market.district === district &&
+                market.province === province),
+          );
+          if (existing && existing.id !== sourceId)
+            aliases.set(existing.id, sourceId);
+          return {
+            id: sourceId,
+            department,
+            region,
+            province,
+            district,
+            name,
+            status: csvStatus(cells[statusIndex] || "ACTIVO"),
+          };
+        })
+        .filter(Boolean) as Market[];
+      if (!imported.length) throw new Error("La hoja no contiene mercados");
+      const nextMarkets = [...markets];
+      imported.forEach((importedMarket) => {
+        const aliasedId = Array.from(aliases.entries()).find(
+          ([, sourceId]) => sourceId === importedMarket.id,
+        )?.[0];
+        const index = nextMarkets.findIndex(
+          (market) =>
+            market.id === importedMarket.id || market.id === aliasedId,
+        );
+        if (index >= 0)
+          nextMarkets[index] = {
+            ...nextMarkets[index],
+            ...importedMarket,
+            id: nextMarkets[index].id,
+          };
+        else nextMarkets.push(importedMarket);
+      });
+      setMarkets(nextMarkets);
+      writeStore("bt-markets", nextMarkets);
+      await persistImportedSnapshot({ markets: nextMarkets });
+      notify(
+        `${imported.length} mercados actualizados y guardados sin borrar información operativa`,
+      );
+    } catch {
+      notify(
+        "No se pudo importar la hoja. Los mercados locales siguen disponibles.",
+        true,
+      );
+    } finally {
+      setSyncing(false);
+    }
   };
-  const mergeImportedUsers = async (records: Record<string, string>[], authoritative = false) => {
-    const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
+  const mergeImportedUsers = async (
+    records: Record<string, string>[],
+    authoritative = false,
+  ) => {
+    const imported: AppUser[] = [];
+    let skipped = 0;
+    const importId = Date.now();
     records.forEach((record, index) => {
-       const importedUser = importedUserFromRecord(record, index, markets);
-       if (!importedUser) { skipped += 1; return; }
-       imported.push({ ...importedUser, id: csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${importId}-${index + 1}` });
+      const importedUser = importedUserFromRecord(record, index, markets);
+      if (!importedUser) {
+        skipped += 1;
+        return;
+      }
+      imported.push({
+        ...importedUser,
+        id:
+          csvField(record, ["id", "codigo", "idusuario", "idpromotor"]) ||
+          `USR-IMP-${importId}-${index + 1}`,
+      });
     });
-    if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.');
-    if (authoritative && skipped) throw new Error(`La hoja tiene ${skipped} fila${skipped === 1 ? '' : 's'} inválida${skipped === 1 ? '' : 's'}. No se retiró ningún usuario.`);
-    const repeatedDnis = imported.filter((item, index) => imported.findIndex(candidate => candidate.dni === item.dni) !== index).map(item => item.dni);
-    if (repeatedDnis.length) throw new Error('La hoja contiene DNI repetidos. No se actualizó ningún usuario.');
-    const next = [...users]; imported.forEach(item => { const index = next.findIndex(current => current.dni === item.dni); if (index >= 0) { const current = next[index]; next[index] = { ...current, ...item, id: current.id, ...(item.redemptionStock ? { redemptionStock: { ...userRedemptionStock(current), ...item.redemptionStock } } : {}) }; } else next.push(item); }); setUsers(next); writeStore('bt-users', next); await persistImportedSnapshot({ users: next });
-    return `${imported.length} usuarios importados${skipped ? ` · ${skipped} filas omitidas` : ''}`;
+    if (!imported.length)
+      throw new Error(
+        "No se encontraron filas válidas. Revisa DNI, nombre, rol y mercado para promotores.",
+      );
+    if (authoritative && skipped)
+      throw new Error(
+        `La hoja tiene ${skipped} fila${skipped === 1 ? "" : "s"} inválida${skipped === 1 ? "" : "s"}. No se retiró ningún usuario.`,
+      );
+    const repeatedDnis = imported
+      .filter(
+        (item, index) =>
+          imported.findIndex((candidate) => candidate.dni === item.dni) !==
+          index,
+      )
+      .map((item) => item.dni);
+    if (repeatedDnis.length)
+      throw new Error(
+        "La hoja contiene DNI repetidos. No se actualizó ningún usuario.",
+      );
+    const next = [...users];
+    imported.forEach((item) => {
+      const index = next.findIndex((current) => current.dni === item.dni);
+      if (index >= 0) {
+        const current = next[index];
+        next[index] = {
+          ...current,
+          ...item,
+          id: current.id,
+          ...(item.redemptionStock
+            ? {
+                redemptionStock: {
+                  ...userRedemptionStock(current),
+                  ...item.redemptionStock,
+                },
+              }
+            : {}),
+        };
+      } else next.push(item);
+    });
+    setUsers(next);
+    writeStore("bt-users", next);
+    await persistImportedSnapshot({ users: next });
+    return `${imported.length} usuarios importados${skipped ? ` · ${skipped} filas omitidas` : ""}`;
   };
   const importUsers = async (file: File) => {
     setSyncing(true);
-    try { notify(await mergeImportedUsers(parseCsvRecords(await file.text()))); } catch (error) { notify(`No se pudo importar usuarios: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+    try {
+      notify(await mergeImportedUsers(parseCsvRecords(await file.text())));
+    } catch (error) {
+      notify(
+        `No se pudo importar usuarios: ${error instanceof Error ? error.message : "formato inválido"}`,
+        true,
+      );
+    } finally {
+      setSyncing(false);
+    }
   };
   async function importUsersFromSheet() {
     if (!GOOGLE_INTEGRATIONS_ENABLED) return;
     setSyncing(true);
     try {
       const records = await fetchGoogleSheetRecords(USERS_SHEET_ID);
-      const imported: AppUser[] = []; let skipped = 0; const importId = Date.now();
+      const imported: AppUser[] = [];
+      let skipped = 0;
+      const importId = Date.now();
       records.forEach((record, index) => {
         const importedUser = importedUserFromRecord(record, index, markets);
-        if (!importedUser) { skipped += 1; return; }
-        const current = users.find(item => item.dni === importedUser.dni);
+        if (!importedUser) {
+          skipped += 1;
+          return;
+        }
+        const current = users.find((item) => item.dni === importedUser.dni);
         imported.push({
           ...current,
           ...importedUser,
-          id: current?.id || csvField(record, ['id', 'codigo', 'idusuario', 'idpromotor']) || `USR-IMP-${importId}-${index + 1}`,
-          ...(importedUser.redemptionStock ? { redemptionStock: { ...userRedemptionStock(current || importedUser), ...importedUser.redemptionStock } } : {}),
+          id:
+            current?.id ||
+            csvField(record, ["id", "codigo", "idusuario", "idpromotor"]) ||
+            `USR-IMP-${importId}-${index + 1}`,
+          ...(importedUser.redemptionStock
+            ? {
+                redemptionStock: {
+                  ...userRedemptionStock(current || importedUser),
+                  ...importedUser.redemptionStock,
+                },
+              }
+            : {}),
           sheetArchived: false,
         });
       });
-      if (!imported.length) throw new Error('No se encontraron filas válidas. No se retiró ningún usuario.');
-      if (skipped) throw new Error(`La hoja tiene ${skipped} fila${skipped === 1 ? '' : 's'} inválida${skipped === 1 ? '' : 's'}. No se retiró ningún usuario.`);
-      if (new Set(imported.map(item => item.dni)).size !== imported.length) throw new Error('La hoja contiene DNI repetidos. No se retiró ningún usuario.');
+      if (!imported.length)
+        throw new Error(
+          "No se encontraron filas válidas. No se retiró ningún usuario.",
+        );
+      if (skipped)
+        throw new Error(
+          `La hoja tiene ${skipped} fila${skipped === 1 ? "" : "s"} inválida${skipped === 1 ? "" : "s"}. No se retiró ningún usuario.`,
+        );
+      if (new Set(imported.map((item) => item.dni)).size !== imported.length)
+        throw new Error(
+          "La hoja contiene DNI repetidos. No se retiró ningún usuario.",
+        );
       const response = await fetch(`${APP_STORAGE_ADMIN}/users/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(localStorage.getItem(CATALOG_REVISION_STORE_KEY) ? { 'X-Catalog-Revision': localStorage.getItem(CATALOG_REVISION_STORE_KEY) as string } : {}) },
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(localStorage.getItem(CATALOG_REVISION_STORE_KEY)
+            ? {
+                "X-Catalog-Revision": localStorage.getItem(
+                  CATALOG_REVISION_STORE_KEY,
+                ) as string,
+              }
+            : {}),
+        },
         body: JSON.stringify({ users: imported }),
       });
-      const payload = await response.json() as { message?: string; snapshot?: Partial<CloudSnapshot> };
-      if (!response.ok) throw new Error(payload.message || 'No se pudo guardar la actualización');
-      const cloudUsers = Array.isArray(payload.snapshot?.users) ? payload.snapshot.users : imported;
-      const nextUsers = cloudUsers.map(cloudUser => ({ ...cloudUser, password: users.find(item => item.dni === cloudUser.dni)?.password }));
-      setUsers(nextUsers); writeStore('bt-users', nextUsers);
-      const removed = nextUsers.filter(item => item.sheetArchived).length;
-      notify(`${imported.length} usuarios vigentes sincronizados${removed ? ` · ${removed} persona${removed === 1 ? '' : 's'} retirada${removed === 1 ? '' : 's'} de la hoja archivada${removed === 1 ? '' : 's'}` : ''}`);
-    } catch (error) { notify(`No se pudo actualizar usuarios desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
+      const payload = (await response.json()) as {
+        message?: string;
+        snapshot?: Partial<CloudSnapshot>;
+      };
+      if (!response.ok)
+        throw new Error(
+          payload.message || "No se pudo guardar la actualización",
+        );
+      const cloudUsers = Array.isArray(payload.snapshot?.users)
+        ? payload.snapshot.users
+        : imported;
+      const nextUsers = cloudUsers.map((cloudUser) => ({
+        ...cloudUser,
+        password: users.find((item) => item.dni === cloudUser.dni)?.password,
+      }));
+      setUsers(nextUsers);
+      writeStore("bt-users", nextUsers);
+      const removed = nextUsers.filter((item) => item.sheetArchived).length;
+      notify(
+        `${imported.length} usuarios vigentes sincronizados${removed ? ` · ${removed} persona${removed === 1 ? "" : "s"} retirada${removed === 1 ? "" : "s"} de la hoja archivada${removed === 1 ? "" : "s"}` : ""}`,
+      );
+    } catch (error) {
+      notify(
+        `No se pudo actualizar usuarios desde Google Sheets: ${error instanceof Error ? error.message : "hoja no disponible"}`,
+        true,
+      );
+    } finally {
+      setSyncing(false);
+    }
   }
   const mergeImportedClients = async (records: Record<string, string>[]) => {
-    const imported: Client[] = []; let skipped = 0; const importId = Date.now();
+    const imported: Client[] = [];
+    let skipped = 0;
+    const importId = Date.now();
     records.forEach((record, index) => {
-      const name = csvField(record, ['cliente', 'nombre', 'nombrecliente', 'tienda', 'razonsocial', 'nombrecomercial']); const marketId = csvMarketId(csvField(record, ['marketid', 'idmercado', 'idmerc', 'mercado', 'market', 'nombremercado']), markets);
-      if (!name || !marketId) { skipped += 1; return; }
-      const code = csvField(record, ['codigo', 'code', 'codigocliente']) || `CLI-${String(clients.length + index + 1).padStart(6, '0')}`;
-      const rawCategory = csvField(record, ['categoria', 'category']).trim().toUpperCase();
-      imported.push({ id: csvField(record, ['id', 'idcliente']) || code, code, name, phone: csvField(record, ['celular', 'telefono', 'phone', 'movil']) || undefined, category: rawCategory === 'CONFETI' ? 'CONFETI' : 'MIXTO', marketId, status: csvStatus(csvField(record, ['estado', 'status'])) });
+      const name = csvField(record, [
+        "cliente",
+        "nombre",
+        "nombrecliente",
+        "tienda",
+        "razonsocial",
+        "nombrecomercial",
+      ]);
+      const marketId = csvMarketId(
+        csvField(record, [
+          "marketid",
+          "idmercado",
+          "idmerc",
+          "mercado",
+          "market",
+          "nombremercado",
+        ]),
+        markets,
+      );
+      if (!name || !marketId) {
+        skipped += 1;
+        return;
+      }
+      const code =
+        csvField(record, ["codigo", "code", "codigocliente"]) ||
+        `CLI-${String(clients.length + index + 1).padStart(6, "0")}`;
+      const rawCategory = csvField(record, ["categoria", "category"])
+        .trim()
+        .toUpperCase();
+      const category =
+        categories.find(
+          (item) =>
+            item.status === "ACTIVO" &&
+            (item.id === rawCategory || item.name === rawCategory),
+        )?.id || categories.find((item) => item.status === "ACTIVO")?.id;
+      if (!category) {
+        skipped += 1;
+        return;
+      }
+      imported.push({
+        id: csvField(record, ["id", "idcliente"]) || code,
+        code,
+        name,
+        phone:
+          csvField(record, ["celular", "telefono", "phone", "movil"]) ||
+          undefined,
+        category,
+        marketId,
+        status: csvStatus(csvField(record, ["estado", "status"])),
+      });
     });
-    if (!imported.length) throw new Error('No se encontraron filas válidas. Revisa cliente y mercado.');
-    const next = [...clients]; imported.forEach(item => { const index = next.findIndex(current => current.id === item.id || current.code === item.code); if (index >= 0) next[index] = { ...next[index], ...item }; else next.push(item); }); setClients(next); writeStore('bt-clients', next); await persistImportedSnapshot({ clients: next });
-    return `${imported.length} clientes importados${skipped ? ` · ${skipped} filas omitidas` : ''}`;
+    if (!imported.length)
+      throw new Error(
+        "No se encontraron filas válidas. Revisa cliente y mercado.",
+      );
+    const next = [...clients];
+    imported.forEach((item) => {
+      const index = next.findIndex(
+        (current) => current.id === item.id || current.code === item.code,
+      );
+      if (index >= 0) next[index] = { ...next[index], ...item };
+      else next.push(item);
+    });
+    setClients(next);
+    writeStore("bt-clients", next);
+    await persistImportedSnapshot({ clients: next });
+    return `${imported.length} clientes importados${skipped ? ` · ${skipped} filas omitidas` : ""}`;
   };
   const importClients = async (file: File) => {
     setSyncing(true);
-    try { notify(await mergeImportedClients(parseCsvRecords(await file.text()))); } catch (error) { notify(`No se pudo importar clientes: ${error instanceof Error ? error.message : 'formato inválido'}`, true); } finally { setSyncing(false); }
+    try {
+      notify(await mergeImportedClients(parseCsvRecords(await file.text())));
+    } catch (error) {
+      notify(
+        `No se pudo importar clientes: ${error instanceof Error ? error.message : "formato inválido"}`,
+        true,
+      );
+    } finally {
+      setSyncing(false);
+    }
   };
   const importClientsFromSheet = async () => {
     setSyncing(true);
-    try { notify(await mergeImportedClients(await fetchGoogleSheetRecords(CLIENTS_SHEET_ID))); } catch (error) { notify(`No se pudo actualizar clientes desde Google Sheets: ${error instanceof Error ? error.message : 'hoja no disponible'}`, true); } finally { setSyncing(false); }
+    try {
+      notify(
+        await mergeImportedClients(
+          await fetchGoogleSheetRecords(CLIENTS_SHEET_ID),
+        ),
+      );
+    } catch (error) {
+      notify(
+        `No se pudo actualizar clientes desde Google Sheets: ${error instanceof Error ? error.message : "hoja no disponible"}`,
+        true,
+      );
+    } finally {
+      setSyncing(false);
+    }
   };
   const downloadUsersExample = () => {
     const market = activeMarkets[0] || markets[0];
-     downloadCsv('ejemplo-usuarios.csv', ['DNI', 'Nombre', 'Rol', 'Mercado', 'Estado'], [['87654322', 'Promotor Ejemplo', 'PROMOTOR', market?.name || 'MERCADO MODELO', 'ACTIVO']]);
-    notify('Ejemplo de usuarios descargado');
+    downloadCsv(
+      "ejemplo-usuarios.csv",
+      ["DNI", "Nombre", "Rol", "Mercado", "Estado"],
+      [
+        [
+          "87654322",
+          "Promotor Ejemplo",
+          "PROMOTOR",
+          market?.name || "MERCADO MODELO",
+          "ACTIVO",
+        ],
+      ],
+    );
+    notify("Ejemplo de usuarios descargado");
   };
   const downloadClientsExample = () => {
     const market = activeMarkets[0] || markets[0];
-    downloadCsv('ejemplo-clientes.csv', ['Código', 'Cliente', 'Celular', 'Categoría', 'Mercado', 'Estado'], [['CLI-EJEMPLO-001', 'Bodega Ejemplo', '999888777', 'MIXTO', market?.name || 'MERCADO MODELO', 'ACTIVO']]);
-    notify('Ejemplo de clientes descargado');
+    downloadCsv(
+      "ejemplo-clientes.csv",
+      ["Código", "Cliente", "Celular", "Categoría", "Mercado", "Estado"],
+      [
+        [
+          "CLI-EJEMPLO-001",
+          "Bodega Ejemplo",
+          "999888777",
+          "MIXTO",
+          market?.name || "MERCADO MODELO",
+          "ACTIVO",
+        ],
+      ],
+    );
+    notify("Ejemplo de clientes descargado");
   };
-    const applyAdminSnapshot = (snapshot: Partial<CloudSnapshot> | undefined, removedSaleId?: string) => {
-     if (!snapshot) return;
-      if (Array.isArray(snapshot.markets)) { setMarkets(snapshot.markets); writeStore('bt-markets', snapshot.markets); }
-     if (Array.isArray(snapshot.users)) {
-       const localUsers = users;
-        const nextUsers = snapshot.users.map(cloudUser => {
-         const localUser = localUsers.find(item => item.id === cloudUser.id || item.dni === cloudUser.dni);
-         return { ...cloudUser, password: localUser?.password };
-        });
-        setUsers(nextUsers); writeStore('bt-users', nextUsers);
-     }
-      if (Array.isArray(snapshot.clients)) { setClients(snapshot.clients); writeStore('bt-clients', snapshot.clients); }
-       if (Array.isArray(snapshot.sales)) {
-         const nextSales = mergeSales(sales, snapshot.sales).filter(sale => sale.id !== removedSaleId);
-         setSales(nextSales);
-         writeStore('bt-sales', nextSales);
-       }
-      if (Array.isArray(snapshot.attendance)) { setAttendance(snapshot.attendance); writeStore('bt-attendance', snapshot.attendance); }
-      if (Array.isArray(snapshot.inventory)) { const nextInventory = reconcileInventory(snapshot.inventory, Array.isArray(snapshot.movements) ? snapshot.movements : movements); setInventory(nextInventory); writeStore('bt-inventory', nextInventory); }
-      if (Array.isArray(snapshot.movements)) { setMovements(snapshot.movements); writeStore('bt-inventory-movements', snapshot.movements); }
-      if (Array.isArray(snapshot.assignments)) { setAssignments(snapshot.assignments); writeStore('bt-promoter-assignments', snapshot.assignments); }
-      if (Array.isArray(snapshot.closures)) { setClosures(snapshot.closures); writeStore('bt-session-closures', snapshot.closures); }
-   };
-   const adminRequest = async (path: string, init?: RequestInit) => {
-      const headers = new Headers(init?.headers);
-      if(path.startsWith('/records/') || path === '/sales') { headers.set('X-Admin-Dni',user.dni); headers.set('X-Admin-Key',user.password || ''); }
-      const catalogRevision = localStorage.getItem(CATALOG_REVISION_STORE_KEY);
-      if (catalogRevision) headers.set('X-Catalog-Revision', catalogRevision);
-      const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, { ...init, headers });
-     const payload = await response.json() as { message?: string; catalogRevision?: string | null; snapshot?: Partial<CloudSnapshot> };
-     if (!response.ok) throw new Error(payload.message || 'No se pudo guardar el cambio');
-     if (payload.catalogRevision) localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
-      const saleDeletePrefix = '/sales/';
-      const removedSaleId = init?.method === 'DELETE' && path.startsWith(saleDeletePrefix)
+  const applyAdminSnapshot = (
+    snapshot: Partial<CloudSnapshot> | undefined,
+    removedSaleId?: string,
+  ) => {
+    if (!snapshot) return;
+    if (Array.isArray(snapshot.markets)) {
+      setMarkets(snapshot.markets);
+      writeStore("bt-markets", snapshot.markets);
+    }
+    if (Array.isArray(snapshot.users)) {
+      const localUsers = users;
+      const nextUsers = snapshot.users.map((cloudUser) => {
+        const localUser = localUsers.find(
+          (item) => item.id === cloudUser.id || item.dni === cloudUser.dni,
+        );
+        return { ...cloudUser, password: localUser?.password };
+      });
+      setUsers(nextUsers);
+      writeStore("bt-users", nextUsers);
+    }
+    if (Array.isArray(snapshot.clients)) {
+      setClients(snapshot.clients);
+      writeStore("bt-clients", snapshot.clients);
+    }
+    if (Array.isArray(snapshot.sales)) {
+      const nextSales = mergeSales(sales, snapshot.sales).filter(
+        (sale) => sale.id !== removedSaleId,
+      );
+      setSales(nextSales);
+      writeStore("bt-sales", nextSales);
+    }
+    if (Array.isArray(snapshot.attendance)) {
+      setAttendance(snapshot.attendance);
+      writeStore("bt-attendance", snapshot.attendance);
+    }
+    if (Array.isArray(snapshot.inventory)) {
+      const nextInventory = reconcileInventory(
+        snapshot.inventory,
+        Array.isArray(snapshot.movements) ? snapshot.movements : movements,
+      );
+      setInventory(nextInventory);
+      writeStore("bt-inventory", nextInventory);
+    }
+    if (Array.isArray(snapshot.movements)) {
+      setMovements(snapshot.movements);
+      writeStore("bt-inventory-movements", snapshot.movements);
+    }
+    if (Array.isArray(snapshot.assignments)) {
+      setAssignments(snapshot.assignments);
+      writeStore("bt-promoter-assignments", snapshot.assignments);
+    }
+    if (Array.isArray(snapshot.closures)) {
+      setClosures(snapshot.closures);
+      writeStore("bt-session-closures", snapshot.closures);
+    }
+    if (Array.isArray(snapshot.productPrices)) {
+      setProductPrices(snapshot.productPrices);
+      writeStore(PRODUCT_PRICES_STORE_KEY, snapshot.productPrices);
+    }
+    if (Array.isArray(snapshot.categories)) {
+      setCategories(snapshot.categories);
+      writeStore(CATEGORIES_STORE_KEY, snapshot.categories);
+    }
+  };
+  const adminRequest = async (path: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    if (
+      path.startsWith("/records/") ||
+      path === "/sales" ||
+      path.startsWith("/catalog/")
+    ) {
+      headers.set("X-Admin-Dni", user.dni);
+      headers.set("X-Admin-Key", user.password || "");
+    }
+    const catalogRevision = localStorage.getItem(CATALOG_REVISION_STORE_KEY);
+    if (catalogRevision) headers.set("X-Catalog-Revision", catalogRevision);
+    const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, {
+      ...init,
+      headers,
+    });
+    const payload = (await response.json()) as {
+      message?: string;
+      catalogRevision?: string | null;
+      snapshot?: Partial<CloudSnapshot>;
+    };
+    if (!response.ok)
+      throw new Error(payload.message || "No se pudo guardar el cambio");
+    if (payload.catalogRevision)
+      localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
+    const saleDeletePrefix = "/sales/";
+    const removedSaleId =
+      init?.method === "DELETE" && path.startsWith(saleDeletePrefix)
         ? decodeURIComponent(path.slice(saleDeletePrefix.length))
         : undefined;
-      applyAdminSnapshot(payload.snapshot, removedSaleId);
-     return payload;
-   };
-   const editRecord = (collection: EditableRecord['collection'], record: object) => setRecordEdit({collection,record:{...record}});
-   const deleteRecord = async (collection: EditableRecord['collection'], record: {id:string}) => { if(!window.confirm('¿Eliminar definitivamente este registro? Los movimientos de stock se revertirán cuando corresponda.')) return; try { await adminRequest(`/records/${collection}/${encodeURIComponent(record.id)}`,{method:'DELETE'}); notify('Registro eliminado'); } catch(error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar',true); } };
-   const saveRecord = async (record: Record<string,unknown>, photo: File | null) => { if(!recordEdit) return false; try { await adminRequest(`/records/${recordEdit.collection}/${encodeURIComponent(String(record.id))}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({record})}); if(photo && recordEdit.collection === 'attendance') await queuePhotoUpload(photo,'attendance',String(record.id),'photo',{clientName:clients.find(x=>x.id===record.clientId)?.name || 'CLIENTE',marketName:markets.find(x=>x.id===record.marketId)?.name || 'MERCADO',recordType:'MARCACIÓN EDITADA'}); notify('Registro actualizado'); return true; } catch(error) { notify(error instanceof Error ? error.message : 'No se pudo guardar',true); return false; } };
-   const saveUser = (newUser: AppUser) => { const next = [...users, newUser]; setUsers(next); writeStore('bt-users', next); setModal(null); notify('Usuario creado con clave temporal'); };
-   const saveMarket = async (market: Market) => { try { await adminRequest('/markets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market }) }); writeStore('bt-markets', [...markets, market]); setModal(null); notify('Mercado creado como ACTIVO'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo crear el mercado', true); } };
-   const deleteMarket = async (market: Market) => { if (!window.confirm(`¿Eliminar definitivamente ${market.name} y sus clientes asociados?`)) return; try { await adminRequest(`/markets/${encodeURIComponent(market.id)}`, { method: 'DELETE' }); notify(`Mercado eliminado: ${market.name}`); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar el mercado', true); } };
-   const saveClient = async (client: Client) => { try { await adminRequest('/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client }) }); notify('Cliente creado como ACTIVO'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo crear el cliente', true); } };
-   const saveClientEdit = async (client: Client) => { try { await adminRequest('/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client }) }); notify(`Cliente actualizado: ${client.name}`); return true; } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo actualizar el cliente', true); return false; } };
-   const deleteClient = async (client: Client) => { if (!window.confirm(`¿Eliminar definitivamente al cliente ${client.name}?`)) return; try { await adminRequest(`/clients/${encodeURIComponent(client.id)}`, { method: 'DELETE' }); notify(`Cliente eliminado: ${client.name}`); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar el cliente', true); } };
-     const saveSaleEdit = async (sale: Sale, photos: { receipt: File | null; exchange: File | null }) => { try { await adminRequest(`/sales/${encodeURIComponent(sale.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sale }) }); const client = clients.find(item => item.id === sale.clientId); const market = markets.find(item => item.id === sale.marketId); const context = { clientName: client?.name || client?.code || 'CLIENTE NO IDENTIFICADO', marketName: market?.name || 'MERCADO NO IDENTIFICADO', recordType: 'VENTA EDITADA' }; const queueEditedPhoto = (file: File, field: 'receiptPhoto' | 'exchangePhoto') => void queuePhotoUpload(file, 'sale', sale.id, field, context).catch(() => notify('La venta se actualizó, pero no se pudo guardar la foto en la cola del dispositivo.', true)); if (photos.receipt) queueEditedPhoto(photos.receipt, 'receiptPhoto'); if (sale.bonus && photos.exchange) queueEditedPhoto(photos.exchange, 'exchangePhoto'); notify(`Venta actualizada: ${sale.id}. Las fotos nuevas quedaron en cola de subida.`); return true; } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo editar la venta', true); return false; } };
-    const deleteSale = async (sale: Sale) => { if (!window.confirm(`¿Eliminar definitivamente la venta ${sale.id}? Esta acción también devolverá al inventario los canjes asociados y no se puede deshacer.`)) return; try { await adminRequest(`/sales/${encodeURIComponent(sale.id)}`, { method: 'DELETE' }); if (editingSale?.id === sale.id) setEditingSale(null); notify(`Venta eliminada: ${sale.id}`); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar la venta', true); } };
-    const saveCanje = async (canjes: InventoryMovement[]) => { try { await adminRequest('/canjes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ canjes }) }); notify(`${canjes.length} artículo${canjes.length === 1 ? '' : 's'} cargado${canjes.length === 1 ? '' : 's'} en el stock personal`); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo cargar el stock', true); } };
-   const deleteCanje = async (canje: AdminCanje) => { if (!window.confirm('¿Eliminar definitivamente este canje?')) return; try { await adminRequest(`/canjes/${canje.source}/${encodeURIComponent(canje.canjeId)}`, { method: 'DELETE' }); notify('Canje eliminado'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar el canje', true); } };
-      const deleteTastingConsumption = async (consumo: InventoryMovement) => { if (!window.confirm(`¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? '' : 'es'}? La cantidad volverá a su stock personal.`)) return; try { await adminRequest(`/degustaciones/movement/${encodeURIComponent(consumo.id)}`, { method: 'DELETE' }); notify('Degustación eliminada y stock personal restaurado'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo eliminar la degustación', true); } };
-     const cleanupCatalogs = async () => { if (!window.confirm('Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones, cierres y usuarios que no sean ANALISTA. Los precios y el usuario ANALISTA se conservarán. ¿Empezar desde cero?')) return; try { await adminRequest('/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmation: 'LIMPIAR_MERCADOS_CLIENTES_CANJES' }) }); localStorage.removeItem(DEFAULT_STOCK_SEED_KEY); notify('Marcaciones, inventario y demás datos operativos eliminados.'); } catch (error) { notify(error instanceof Error ? error.message : 'No se pudo limpiar la información', true); } };
-  const filteredClients = clients.filter(client => matchesTableSearch(query,[client.id, client.code, client.name, client.category || 'SIN CATEGORÍA', client.phone || 'No registrado', client.status, marketMap[client.marketId]?.name || 'No identificado', marketMap[client.marketId]?.district]));
-  const searchedMarkets = markets.filter(market => matchesTableSearch(marketSearch,[market.id,market.name,market.region,market.department,market.province,market.district,marketAssignmentSummary[market.id]?.clients || 0,marketAssignmentSummary[market.id]?.promoters || 0]));
-  const searchedUsers = visibleUsers.filter(current => matchesTableSearch(userSearch,[current.id,current.dni,current.name,current.roleLabel || current.role,current.status,current.marketId ? marketMap[current.marketId]?.name || 'Mercado asignado' : current.clientId ? 'Cliente vinculado' : 'Sin asignación', isPromoterRole(current.role) ? `${userTastingStock(current)} degustación ${redemptionStockText(userRedemptionStock(current))}` : 'No aplica']));
-  const searchedAttendance = orderedAttendance.filter(item => { const promoter = users.find(x => x.id === item.promoterId); const market = marketMap[item.marketId]; return matchesTableSearch(attendanceSearch,[item.id, clients.find(x => x.id === item.clientId)?.name || 'Tienda',market?.name || 'Mercado no identificado',promoter?.name || 'Promotor no identificado',promoter?.dni,item.promoterRole || promoter?.role || 'Rol no identificado',item.type,market?.department || 'No identificado',market?.district,formatDate(item.date),item.date,item.status,item.photo]); });
-  const searchedClosures = automaticClosures.filter(item => matchesTableSearch(attendanceSearch,[item.id, clients.find(x=>x.id===item.clientId)?.name || 'Cliente no identificado',users.find(x=>x.id===item.promoterId)?.name || 'Promotor no identificado',marketMap[item.marketId]?.name || 'Mercado no identificado',formatDate(item.date),item.date,item.evidence || 'Cierre automático','AUTOMÁTICO']));
-  const filteredAdminSales = sales.filter(sale => {
-    const promoter = users.find(item => item.id === sale.promoterId);
-    const client = clients.find(item => item.id === sale.clientId);
-    const market = marketMap[sale.marketId];
-    const products = saleExportBreakdown(sale).map(item => item.label).join(' ');
-    return `${sale.id} ${client?.name || ''} ${market?.name || ''} ${promoter?.name || ''} ${promoter?.dni || ''} ${products} ${sale.mode} ${sale.bonus || ''}`.toLowerCase().includes(salesQuery.trim().toLowerCase());
+    applyAdminSnapshot(payload.snapshot, removedSaleId);
+    return payload;
+  };
+  const editRecord = (
+    collection: EditableRecord["collection"],
+    record: object,
+  ) => setRecordEdit({ collection, record: { ...record } });
+  const deleteRecord = async (
+    collection: EditableRecord["collection"],
+    record: { id: string },
+  ) => {
+    if (
+      !window.confirm(
+        "¿Eliminar definitivamente este registro? Los movimientos de stock se revertirán cuando corresponda.",
+      )
+    )
+      return;
+    try {
+      await adminRequest(
+        `/records/${collection}/${encodeURIComponent(record.id)}`,
+        { method: "DELETE" },
+      );
+      notify("Registro eliminado");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo eliminar",
+        true,
+      );
+    }
+  };
+  const saveRecord = async (
+    record: Record<string, unknown>,
+    photo: File | null,
+  ) => {
+    if (!recordEdit) return false;
+    try {
+      await adminRequest(
+        `/records/${recordEdit.collection}/${encodeURIComponent(String(record.id))}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ record }),
+        },
+      );
+      if (photo && recordEdit.collection === "attendance")
+        await queuePhotoUpload(
+          photo,
+          "attendance",
+          String(record.id),
+          "photo",
+          {
+            clientName:
+              clients.find((x) => x.id === record.clientId)?.name || "CLIENTE",
+            marketName:
+              markets.find((x) => x.id === record.marketId)?.name || "MERCADO",
+            recordType: "MARCACIÓN EDITADA",
+          },
+        );
+      notify("Registro actualizado");
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo guardar",
+        true,
+      );
+      return false;
+    }
+  };
+  const saveUser = (newUser: AppUser) => {
+    const next = [...users, newUser];
+    setUsers(next);
+    writeStore("bt-users", next);
+    setModal(null);
+    notify("Usuario creado con clave temporal");
+  };
+  const saveMarket = async (market: Market) => {
+    try {
+      await adminRequest("/markets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ market }),
+      });
+      writeStore("bt-markets", [...markets, market]);
+      setModal(null);
+      notify("Mercado creado como ACTIVO");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo crear el mercado",
+        true,
+      );
+    }
+  };
+  const deleteMarket = async (market: Market) => {
+    if (
+      !window.confirm(
+        `¿Eliminar definitivamente ${market.name} y sus clientes asociados?`,
+      )
+    )
+      return;
+    try {
+      await adminRequest(`/markets/${encodeURIComponent(market.id)}`, {
+        method: "DELETE",
+      });
+      notify(`Mercado eliminado: ${market.name}`);
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar el mercado",
+        true,
+      );
+    }
+  };
+  const saveClient = async (client: Client) => {
+    try {
+      await adminRequest("/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client }),
+      });
+      notify("Cliente creado como ACTIVO");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo crear el cliente",
+        true,
+      );
+    }
+  };
+  const saveClientEdit = async (client: Client) => {
+    try {
+      await adminRequest("/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client }),
+      });
+      notify(`Cliente actualizado: ${client.name}`);
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar el cliente",
+        true,
+      );
+      return false;
+    }
+  };
+  const deleteClient = async (client: Client) => {
+    if (!window.confirm(`¿Eliminar definitivamente al cliente ${client.name}?`))
+      return;
+    try {
+      await adminRequest(`/clients/${encodeURIComponent(client.id)}`, {
+        method: "DELETE",
+      });
+      notify(`Cliente eliminado: ${client.name}`);
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar el cliente",
+        true,
+      );
+    }
+  };
+  const saveCatalogProduct = async (record: ProductPrice) => {
+    try {
+      await adminRequest("/catalog/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record }),
+      });
+      notify(`Producto guardado: ${record.product}`);
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo guardar el producto",
+        true,
+      );
+      return false;
+    }
+  };
+  const saveCatalogCategory = async (record: Category) => {
+    try {
+      await adminRequest("/catalog/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ record }),
+      });
+      notify(`Categoría guardada: ${record.name}`);
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo guardar la categoría",
+        true,
+      );
+      return false;
+    }
+  };
+  const deleteCatalogRecord = async (
+    kind: "products" | "categories",
+    id: string,
+    label: string,
+  ) => {
+    if (
+      !window.confirm(
+        `¿Retirar ${label} del catálogo? Los registros históricos conservarán esta información.`,
+      )
+    )
+      return;
+    try {
+      await adminRequest(`/catalog/${kind}/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      notify(`${label} retirado del catálogo`);
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo retirar el registro",
+        true,
+      );
+    }
+  };
+  const saveSaleEdit = async (
+    sale: Sale,
+    photos: { receipt: File | null; exchange: File | null },
+  ) => {
+    try {
+      await adminRequest(`/sales/${encodeURIComponent(sale.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sale }),
+      });
+      const client = clients.find((item) => item.id === sale.clientId);
+      const market = markets.find((item) => item.id === sale.marketId);
+      const context = {
+        clientName: client?.name || client?.code || "CLIENTE NO IDENTIFICADO",
+        marketName: market?.name || "MERCADO NO IDENTIFICADO",
+        recordType: "VENTA EDITADA",
+      };
+      const queueEditedPhoto = (
+        file: File,
+        field: "receiptPhoto" | "exchangePhoto",
+      ) =>
+        void queuePhotoUpload(file, "sale", sale.id, field, context).catch(() =>
+          notify(
+            "La venta se actualizó, pero no se pudo guardar la foto en la cola del dispositivo.",
+            true,
+          ),
+        );
+      if (photos.receipt) queueEditedPhoto(photos.receipt, "receiptPhoto");
+      if (sale.bonus && photos.exchange)
+        queueEditedPhoto(photos.exchange, "exchangePhoto");
+      notify(
+        `Venta actualizada: ${sale.id}. Las fotos nuevas quedaron en cola de subida.`,
+      );
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo editar la venta",
+        true,
+      );
+      return false;
+    }
+  };
+  const deleteSale = async (sale: Sale) => {
+    if (
+      !window.confirm(
+        `¿Eliminar definitivamente la venta ${sale.id}? Esta acción también devolverá al inventario los canjes asociados y no se puede deshacer.`,
+      )
+    )
+      return;
+    try {
+      await adminRequest(`/sales/${encodeURIComponent(sale.id)}`, {
+        method: "DELETE",
+      });
+      if (editingSale?.id === sale.id) setEditingSale(null);
+      notify(`Venta eliminada: ${sale.id}`);
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo eliminar la venta",
+        true,
+      );
+    }
+  };
+  const saveCanje = async (canjes: InventoryMovement[]) => {
+    try {
+      await adminRequest("/canjes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ canjes }),
+      });
+      notify(
+        `${canjes.length} artículo${canjes.length === 1 ? "" : "s"} cargado${canjes.length === 1 ? "" : "s"} en el stock personal`,
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo cargar el stock",
+        true,
+      );
+    }
+  };
+  const deleteCanje = async (canje: AdminCanje) => {
+    if (!window.confirm("¿Eliminar definitivamente este canje?")) return;
+    try {
+      await adminRequest(
+        `/canjes/${canje.source}/${encodeURIComponent(canje.canjeId)}`,
+        { method: "DELETE" },
+      );
+      notify("Canje eliminado");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo eliminar el canje",
+        true,
+      );
+    }
+  };
+  const deleteTastingConsumption = async (consumo: InventoryMovement) => {
+    if (
+      !window.confirm(
+        `¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? "" : "es"}? La cantidad volverá a su stock personal.`,
+      )
+    )
+      return;
+    try {
+      await adminRequest(
+        `/degustaciones/movement/${encodeURIComponent(consumo.id)}`,
+        { method: "DELETE" },
+      );
+      notify("Degustación eliminada y stock personal restaurado");
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar la degustación",
+        true,
+      );
+    }
+  };
+  const cleanupCatalogs = async () => {
+    if (
+      !window.confirm(
+        "Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones, cierres y usuarios que no sean ANALISTA. Los precios y el usuario ANALISTA se conservarán. ¿Empezar desde cero?",
+      )
+    )
+      return;
+    try {
+      await adminRequest("/cleanup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirmation: "LIMPIAR_MERCADOS_CLIENTES_CANJES",
+        }),
+      });
+      localStorage.removeItem(DEFAULT_STOCK_SEED_KEY);
+      notify("Marcaciones, inventario y demás datos operativos eliminados.");
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo limpiar la información",
+        true,
+      );
+    }
+  };
+  const filteredClients = clients.filter((client) =>
+    matchesTableSearch(query, [
+      client.id,
+      client.code,
+      client.name,
+      client.category || "SIN CATEGORÍA",
+      client.phone || "No registrado",
+      client.status,
+      marketMap[client.marketId]?.name || "No identificado",
+      marketMap[client.marketId]?.district,
+    ]),
+  );
+  const catalogProducts = normalizedProducts(productPrices);
+  const filteredProducts = catalogProducts.filter((product) =>
+    matchesTableSearch(productSearch, [
+      product.sku,
+      product.product,
+      product.brand,
+      product.weightKg,
+      product.unitPrice,
+      product.saleModes?.join(" "),
+      product.status,
+    ]),
+  );
+  const filteredCategories = categories.filter((category) =>
+    matchesTableSearch(categorySearch, [
+      category.id,
+      category.name,
+      category.status,
+      clients.filter((client) => client.category === category.id).length,
+    ]),
+  );
+  const searchedMarkets = markets.filter((market) =>
+    matchesTableSearch(marketSearch, [
+      market.id,
+      market.name,
+      market.region,
+      market.department,
+      market.province,
+      market.district,
+      marketAssignmentSummary[market.id]?.clients || 0,
+      marketAssignmentSummary[market.id]?.promoters || 0,
+    ]),
+  );
+  const searchedUsers = visibleUsers.filter((current) =>
+    matchesTableSearch(userSearch, [
+      current.id,
+      current.dni,
+      current.name,
+      current.roleLabel || current.role,
+      current.status,
+      current.marketId
+        ? marketMap[current.marketId]?.name || "Mercado asignado"
+        : current.clientId
+          ? "Cliente vinculado"
+          : "Sin asignación",
+      isPromoterRole(current.role)
+        ? `${userTastingStock(current)} degustación ${redemptionStockText(userRedemptionStock(current))}`
+        : "No aplica",
+    ]),
+  );
+  const searchedAttendance = orderedAttendance.filter((item) => {
+    const promoter = users.find((x) => x.id === item.promoterId);
+    const market = marketMap[item.marketId];
+    return matchesTableSearch(attendanceSearch, [
+      item.id,
+      clients.find((x) => x.id === item.clientId)?.name || "Tienda",
+      market?.name || "Mercado no identificado",
+      promoter?.name || "Promotor no identificado",
+      promoter?.dni,
+      item.promoterRole || promoter?.role || "Rol no identificado",
+      item.type,
+      market?.department || "No identificado",
+      market?.district,
+      formatDate(item.date),
+      item.date,
+      item.status,
+      item.photo,
+    ]);
   });
-   const adminCanjes: AdminCanje[] = [
-     ...sales.filter(sale => Boolean(sale.bonus)).map(sale => ({ id: `CAN-${sale.id}`, marketId: sale.marketId, kind: 'CANJE' as const, itemId: undefined, quantity: sale.redemptionCount || 1, actorId: sale.promoterId, actorName: users.find(current => current.id === sale.promoterId)?.name || 'Promotor', promoterId: sale.promoterId, canjeProductLabel: sale.bonus, canjeComponents: saleRedemptionRequirements(sale), date: sale.date, status: sale.status, source: 'sale' as const, canjeId: `CAN-${sale.id}`, sale })),
-   ];
-    const tastingConsumptions = movements.filter(movement => movement.kind === 'DEGUSTACION').sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
-     const tabs = [['inicio', 'Resumen'], ['mercados', 'Mercados'], ['usuarios', 'Usuarios'], ['clientes', 'Clientes'], ['canjes', 'Canjes'], ['degustacion', 'Degustación'], ['asignaciones', 'Asignaciones'], ['ventas', 'Ventas'], ['marcaciones', 'Marcaciones']];
-  return <main className="workspace">
-    <div className="page-head"><div><span className="eyebrow">PANEL DE CONTROL</span><h1>Hola, {user.name}</h1><p>Supervisa el pulso de la campaña desde un solo lugar.</p></div></div>
-    <nav className="tabs" aria-label="Módulos">{tabs.map(([value, label]) => <button key={value} className={`tab ${tab === value ? 'active' : ''}`} onClick={() => setTab(value)} data-testid={`tab-${value}`}>{label}</button>)}</nav>
-      {tab === 'inicio' && <SalesDashboard sales={sales} markets={markets} users={users} movements={movements} onViewSales={() => setTab('ventas')} onExport={exportSummary} />}
-      {tab === 'mercados' && <section className="panel"><div className="panel-header"><div><h2>Mercados</h2><p>Catálogo almacenado en DigitalOcean PostgreSQL.</p></div><div className="panel-actions">{GOOGLE_INTEGRATIONS_ENABLED && <Btn variant="outline" onClick={importMarkets} disabled={syncing} testId="button-refresh-markets"><RefreshCw /> Actualizar hoja</Btn>}<Btn onClick={() => setModal('market')} testId="button-new-market"><Plus /> Nuevo mercado</Btn></div></div><div className="panel-body"><TableSearch value={marketSearch} onChange={setMarketSearch} fields="Código, nombre, región, departamento, provincia, distrito y cantidades de clientes y promotores." count={searchedMarkets.length} total={markets.length} /><div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-8"><span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span><span>Clientes</span><span>Promotores</span><span>Acciones</span></div>{searchedMarkets.map(market => <div className="module-table-row cols-8" key={market.id}><span><strong>{market.name}</strong><small>{market.id}</small></span><span><strong>{market.region || '—'}</strong></span><span>{market.department}</span><span>{market.province}</span><span>{market.district}</span><span><strong>{marketAssignmentSummary[market.id]?.clients || 0}</strong></span><span><strong>{marketAssignmentSummary[market.id]?.promoters || 0}</strong></span><span className="module-table-actions"><Btn variant="outline" onClick={() => editRecord('markets',market)}><Pencil /> Editar</Btn><Btn variant="danger" onClick={() => deleteRecord('markets',market)} testId={`button-delete-market-${market.id}`}><Trash2 /> Eliminar</Btn></span></div>)}</div></div></div></section>}
-        {tab === 'usuarios' && <section className="panel"><div className="panel-header"><div><h2>Usuarios</h2><p>Administra usuarios en DigitalOcean o importa un CSV.</p></div><div className="panel-actions">{GOOGLE_INTEGRATIONS_ENABLED && <Btn variant="outline" onClick={importUsersFromSheet} disabled={syncing} testId="button-refresh-users"><RefreshCw /> Actualizar hoja</Btn>}<CsvImportButton label="Importar usuarios" onImport={importUsers} testId="button-import-users" /><CsvExampleButton onDownload={downloadUsersExample} testId="button-example-users" /><Btn onClick={() => setModal('user')} testId="button-new-user"><Plus /> Nuevo usuario</Btn></div></div><div className="panel-body"><TableSearch value={userSearch} onChange={setUserSearch} fields="Código, nombre, DNI, rol, asignación, stock personal y estado." count={searchedUsers.length} total={visibleUsers.length} /><div className="import-hint">DigitalOcean PostgreSQL conserva identidad, acceso, rol y estado. El stock se carga exclusivamente desde Canjes.</div><div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-7"><span>Usuario</span><span>DNI</span><span>Rol</span><span>Asignación</span><span>Stock personal</span><span>Estado</span><span>Acciones</span></div>{searchedUsers.map(user => <article className="module-table-row cols-7" key={user.id}><span><strong>{user.name}</strong><small>{user.id}</small></span><span><strong>{user.dni}</strong></span><span><strong>{user.roleLabel || user.role}</strong></span><span><strong>{user.marketId ? marketMap[user.marketId]?.name || 'Mercado asignado' : user.clientId ? 'Cliente vinculado' : 'Sin asignación'}</strong></span><span><strong>{isPromoterRole(user.role) ? `${userTastingStock(user)} degustación` : 'No aplica'}</strong><small>{isPromoterRole(user.role) ? redemptionStockText(userRedemptionStock(user)) : '—'}</small></span><span><StatusPill status={user.status} /></span><span className="module-table-actions"><Btn variant="outline" onClick={() => editRecord('users',user)}><Pencil /> Editar</Btn><Btn variant="danger" onClick={() => deleteRecord('users',user)}><Trash2 /> Eliminar</Btn></span></article>)}</div></div></div></section>}
-      {tab === 'clientes' && <section className="panel"><div className="panel-header"><div><h2>Clientes</h2><p>Administra los clientes en DigitalOcean o importa un CSV.</p></div><div className="panel-actions">{GOOGLE_INTEGRATIONS_ENABLED && <Btn variant="outline" onClick={importClientsFromSheet} disabled={syncing} testId="button-refresh-clients"><RefreshCw /> Actualizar hoja</Btn>}<CsvImportButton label="Importar clientes" onImport={importClients} testId="button-import-clients" /><CsvExampleButton onDownload={downloadClientsExample} testId="button-example-clients" /><Btn onClick={() => setModal('client')} testId="button-new-client"><Plus /> Nuevo cliente</Btn></div></div><div className="panel-body sales-panel-body"><TableSearch value={query} onChange={setQuery} fields="Código, nombre, categoría, mercado, distrito, contacto y estado." count={filteredClients.length} total={clients.length} />{filteredClients.length ? <div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-7"><span>Código</span><span>Cliente</span><span>Categoría</span><span>Mercado</span><span>Contacto</span><span>Estado</span><span>Acciones</span></div>{filteredClients.map(client => <article className="module-table-row cols-7" key={client.id}><span><b className="module-table-id">{client.code}</b><small>{client.id}</small></span><span><strong>{client.name}</strong></span><span><strong>{client.category || 'SIN CATEGORÍA'}</strong></span><span><strong>{marketMap[client.marketId]?.name || 'No identificado'}</strong><small>{marketMap[client.marketId]?.district || '—'}</small></span><span><strong>{client.phone || 'No registrado'}</strong></span><span><StatusPill status={client.status} /></span><span className="module-table-actions"><Btn variant="outline" onClick={() => setEditingClient(client)} testId={`button-edit-client-${client.id}`}><Pencil /> Editar</Btn><Btn variant="danger" onClick={() => deleteClient(client)} testId={`button-delete-client-${client.id}`}><Trash2 /> Eliminar</Btn></span></article>)}</div></div> : <Empty title="No hay coincidencias" detail="Prueba con otro nombre, código o mercado." />}</div></section>}
-        {tab === 'canjes' && <AdminCanjesModule onEdit={record => { const sale = record.sale || sales.find(sale => record.id.startsWith(`CAN-${sale.id}-`)); if(sale) setEditingSale(sale); else editRecord('movements',record); }} canjes={adminCanjes} marketMap={marketMap} users={users} onCreate={() => setModal('canje')} onDelete={async record => { const linked = record.sale || sales.find(sale => record.id.startsWith(`CAN-${sale.id}-`)); if(linked) { if(window.confirm('¿Eliminar el canje de esta venta y devolver sus productos al stock?')) await saveSaleEdit({...linked,bonus:undefined,redemptionCount:0,redemptionItems:undefined,exchangePhoto:undefined},{receipt:null,exchange:null}); } else await deleteRecord('movements',record); }} onCleanup={cleanupCatalogs} canCleanup={user.role === 'ADMIN'} notify={notify} />}
-      {tab === 'degustacion' && <AdminDegustacionesModule onEdit={record => editRecord('movements',record)} consumos={tastingConsumptions} users={users} marketMap={marketMap} onDeleteConsumo={record => deleteRecord('movements',record)} />}
-      {tab === 'asignaciones' && <AssignmentModule markets={markets} users={users} clients={clients} assignments={assignments} setAssignments={setAssignments} setUsers={setUsers} notify={notify} />}
-        {tab === 'ventas' && <section className="panel sales-console"><div className="panel-header"><div><h2>Ventas y evidencias</h2><p>Ordenadas desde la venta más reciente hasta la más antigua.</p></div>{['ADMIN','ANALISTA'].includes(user.role) && <Btn onClick={() => setNewAdminSale(true)}><Plus /> Registrar venta de promotor</Btn>}<Btn variant="outline" onClick={exportSales}><Download /> Descargar</Btn></div><div className="panel-body sales-panel-body"><div className="sales-console-search"><Search /><Input value={salesQuery} onChange={setSalesQuery} placeholder="Buscar ticket, producto, tienda o promotor" testId="input-search-sales" /></div>{filteredAdminSales.length ? <div className="sales-table-scroll"><div className="sales-dark-table"><div className="sales-dark-row sales-dark-header"><span>Ticket</span><span>Producto</span><span>Total</span><span>Tienda</span><span>Empleado</span><span>Canje</span><span>Evidencias</span><span>Fecha y hora</span><span>Acciones</span></div>{filteredAdminSales.map(sale => {
-          const promoter = users.find(item => item.id === sale.promoterId);
-          const client = clients.find(item => item.id === sale.clientId);
-          const products = saleExportBreakdown(sale);
-          return <article className="sales-dark-row" key={sale.id}>
-            <span className="sales-ticket"><b>{sale.id}</b><small>{sale.status}</small></span>
-            <span className="sales-product"><i><ShoppingBag /></i><span><strong>{products.map(item => item.label).join(' · ') || sale.mode}</strong><small>{sale.units} unidades · {sale.mode}</small></span></span>
-            <span className="sales-total"><strong>{formatSoles(sale.amountSoles)}</strong><small>{sale.units} und.</small></span>
-            <span><strong>{client?.name || 'Tienda'}</strong><small>{marketMap[sale.marketId]?.name || 'Mercado no identificado'}<br />{saleMarketLocationText(sale, markets)}</small></span>
-            <span><strong>{promoter?.name || 'Promotor no identificado'}</strong><small>DNI {promoter?.dni || '—'}<br />{sale.promoterRoleLabel || promoter?.roleLabel || sale.promoterRole || promoter?.role || 'Rol no identificado'}</small></span>
-            <span>{sale.bonus ? <b className="sales-flag yes">SÍ</b> : <b className="sales-flag no">NO</b>}<small>{sale.bonus ? `${sale.redemptionCount ?? 1} · ${sale.bonus}` : 'Sin canje'}</small></span>
-            <span className="sales-evidence"><PhotoThumbnail label="Boleta" src={sale.receiptPhoto} />{sale.exchangePhoto && <PhotoThumbnail label="Canje" src={sale.exchangePhoto} />}</span>
-            <span><strong>{formatDate(sale.date)}</strong>{sale.comment && <small title={sale.comment}>{sale.comment}</small>}</span>
-            <span className="sales-row-actions"><Btn variant="outline" onClick={() => setEditingSale(sale)} testId={`button-edit-sale-${sale.id}`}><Pencil /> Editar</Btn><Btn variant="danger" onClick={() => deleteSale(sale)} testId={`button-delete-sale-${sale.id}`}><Trash2 /> Eliminar</Btn></span>
-          </article>;
-        })}</div></div> : <Empty title={sales.length ? 'No hay coincidencias' : 'Aún no hay ventas'} detail={sales.length ? 'Prueba con otro ticket, producto, tienda o promotor.' : 'Las ventas aparecerán aquí cuando sean registradas.'} />}</div></section>}
-       {tab === 'marcaciones' && <><section className="panel"><div className="panel-header"><div><h2>Marcaciones de asistencia</h2><p>Ordenadas desde la más reciente hasta la más antigua.</p></div><Btn variant="outline" onClick={exportAttendance}><Download /> Descargar</Btn></div><div className="panel-body"><TableSearch value={attendanceSearch} onChange={setAttendanceSearch} fields="Código, tienda, mercado, promotor, DNI, rol, evento, ubicación, evidencia, fecha y estado. Incluye cierres automáticos." count={searchedAttendance.length + searchedClosures.length} total={orderedAttendance.length + automaticClosures.length} />{searchedAttendance.length ? <div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header attendance-columns"><span>Código</span><span>Tienda</span><span>Promotor</span><span>Evento</span><span>Ubicación</span><span>Evidencia y fecha</span><span>Estado</span><span>Acciones</span></div>{searchedAttendance.map(item => { const promoter = users.find(user => user.id === item.promoterId); const market = marketMap[item.marketId]; return <article className="module-table-row attendance-columns" key={item.id}><span><b className="module-table-id">{item.id}</b></span><span><strong>{clients.find(client => client.id === item.clientId)?.name || 'Tienda'}</strong><small>{market?.name || 'Mercado no identificado'}</small></span><span><strong>{promoter?.name || 'Promotor no identificado'}</strong><small>DNI {promoter?.dni || '—'} · {item.promoterRole || promoter?.role || 'Rol no identificado'}</small></span><span><b className={`sales-flag ${item.type === 'ENTRADA' ? 'yes' : 'no'}`}>{item.type}</b></span><span><strong>{market?.department || 'No identificado'}</strong><small>{market?.district || '—'}</small></span><span className="sales-evidence"><PhotoThumbnail label={item.type === 'ENTRADA' ? 'Entrada' : 'Salida'} src={item.photo} /><small>{formatDate(item.date)}</small></span><span><StatusPill status={item.status} /></span><span className="module-table-actions"><Btn variant="outline" onClick={() => editRecord('attendance',item)}><Pencil /> Editar</Btn><Btn variant="danger" onClick={() => deleteRecord('attendance',item)}><Trash2 /> Eliminar</Btn></span></article>; })}</div></div> : <Empty title={attendanceSearch ? "No hay marcaciones coincidentes" : "Aún no hay marcaciones"} detail="Prueba con otro término o limpia el buscador." />}</div></section>{searchedClosures.length > 0 && <section className="panel"><div className="panel-header"><div><h2>Evidencia de cierres automáticos</h2><p>Generados a las 11:59 p. m. cuando faltó el cierre manual.</p></div></div><div className="panel-body"><div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-4"><span>Tienda</span><span>Promotor</span><span>Mercado y fecha</span><span>Estado</span></div>{searchedClosures.map(closure => { const promoter = users.find(current => current.id === closure.promoterId); const market = marketMap[closure.marketId]; const client = clients.find(current => current.id === closure.clientId); return <article className="module-table-row cols-4" key={closure.id}><span><strong>{client?.name || 'Cliente no identificado'}</strong><small>{closure.id}</small></span><span><strong>{promoter?.name || 'Promotor no identificado'}</strong></span><span><strong>{market?.name || 'Mercado no identificado'}</strong><small>{formatDate(closure.date)} · {closure.evidence || 'Cierre automático'}</small></span><span><span className="status pending">AUTOMÁTICO</span></span></article>; })}</div></div></div></section>}</>}
-     {modal === 'user' && <NewUserModal markets={marketOptions} clients={clients} onSave={saveUser} close={() => setModal(null)} />}
-     {modal === 'market' && <NewMarketModal onSave={saveMarket} close={() => setModal(null)} />}
-    {newAdminSale && ['ADMIN','ANALISTA'].includes(user.role) && <Modal className="admin-sale-modal" title="Registrar venta de promotor" detail="La venta y sus canjes se asignan al promotor seleccionado. Fecha y hora de Perú." close={() => setNewAdminSale(false)}>
-      {adminPromoterId && !adminMarkets.length && <p className="modal-hint">Este promotor no tiene mercados activos asignados. Revisa el módulo Asignaciones.</p>}
-      {adminMarketId && !adminClients.length && <p className="modal-hint">Este promotor no tiene clientes activos asignados en el mercado seleccionado.</p>}
-      <div className="form-grid">
-        <SelectField label="Promotor *" value={adminPromoterId} onChange={value => {setAdminPromoterId(value);setAdminMarketId('');setAdminClientId('');}} placeholder="Seleccionar promotor" items={visibleUsers.filter(person => isPromoterRole(person.role) && person.status === 'ACTIVO').map(person => ({value:person.id,label:`${person.name} · ${person.roleLabel || person.role} · ${person.dni}`}))} />
-        <SelectField label="Mercado *" value={adminMarketId} onChange={value => {setAdminMarketId(value);setAdminClientId('');}} placeholder={adminPromoterId ? "Seleccionar mercado asignado" : "Primero selecciona un promotor"} items={adminMarkets.map(item => ({value:item.id,label:`${item.name} · ${item.district}`}))} />
-        <SelectField label="Cliente *" value={adminClientId} onChange={setAdminClientId} placeholder="Seleccionar cliente" items={adminClients.map(person => ({value:person.id,label:`${person.code} · ${person.name}`}))} />
-        <Field label="Fecha y hora de la venta (Perú) *"><input className="input" type="datetime-local" value={adminSaleDate} onChange={event => setAdminSaleDate(event.target.value)} /></Field>
+  const searchedClosures = automaticClosures.filter((item) =>
+    matchesTableSearch(attendanceSearch, [
+      item.id,
+      clients.find((x) => x.id === item.clientId)?.name ||
+        "Cliente no identificado",
+      users.find((x) => x.id === item.promoterId)?.name ||
+        "Promotor no identificado",
+      marketMap[item.marketId]?.name || "Mercado no identificado",
+      formatDate(item.date),
+      item.date,
+      item.evidence || "Cierre automático",
+      "AUTOMÁTICO",
+    ]),
+  );
+  const filteredAdminSales = sales.filter((sale) => {
+    const promoter = users.find((item) => item.id === sale.promoterId);
+    const client = clients.find((item) => item.id === sale.clientId);
+    const market = marketMap[sale.marketId];
+    const products = saleExportBreakdown(sale)
+      .map((item) => item.label)
+      .join(" ");
+    return `${sale.id} ${client?.name || ""} ${market?.name || ""} ${promoter?.name || ""} ${promoter?.dni || ""} ${products} ${sale.mode} ${sale.bonus || ""}`
+      .toLowerCase()
+      .includes(salesQuery.trim().toLowerCase());
+  });
+  const adminCanjes: AdminCanje[] = [
+    ...sales
+      .filter((sale) => Boolean(sale.bonus))
+      .map((sale) => ({
+        id: `CAN-${sale.id}`,
+        marketId: sale.marketId,
+        kind: "CANJE" as const,
+        itemId: undefined,
+        quantity: sale.redemptionCount || 1,
+        actorId: sale.promoterId,
+        actorName:
+          users.find((current) => current.id === sale.promoterId)?.name ||
+          "Promotor",
+        promoterId: sale.promoterId,
+        canjeProductLabel: sale.bonus,
+        canjeComponents: saleRedemptionRequirements(sale),
+        date: sale.date,
+        status: sale.status,
+        source: "sale" as const,
+        canjeId: `CAN-${sale.id}`,
+        sale,
+      })),
+  ];
+  const tastingConsumptions = movements
+    .filter((movement) => movement.kind === "DEGUSTACION")
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const tabs = [
+    ["inicio", "Resumen"],
+    ["mercados", "Mercados"],
+    ["usuarios", "Usuarios"],
+    ["clientes", "Clientes"],
+    ...(canManageCatalogs
+      ? [
+          ["productos", "Productos"],
+          ["categorias", "Categorías"],
+        ]
+      : []),
+    ["canjes", "Canjes"],
+    ["degustacion", "Degustación"],
+    ["asignaciones", "Asignaciones"],
+    ["ventas", "Ventas"],
+    ["marcaciones", "Marcaciones"],
+  ];
+  return (
+    <main className="workspace">
+      <div className="page-head">
+        <div>
+          <span className="eyebrow">PANEL DE CONTROL</span>
+          <h1>Hola, {user.name}</h1>
+          <p>Supervisa el pulso de la campaña desde un solo lugar.</p>
+        </div>
       </div>
-      {adminPromoterId && adminMarkets.some(item => item.id === adminMarketId) && adminClients.some(item => item.id === adminClientId) && users.some(person => person.id === adminPromoterId) && <PromoterApp key={`${adminPromoterId}:${adminMarketId}:${adminClientId}`} user={users.find(person => person.id === adminPromoterId)!} markets={markets} clients={adminClients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={() => {}} onUpdateUser={() => {}} onLogout={() => {}} enqueueEvidencePhoto={() => {}} administrative={{marketId:adminMarketId,clientId:adminClientId,date:adminSaleDate,close:()=>setNewAdminSale(false),save:async sale => {await adminRequest('/sales',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sale})});setNewAdminSale(false);notify('Venta del promotor guardada en la base de datos.');}}} />}
-    </Modal>}
-    {modal === 'client' && <NewClientModal markets={marketOptions} count={clients.length} onSave={saveClient} close={() => setModal(null)} />}
-       {recordEdit && <RecordEditModal target={recordEdit} markets={markets} users={users} clients={clients} save={saveRecord} close={() => setRecordEdit(null)} />}
-       {editingClient && <EditClientModal client={editingClient} markets={marketOptions} onSave={saveClientEdit} close={() => setEditingClient(null)} />}
-       {editingSale && <SaleEditModal sale={editingSale} clients={clients} promoter={users.find(item => item.id === editingSale.promoterId)} onSave={saveSaleEdit} close={() => setEditingSale(null)} />}
-       {modal === 'canje' && <NewCanjeModal users={visibleUsers} user={user} onSave={saveCanje} close={() => setModal(null)} />}
-  </main>;
+      <nav className="tabs" aria-label="Módulos">
+        {tabs.map(([value, label]) => (
+          <button
+            key={value}
+            className={`tab ${tab === value ? "active" : ""}`}
+            onClick={() => setTab(value)}
+            data-testid={`tab-${value}`}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {tab === "inicio" && (
+        <SalesDashboard
+          sales={sales}
+          markets={markets}
+          users={users}
+          movements={movements}
+          onViewSales={() => setTab("ventas")}
+          onExport={exportSummary}
+        />
+      )}
+      {tab === "mercados" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Mercados</h2>
+              <p>Catálogo almacenado en DigitalOcean PostgreSQL.</p>
+            </div>
+            <div className="panel-actions">
+              {GOOGLE_INTEGRATIONS_ENABLED && (
+                <Btn
+                  variant="outline"
+                  onClick={importMarkets}
+                  disabled={syncing}
+                  testId="button-refresh-markets"
+                >
+                  <RefreshCw /> Actualizar hoja
+                </Btn>
+              )}
+              <Btn
+                onClick={() => setModal("market")}
+                testId="button-new-market"
+              >
+                <Plus /> Nuevo mercado
+              </Btn>
+            </div>
+          </div>
+          <div className="panel-body">
+            <TableSearch
+              value={marketSearch}
+              onChange={setMarketSearch}
+              fields="Código, nombre, región, departamento, provincia, distrito y cantidades de clientes y promotores."
+              count={searchedMarkets.length}
+              total={markets.length}
+            />
+            <div className="module-table-wrap">
+              <div className="module-table">
+                <div className="module-table-row module-table-header cols-8">
+                  <span>Mercado</span>
+                  <span>Región</span>
+                  <span>Departamento</span>
+                  <span>Provincia</span>
+                  <span>Distrito</span>
+                  <span>Clientes</span>
+                  <span>Promotores</span>
+                  <span>Acciones</span>
+                </div>
+                {searchedMarkets.map((market) => (
+                  <div className="module-table-row cols-8" key={market.id}>
+                    <span>
+                      <strong>{market.name}</strong>
+                      <small>{market.id}</small>
+                    </span>
+                    <span>
+                      <strong>{market.region || "—"}</strong>
+                    </span>
+                    <span>{market.department}</span>
+                    <span>{market.province}</span>
+                    <span>{market.district}</span>
+                    <span>
+                      <strong>
+                        {marketAssignmentSummary[market.id]?.clients || 0}
+                      </strong>
+                    </span>
+                    <span>
+                      <strong>
+                        {marketAssignmentSummary[market.id]?.promoters || 0}
+                      </strong>
+                    </span>
+                    <span className="module-table-actions">
+                      <Btn
+                        variant="outline"
+                        onClick={() => editRecord("markets", market)}
+                      >
+                        <Pencil /> Editar
+                      </Btn>
+                      <Btn
+                        variant="danger"
+                        onClick={() => deleteRecord("markets", market)}
+                        testId={`button-delete-market-${market.id}`}
+                      >
+                        <Trash2 /> Eliminar
+                      </Btn>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+      {tab === "usuarios" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Usuarios</h2>
+              <p>Administra usuarios en DigitalOcean o importa un CSV.</p>
+            </div>
+            <div className="panel-actions">
+              {GOOGLE_INTEGRATIONS_ENABLED && (
+                <Btn
+                  variant="outline"
+                  onClick={importUsersFromSheet}
+                  disabled={syncing}
+                  testId="button-refresh-users"
+                >
+                  <RefreshCw /> Actualizar hoja
+                </Btn>
+              )}
+              <CsvImportButton
+                label="Importar usuarios"
+                onImport={importUsers}
+                testId="button-import-users"
+              />
+              <CsvExampleButton
+                onDownload={downloadUsersExample}
+                testId="button-example-users"
+              />
+              <Btn onClick={() => setModal("user")} testId="button-new-user">
+                <Plus /> Nuevo usuario
+              </Btn>
+            </div>
+          </div>
+          <div className="panel-body">
+            <TableSearch
+              value={userSearch}
+              onChange={setUserSearch}
+              fields="Código, nombre, DNI, rol, asignación, stock personal y estado."
+              count={searchedUsers.length}
+              total={visibleUsers.length}
+            />
+            <div className="import-hint">
+              DigitalOcean PostgreSQL conserva identidad, acceso, rol y estado.
+              El stock se carga exclusivamente desde Canjes.
+            </div>
+            <div className="module-table-wrap">
+              <div className="module-table">
+                <div className="module-table-row module-table-header cols-7">
+                  <span>Usuario</span>
+                  <span>DNI</span>
+                  <span>Rol</span>
+                  <span>Asignación</span>
+                  <span>Stock personal</span>
+                  <span>Estado</span>
+                  <span>Acciones</span>
+                </div>
+                {searchedUsers.map((user) => (
+                  <article className="module-table-row cols-7" key={user.id}>
+                    <span>
+                      <strong>{user.name}</strong>
+                      <small>{user.id}</small>
+                    </span>
+                    <span>
+                      <strong>{user.dni}</strong>
+                    </span>
+                    <span>
+                      <strong>{user.roleLabel || user.role}</strong>
+                    </span>
+                    <span>
+                      <strong>
+                        {user.marketId
+                          ? marketMap[user.marketId]?.name || "Mercado asignado"
+                          : user.clientId
+                            ? "Cliente vinculado"
+                            : "Sin asignación"}
+                      </strong>
+                    </span>
+                    <span>
+                      <strong>
+                        {isPromoterRole(user.role)
+                          ? `${userTastingStock(user)} degustación`
+                          : "No aplica"}
+                      </strong>
+                      <small>
+                        {isPromoterRole(user.role)
+                          ? redemptionStockText(userRedemptionStock(user))
+                          : "—"}
+                      </small>
+                    </span>
+                    <span>
+                      <StatusPill status={user.status} />
+                    </span>
+                    <span className="module-table-actions">
+                      <Btn
+                        variant="outline"
+                        onClick={() => editRecord("users", user)}
+                      >
+                        <Pencil /> Editar
+                      </Btn>
+                      <Btn
+                        variant="danger"
+                        onClick={() => deleteRecord("users", user)}
+                      >
+                        <Trash2 /> Eliminar
+                      </Btn>
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+      {tab === "clientes" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Clientes</h2>
+              <p>Administra los clientes en DigitalOcean o importa un CSV.</p>
+            </div>
+            <div className="panel-actions">
+              {GOOGLE_INTEGRATIONS_ENABLED && (
+                <Btn
+                  variant="outline"
+                  onClick={importClientsFromSheet}
+                  disabled={syncing}
+                  testId="button-refresh-clients"
+                >
+                  <RefreshCw /> Actualizar hoja
+                </Btn>
+              )}
+              <CsvImportButton
+                label="Importar clientes"
+                onImport={importClients}
+                testId="button-import-clients"
+              />
+              <CsvExampleButton
+                onDownload={downloadClientsExample}
+                testId="button-example-clients"
+              />
+              <Btn
+                onClick={() => setModal("client")}
+                testId="button-new-client"
+              >
+                <Plus /> Nuevo cliente
+              </Btn>
+            </div>
+          </div>
+          <div className="panel-body sales-panel-body">
+            <TableSearch
+              value={query}
+              onChange={setQuery}
+              fields="Código, nombre, categoría, mercado, distrito, contacto y estado."
+              count={filteredClients.length}
+              total={clients.length}
+            />
+            {filteredClients.length ? (
+              <div className="module-table-wrap">
+                <div className="module-table">
+                  <div className="module-table-row module-table-header cols-7">
+                    <span>Código</span>
+                    <span>Cliente</span>
+                    <span>Categoría</span>
+                    <span>Mercado</span>
+                    <span>Contacto</span>
+                    <span>Estado</span>
+                    <span>Acciones</span>
+                  </div>
+                  {filteredClients.map((client) => (
+                    <article
+                      className="module-table-row cols-7"
+                      key={client.id}
+                    >
+                      <span>
+                        <b className="module-table-id">{client.code}</b>
+                        <small>{client.id}</small>
+                      </span>
+                      <span>
+                        <strong>{client.name}</strong>
+                      </span>
+                      <span>
+                        <strong>{client.category || "SIN CATEGORÍA"}</strong>
+                      </span>
+                      <span>
+                        <strong>
+                          {marketMap[client.marketId]?.name ||
+                            "No identificado"}
+                        </strong>
+                        <small>
+                          {marketMap[client.marketId]?.district || "—"}
+                        </small>
+                      </span>
+                      <span>
+                        <strong>{client.phone || "No registrado"}</strong>
+                      </span>
+                      <span>
+                        <StatusPill status={client.status} />
+                      </span>
+                      <span className="module-table-actions">
+                        <Btn
+                          variant="outline"
+                          onClick={() => setEditingClient(client)}
+                          testId={`button-edit-client-${client.id}`}
+                        >
+                          <Pencil /> Editar
+                        </Btn>
+                        <Btn
+                          variant="danger"
+                          onClick={() => deleteClient(client)}
+                          testId={`button-delete-client-${client.id}`}
+                        >
+                          <Trash2 /> Eliminar
+                        </Btn>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <Empty
+                title="No hay coincidencias"
+                detail="Prueba con otro nombre, código o mercado."
+              />
+            )}
+          </div>
+        </section>
+      )}
+      {tab === "productos" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Productos</h2>
+              <p>
+                Catálogo de PostgreSQL utilizado en ventas por unidades y
+                planchas.
+              </p>
+            </div>
+            <Btn onClick={() => setModal("product")}>
+              <Plus /> Nuevo producto
+            </Btn>
+          </div>
+          <div className="panel-body sales-panel-body">
+            <TableSearch
+              value={productSearch}
+              onChange={setProductSearch}
+              fields="SKU, producto, marca, peso, precio, tipo de venta y estado."
+              count={filteredProducts.length}
+              total={catalogProducts.length}
+            />
+            {filteredProducts.length ? (
+              <div className="module-table-wrap">
+                <div className="module-table">
+                  <div className="module-table-row module-table-header catalog-product-columns">
+                    <span>SKU</span>
+                    <span>Producto</span>
+                    <span>Marca</span>
+                    <span>Peso</span>
+                    <span>Precio</span>
+                    <span>Venta</span>
+                    <span>Estado</span>
+                    <span>Acciones</span>
+                  </div>
+                  {filteredProducts.map((product) => (
+                    <article
+                      className="module-table-row catalog-product-columns"
+                      key={product.sku}
+                    >
+                      <span>
+                        <b className="module-table-id">{product.sku}</b>
+                      </span>
+                      <span>
+                        <strong>{product.product}</strong>
+                        <small>{product.unitsPerPackage} por empaque</small>
+                      </span>
+                      <span>
+                        <strong>{product.brand}</strong>
+                      </span>
+                      <span>
+                        <strong>{formatKilos(product.weightKg || 0)}</strong>
+                      </span>
+                      <span>
+                        <strong>{formatSoles(product.unitPrice)}</strong>
+                      </span>
+                      <span>
+                        <strong>{product.saleModes?.join(" · ")}</strong>
+                      </span>
+                      <span>
+                        <StatusPill status={product.status || "ACTIVO"} />
+                      </span>
+                      <span className="module-table-actions">
+                        <Btn
+                          variant="outline"
+                          onClick={() => setEditingProduct(product)}
+                        >
+                          <Pencil /> Editar
+                        </Btn>
+                        <Btn
+                          variant="danger"
+                          onClick={() =>
+                            deleteCatalogRecord(
+                              "products",
+                              product.sku,
+                              product.product,
+                            )
+                          }
+                        >
+                          <Trash2 /> Eliminar
+                        </Btn>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <Empty
+                title="No hay productos"
+                detail="Agrega el primer producto o limpia el buscador."
+              />
+            )}
+          </div>
+        </section>
+      )}
+      {tab === "categorias" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Categorías de clientes</h2>
+              <p>Las categorías activas aparecen al crear o editar clientes.</p>
+            </div>
+            <Btn onClick={() => setModal("category")}>
+              <Plus /> Nueva categoría
+            </Btn>
+          </div>
+          <div className="panel-body sales-panel-body">
+            <TableSearch
+              value={categorySearch}
+              onChange={setCategorySearch}
+              fields="Código, nombre, clientes relacionados y estado."
+              count={filteredCategories.length}
+              total={categories.length}
+            />
+            {filteredCategories.length ? (
+              <div className="module-table-wrap">
+                <div className="module-table">
+                  <div className="module-table-row module-table-header cols-4">
+                    <span>Código</span>
+                    <span>Categoría</span>
+                    <span>Clientes</span>
+                    <span>Acciones</span>
+                  </div>
+                  {filteredCategories.map((category) => (
+                    <article
+                      className="module-table-row cols-4"
+                      key={category.id}
+                    >
+                      <span>
+                        <b className="module-table-id">{category.id}</b>
+                      </span>
+                      <span>
+                        <strong>{category.name}</strong>
+                        <small>
+                          <StatusPill status={category.status} />
+                        </small>
+                      </span>
+                      <span>
+                        <strong>
+                          {
+                            clients.filter(
+                              (client) => client.category === category.id,
+                            ).length
+                          }
+                        </strong>
+                        <small>clientes relacionados</small>
+                      </span>
+                      <span className="module-table-actions">
+                        <Btn
+                          variant="outline"
+                          onClick={() => setEditingCategory(category)}
+                        >
+                          <Pencil /> Editar
+                        </Btn>
+                        <Btn
+                          variant="danger"
+                          onClick={() =>
+                            deleteCatalogRecord(
+                              "categories",
+                              category.id,
+                              category.name,
+                            )
+                          }
+                        >
+                          <Trash2 /> Eliminar
+                        </Btn>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <Empty
+                title="No hay categorías"
+                detail="Agrega la primera categoría o limpia el buscador."
+              />
+            )}
+          </div>
+        </section>
+      )}
+      {tab === "canjes" && (
+        <AdminCanjesModule
+          onEdit={(record) => {
+            const sale =
+              record.sale ||
+              sales.find((sale) => record.id.startsWith(`CAN-${sale.id}-`));
+            if (sale) setEditingSale(sale);
+            else editRecord("movements", record);
+          }}
+          canjes={adminCanjes}
+          marketMap={marketMap}
+          users={users}
+          onCreate={() => setModal("canje")}
+          onDelete={async (record) => {
+            const linked =
+              record.sale ||
+              sales.find((sale) => record.id.startsWith(`CAN-${sale.id}-`));
+            if (linked) {
+              if (
+                window.confirm(
+                  "¿Eliminar el canje de esta venta y devolver sus productos al stock?",
+                )
+              )
+                await saveSaleEdit(
+                  {
+                    ...linked,
+                    bonus: undefined,
+                    redemptionCount: 0,
+                    redemptionItems: undefined,
+                    exchangePhoto: undefined,
+                  },
+                  { receipt: null, exchange: null },
+                );
+            } else await deleteRecord("movements", record);
+          }}
+          onCleanup={cleanupCatalogs}
+          canCleanup={user.role === "ADMIN"}
+          notify={notify}
+        />
+      )}
+      {tab === "degustacion" && (
+        <AdminDegustacionesModule
+          onEdit={(record) => editRecord("movements", record)}
+          consumos={tastingConsumptions}
+          users={users}
+          marketMap={marketMap}
+          onDeleteConsumo={(record) => deleteRecord("movements", record)}
+        />
+      )}
+      {tab === "asignaciones" && (
+        <AssignmentModule
+          markets={markets}
+          users={users}
+          clients={clients}
+          assignments={assignments}
+          setAssignments={setAssignments}
+          setUsers={setUsers}
+          notify={notify}
+        />
+      )}
+      {tab === "ventas" && (
+        <section className="panel sales-console">
+          <div className="panel-header">
+            <div>
+              <h2>Ventas y evidencias</h2>
+              <p>Ordenadas desde la venta más reciente hasta la más antigua.</p>
+            </div>
+            {["ADMIN", "ANALISTA"].includes(user.role) && (
+              <Btn onClick={() => setNewAdminSale(true)}>
+                <Plus /> Registrar venta de promotor
+              </Btn>
+            )}
+            <Btn variant="outline" onClick={exportSales}>
+              <Download /> Descargar
+            </Btn>
+          </div>
+          <div className="panel-body sales-panel-body">
+            <div className="sales-console-search">
+              <Search />
+              <Input
+                value={salesQuery}
+                onChange={setSalesQuery}
+                placeholder="Buscar ticket, producto, tienda o promotor"
+                testId="input-search-sales"
+              />
+            </div>
+            {filteredAdminSales.length ? (
+              <div className="sales-table-scroll">
+                <div className="sales-dark-table">
+                  <div className="sales-dark-row sales-dark-header">
+                    <span>Ticket</span>
+                    <span>Producto</span>
+                    <span>Total</span>
+                    <span>Tienda</span>
+                    <span>Empleado</span>
+                    <span>Canje</span>
+                    <span>Evidencias</span>
+                    <span>Fecha y hora</span>
+                    <span>Acciones</span>
+                  </div>
+                  {filteredAdminSales.map((sale) => {
+                    const promoter = users.find(
+                      (item) => item.id === sale.promoterId,
+                    );
+                    const client = clients.find(
+                      (item) => item.id === sale.clientId,
+                    );
+                    const products = saleExportBreakdown(sale);
+                    return (
+                      <article className="sales-dark-row" key={sale.id}>
+                        <span className="sales-ticket">
+                          <b>{sale.id}</b>
+                          <small>{sale.status}</small>
+                        </span>
+                        <span className="sales-product">
+                          <i>
+                            <ShoppingBag />
+                          </i>
+                          <span>
+                            <strong>
+                              {products.map((item) => item.label).join(" · ") ||
+                                sale.mode}
+                            </strong>
+                            <small>
+                              {sale.units} unidades · {sale.mode}
+                            </small>
+                          </span>
+                        </span>
+                        <span className="sales-total">
+                          <strong>{formatSoles(sale.amountSoles)}</strong>
+                          <small>{sale.units} und.</small>
+                        </span>
+                        <span>
+                          <strong>{client?.name || "Tienda"}</strong>
+                          <small>
+                            {marketMap[sale.marketId]?.name ||
+                              "Mercado no identificado"}
+                            <br />
+                            {saleMarketLocationText(sale, markets)}
+                          </small>
+                        </span>
+                        <span>
+                          <strong>
+                            {promoter?.name || "Promotor no identificado"}
+                          </strong>
+                          <small>
+                            DNI {promoter?.dni || "—"}
+                            <br />
+                            {sale.promoterRoleLabel ||
+                              promoter?.roleLabel ||
+                              sale.promoterRole ||
+                              promoter?.role ||
+                              "Rol no identificado"}
+                          </small>
+                        </span>
+                        <span>
+                          {sale.bonus ? (
+                            <b className="sales-flag yes">SÍ</b>
+                          ) : (
+                            <b className="sales-flag no">NO</b>
+                          )}
+                          <small>
+                            {sale.bonus
+                              ? `${sale.redemptionCount ?? 1} · ${sale.bonus}`
+                              : "Sin canje"}
+                          </small>
+                        </span>
+                        <span className="sales-evidence">
+                          <PhotoThumbnail
+                            label="Boleta"
+                            src={sale.receiptPhoto}
+                          />
+                          {sale.exchangePhoto && (
+                            <PhotoThumbnail
+                              label="Canje"
+                              src={sale.exchangePhoto}
+                            />
+                          )}
+                        </span>
+                        <span>
+                          <strong>{formatDate(sale.date)}</strong>
+                          {sale.comment && (
+                            <small title={sale.comment}>{sale.comment}</small>
+                          )}
+                        </span>
+                        <span className="sales-row-actions">
+                          <Btn
+                            variant="outline"
+                            onClick={() => setEditingSale(sale)}
+                            testId={`button-edit-sale-${sale.id}`}
+                          >
+                            <Pencil /> Editar
+                          </Btn>
+                          <Btn
+                            variant="danger"
+                            onClick={() => deleteSale(sale)}
+                            testId={`button-delete-sale-${sale.id}`}
+                          >
+                            <Trash2 /> Eliminar
+                          </Btn>
+                        </span>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <Empty
+                title={
+                  sales.length ? "No hay coincidencias" : "Aún no hay ventas"
+                }
+                detail={
+                  sales.length
+                    ? "Prueba con otro ticket, producto, tienda o promotor."
+                    : "Las ventas aparecerán aquí cuando sean registradas."
+                }
+              />
+            )}
+          </div>
+        </section>
+      )}
+      {tab === "marcaciones" && (
+        <>
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>Marcaciones de asistencia</h2>
+                <p>Ordenadas desde la más reciente hasta la más antigua.</p>
+              </div>
+              <Btn variant="outline" onClick={exportAttendance}>
+                <Download /> Descargar
+              </Btn>
+            </div>
+            <div className="panel-body">
+              <TableSearch
+                value={attendanceSearch}
+                onChange={setAttendanceSearch}
+                fields="Código, tienda, mercado, promotor, DNI, rol, evento, ubicación, evidencia, fecha y estado. Incluye cierres automáticos."
+                count={searchedAttendance.length + searchedClosures.length}
+                total={orderedAttendance.length + automaticClosures.length}
+              />
+              {searchedAttendance.length ? (
+                <div className="module-table-wrap">
+                  <div className="module-table">
+                    <div className="module-table-row module-table-header attendance-columns">
+                      <span>Código</span>
+                      <span>Tienda</span>
+                      <span>Promotor</span>
+                      <span>Evento</span>
+                      <span>Ubicación</span>
+                      <span>Evidencia y fecha</span>
+                      <span>Estado</span>
+                      <span>Acciones</span>
+                    </div>
+                    {searchedAttendance.map((item) => {
+                      const promoter = users.find(
+                        (user) => user.id === item.promoterId,
+                      );
+                      const market = marketMap[item.marketId];
+                      return (
+                        <article
+                          className="module-table-row attendance-columns"
+                          key={item.id}
+                        >
+                          <span>
+                            <b className="module-table-id">{item.id}</b>
+                          </span>
+                          <span>
+                            <strong>
+                              {clients.find(
+                                (client) => client.id === item.clientId,
+                              )?.name || "Tienda"}
+                            </strong>
+                            <small>
+                              {market?.name || "Mercado no identificado"}
+                            </small>
+                          </span>
+                          <span>
+                            <strong>
+                              {promoter?.name || "Promotor no identificado"}
+                            </strong>
+                            <small>
+                              DNI {promoter?.dni || "—"} ·{" "}
+                              {item.promoterRole ||
+                                promoter?.role ||
+                                "Rol no identificado"}
+                            </small>
+                          </span>
+                          <span>
+                            <b
+                              className={`sales-flag ${item.type === "ENTRADA" ? "yes" : "no"}`}
+                            >
+                              {item.type}
+                            </b>
+                          </span>
+                          <span>
+                            <strong>
+                              {market?.department || "No identificado"}
+                            </strong>
+                            <small>{market?.district || "—"}</small>
+                          </span>
+                          <span className="sales-evidence">
+                            <PhotoThumbnail
+                              label={
+                                item.type === "ENTRADA" ? "Entrada" : "Salida"
+                              }
+                              src={item.photo}
+                            />
+                            <small>{formatDate(item.date)}</small>
+                          </span>
+                          <span>
+                            <StatusPill status={item.status} />
+                          </span>
+                          <span className="module-table-actions">
+                            <Btn
+                              variant="outline"
+                              onClick={() => editRecord("attendance", item)}
+                            >
+                              <Pencil /> Editar
+                            </Btn>
+                            <Btn
+                              variant="danger"
+                              onClick={() => deleteRecord("attendance", item)}
+                            >
+                              <Trash2 /> Eliminar
+                            </Btn>
+                          </span>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <Empty
+                  title={
+                    attendanceSearch
+                      ? "No hay marcaciones coincidentes"
+                      : "Aún no hay marcaciones"
+                  }
+                  detail="Prueba con otro término o limpia el buscador."
+                />
+              )}
+            </div>
+          </section>
+          {searchedClosures.length > 0 && (
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Evidencia de cierres automáticos</h2>
+                  <p>
+                    Generados a las 11:59 p. m. cuando faltó el cierre manual.
+                  </p>
+                </div>
+              </div>
+              <div className="panel-body">
+                <div className="module-table-wrap">
+                  <div className="module-table">
+                    <div className="module-table-row module-table-header cols-4">
+                      <span>Tienda</span>
+                      <span>Promotor</span>
+                      <span>Mercado y fecha</span>
+                      <span>Estado</span>
+                    </div>
+                    {searchedClosures.map((closure) => {
+                      const promoter = users.find(
+                        (current) => current.id === closure.promoterId,
+                      );
+                      const market = marketMap[closure.marketId];
+                      const client = clients.find(
+                        (current) => current.id === closure.clientId,
+                      );
+                      return (
+                        <article
+                          className="module-table-row cols-4"
+                          key={closure.id}
+                        >
+                          <span>
+                            <strong>
+                              {client?.name || "Cliente no identificado"}
+                            </strong>
+                            <small>{closure.id}</small>
+                          </span>
+                          <span>
+                            <strong>
+                              {promoter?.name || "Promotor no identificado"}
+                            </strong>
+                          </span>
+                          <span>
+                            <strong>
+                              {market?.name || "Mercado no identificado"}
+                            </strong>
+                            <small>
+                              {formatDate(closure.date)} ·{" "}
+                              {closure.evidence || "Cierre automático"}
+                            </small>
+                          </span>
+                          <span>
+                            <span className="status pending">AUTOMÁTICO</span>
+                          </span>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+      {modal === "user" && (
+        <NewUserModal
+          markets={marketOptions}
+          clients={clients}
+          onSave={saveUser}
+          close={() => setModal(null)}
+        />
+      )}
+      {modal === "market" && (
+        <NewMarketModal onSave={saveMarket} close={() => setModal(null)} />
+      )}
+      {newAdminSale && ["ADMIN", "ANALISTA"].includes(user.role) && (
+        <Modal
+          className="admin-sale-modal"
+          title="Registrar venta de promotor"
+          detail="La venta y sus canjes se asignan al promotor seleccionado. Fecha y hora de Perú."
+          close={() => setNewAdminSale(false)}
+        >
+          {adminPromoterId && !adminMarkets.length && (
+            <p className="modal-hint">
+              Este promotor no tiene mercados activos asignados. Revisa el
+              módulo Asignaciones.
+            </p>
+          )}
+          {adminMarketId && !adminClients.length && (
+            <p className="modal-hint">
+              Este promotor no tiene clientes activos asignados en el mercado
+              seleccionado.
+            </p>
+          )}
+          <div className="form-grid">
+            <SelectField
+              label="Promotor *"
+              value={adminPromoterId}
+              onChange={(value) => {
+                setAdminPromoterId(value);
+                setAdminMarketId("");
+                setAdminClientId("");
+              }}
+              placeholder="Seleccionar promotor"
+              items={visibleUsers
+                .filter(
+                  (person) =>
+                    isPromoterRole(person.role) && person.status === "ACTIVO",
+                )
+                .map((person) => ({
+                  value: person.id,
+                  label: `${person.name} · ${person.roleLabel || person.role} · ${person.dni}`,
+                }))}
+            />
+            <SelectField
+              label="Mercado *"
+              value={adminMarketId}
+              onChange={(value) => {
+                setAdminMarketId(value);
+                setAdminClientId("");
+              }}
+              placeholder={
+                adminPromoterId
+                  ? "Seleccionar mercado asignado"
+                  : "Primero selecciona un promotor"
+              }
+              items={adminMarkets.map((item) => ({
+                value: item.id,
+                label: `${item.name} · ${item.district}`,
+              }))}
+            />
+            <SelectField
+              label="Cliente *"
+              value={adminClientId}
+              onChange={setAdminClientId}
+              placeholder="Seleccionar cliente"
+              items={adminClients.map((person) => ({
+                value: person.id,
+                label: `${person.code} · ${person.name}`,
+              }))}
+            />
+            <Field label="Fecha y hora de la venta (Perú) *">
+              <input
+                className="input"
+                type="datetime-local"
+                value={adminSaleDate}
+                onChange={(event) => setAdminSaleDate(event.target.value)}
+              />
+            </Field>
+          </div>
+          {adminPromoterId &&
+            adminMarkets.some((item) => item.id === adminMarketId) &&
+            adminClients.some((item) => item.id === adminClientId) &&
+            users.some((person) => person.id === adminPromoterId) && (
+              <PromoterApp
+                key={`${adminPromoterId}:${adminMarketId}:${adminClientId}`}
+                user={users.find((person) => person.id === adminPromoterId)!}
+                markets={markets}
+                clients={adminClients}
+                assignments={assignments}
+                productPrices={productPrices}
+                sales={sales}
+                setSales={setSales}
+                attendance={attendance}
+                setAttendance={setAttendance}
+                inventory={inventory}
+                setInventory={setInventory}
+                movements={movements}
+                setMovements={setMovements}
+                notify={notify}
+                onSessionSelection={() => {}}
+                onUpdateUser={() => {}}
+                onLogout={() => {}}
+                enqueueEvidencePhoto={() => {}}
+                administrative={{
+                  marketId: adminMarketId,
+                  clientId: adminClientId,
+                  date: adminSaleDate,
+                  close: () => setNewAdminSale(false),
+                  save: async (sale) => {
+                    await adminRequest("/sales", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ sale }),
+                    });
+                    setNewAdminSale(false);
+                    notify("Venta del promotor guardada en la base de datos.");
+                  },
+                }}
+              />
+            )}
+        </Modal>
+      )}
+      {modal === "client" && (
+        <NewClientModal
+          markets={marketOptions}
+          categories={categories}
+          count={clients.length}
+          onSave={saveClient}
+          close={() => setModal(null)}
+        />
+      )}
+      {recordEdit && (
+        <RecordEditModal
+          target={recordEdit}
+          markets={markets}
+          users={users}
+          clients={clients}
+          save={saveRecord}
+          close={() => setRecordEdit(null)}
+        />
+      )}
+      {editingClient && (
+        <EditClientModal
+          client={editingClient}
+          markets={marketOptions}
+          categories={categories}
+          onSave={saveClientEdit}
+          close={() => setEditingClient(null)}
+        />
+      )}
+      {editingSale && (
+        <SaleEditModal
+          sale={editingSale}
+          clients={clients}
+          promoter={users.find((item) => item.id === editingSale.promoterId)}
+          onSave={saveSaleEdit}
+          close={() => setEditingSale(null)}
+        />
+      )}
+      {(modal === "product" || editingProduct) && (
+        <CatalogProductModal
+          product={editingProduct || undefined}
+          onSave={saveCatalogProduct}
+          close={() => {
+            setModal(null);
+            setEditingProduct(null);
+          }}
+        />
+      )}
+      {(modal === "category" || editingCategory) && (
+        <CatalogCategoryModal
+          category={editingCategory || undefined}
+          onSave={saveCatalogCategory}
+          close={() => {
+            setModal(null);
+            setEditingCategory(null);
+          }}
+        />
+      )}
+      {modal === "canje" && (
+        <NewCanjeModal
+          users={visibleUsers}
+          user={user}
+          onSave={saveCanje}
+          close={() => setModal(null)}
+        />
+      )}
+    </main>
+  );
 }
 
-function PromoterNav({ active, onChange }: { active: 'MARCACIONES' | 'VENTAS'; onChange: (value: 'MARCACIONES' | 'VENTAS') => void }) {
-  return <aside className="promoter-nav"><p className="nav-label">TAREAS DIARIAS</p><button className={active === 'MARCACIONES' ? 'active' : ''} onClick={() => onChange('MARCACIONES')} data-testid="nav-marcaciones"><Clock3 /> Marcaciones</button><button className={active === 'VENTAS' ? 'active' : ''} onClick={() => onChange('VENTAS')} data-testid="nav-ventas"><ShoppingBag /> Ventas</button></aside>;
+function PromoterNav({
+  active,
+  onChange,
+}: {
+  active: "MARCACIONES" | "VENTAS";
+  onChange: (value: "MARCACIONES" | "VENTAS") => void;
+}) {
+  return (
+    <aside className="promoter-nav">
+      <p className="nav-label">TAREAS DIARIAS</p>
+      <button
+        className={active === "MARCACIONES" ? "active" : ""}
+        onClick={() => onChange("MARCACIONES")}
+        data-testid="nav-marcaciones"
+      >
+        <Clock3 /> Marcaciones
+      </button>
+      <button
+        className={active === "VENTAS" ? "active" : ""}
+        onClick={() => onChange("VENTAS")}
+        data-testid="nav-ventas"
+      >
+        <ShoppingBag /> Ventas
+      </button>
+    </aside>
+  );
 }
 function attendanceDay(date: string | Date = new Date()) {
   const parsed = new Date(date);
-  if (!Number.isFinite(parsed.getTime())) return '';
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(parsed);
+  if (!Number.isFinite(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(parsed);
 }
 
-function PromoterApp({ administrative, user, markets, clients, assignments, productPrices, sales, setSales, attendance, setAttendance, inventory, setInventory, movements, setMovements, notify, onSessionSelection, onUpdateUser, onLogout, enqueueEvidencePhoto }: { administrative?: { marketId: string; clientId: string; date: string; close: () => void; save: (sale: Sale) => Promise<void> }; user: AppUser; markets: Market[]; clients: Client[]; assignments: PromoterAssignment[]; productPrices: ProductPrice[]; sales: Sale[]; setSales: (value: Sale[]) => void; attendance: Attendance[]; setAttendance: (value: Attendance[]) => void; inventory: MarketInventory[]; setInventory: (value: MarketInventory[]) => void; movements: InventoryMovement[]; setMovements: (value: InventoryMovement[]) => void; notify: (message: string, error?: boolean) => void; onSessionSelection: (selection: { marketId: string; clientId: string }) => void; onUpdateUser: (user: AppUser) => void; onLogout: () => void; enqueueEvidencePhoto: (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field'], context: PhotoUploadContext) => void }) {
-     const [attendanceClock, setAttendanceClock] = useState(() => new Date());
-     useEffect(() => {
-       const refresh = () => setAttendanceClock(new Date());
-       const timer = window.setInterval(refresh, 1000);
-       window.addEventListener('focus', refresh);
-       return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
-     }, []);
-     const [savingAdminSale, setSavingAdminSale] = useState(false);
-     const adminSaleId = useRef(`VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`);
-     const promoterAssignment = assignments.find(assignment => assignmentMatchesUser(assignment, user)); const assignedMarketIds = promoterAssignment ? promoterAssignment.marketIds : user.marketId ? [user.marketId] : []; const selectableMarkets = markets.filter(market => market.status === 'ACTIVO' && (administrative || assignedMarketIds.includes(market.id))); const [selectedMarketId, setSelectedMarketId] = useState(administrative?.marketId || ''); const [selectedClientId, setSelectedClientId] = useState(administrative?.clientId || ''); const [module, setModule] = useState<'MARCACIONES' | 'VENTAS'>('MARCACIONES'); const [view, setView] = useState<'LISTA' | 'NUEVA'>('LISTA');
-     const available = clients.filter(client => client.marketId === selectedMarketId && client.status === 'ACTIVO' && (!promoterAssignment || promoterAssignment.clientIds.includes(client.id))); const selectedMarket = selectableMarkets.find(market => market.id === selectedMarketId);
-       const [clientId, setClientId] = useState(''); const [mode, setMode] = useState<'UNIDADES' | 'PLANCHAS'>('UNIDADES'); const [sku, setSku] = useState(products[0].sku); const [unitQtyInput, setUnitQtyInput] = useState('1'); const [unitPriceSoles, setUnitPriceSoles] = useState(''); const [brandPrices, setBrandPrices] = useState({ TODINNO: '', COSTA: '', PASQUALINO: '' }); const [planchasInput, setPlanchasInput] = useState('1'); const [mixInputs, setMixInputs] = useState({ TODINNO: '0', COSTA: '0', PASQUALINO: '0' }); const [selectedBonusProductId, setSelectedBonusProductId] = useState<CanjeProductId | ''>(''); const [redemptionCount, setRedemptionCount] = useState(1); const [comment, setComment] = useState(''); const [receipt, setReceipt] = useState<File | null>(null); const [exchange, setExchange] = useState<File | null>(null); const [receiptUrl, setReceiptUrl] = useState(''); const [exchangeUrl, setExchangeUrl] = useState(''); const [receiptUploading, setReceiptUploading] = useState(false); const [exchangeUploading, setExchangeUploading] = useState(false);
-     const [markClientId, setMarkClientId] = useState(''); const [markType, setMarkType] = useState<'ENTRADA' | 'SALIDA'>('ENTRADA'); const [markPhoto, setMarkPhoto] = useState<File | null>(null); const [markPhotoUrl, setMarkPhotoUrl] = useState(''); const [markPhotoUploading, setMarkPhotoUploading] = useState(false); const [tastingExitPrompt, setTastingExitPrompt] = useState(false); const [search, setSearch] = useState(''); const [modeFilter, setModeFilter] = useState<'TODO' | 'UNIDADES' | 'PLANCHAS'>('TODO');
-      const priceBySku = useMemo(() => Object.fromEntries(productPrices.map(price => [price.sku, price])), [productPrices]);
-      useEffect(() => {
-        const price = priceBySku[sku]?.unitPrice;
-        setUnitPriceSoles(price ? String(price) : '');
-      }, [sku, priceBySku]);
-      useEffect(() => {
-        setBrandPrices({
-          TODINNO: String(priceBySku[planchaProducts.TODINNO.sku]?.unitPrice || ''),
-          COSTA: String(priceBySku[planchaProducts.COSTA.sku]?.unitPrice || ''),
-          PASQUALINO: String(priceBySku[planchaProducts.PASQUALINO.sku]?.unitPrice || ''),
-        });
-      }, [priceBySku]);
-     useEffect(() => { setClientId(selectedClientId); setMarkClientId(selectedClientId); onSessionSelection({ marketId: selectedMarketId, clientId: selectedClientId }); }, [selectedMarketId, selectedClientId]);
-     const unitQty = Number(unitQtyInput) || 0; const planchas = Number(planchasInput) || 0; const mix = { TODINNO: Number(mixInputs.TODINNO) || 0, COSTA: Number(mixInputs.COSTA) || 0, PASQUALINO: Number(mixInputs.PASQUALINO) || 0 }; const selectedProduct = products.find(product => product.sku === sku) || products[0]; const brandUnitPrices = Object.fromEntries(Object.keys(planchaProducts).map(brand => [brand, parseSoles(brandPrices[brand as keyof typeof brandPrices])])) as Record<string, number>; const promoterStock = administrative ? calculatedPromoterStock(user.id, sales, movements).redemptionStock : userRedemptionStock(user); const redemptionTotal = sumRedemptionStock(promoterStock); const totalMix = mix.TODINNO + mix.COSTA + mix.PASQUALINO; const total = mode === 'UNIDADES' ? unitQty : totalMix; const unitPrice = parseSoles(unitPriceSoles); const saleAmount = mode === 'UNIDADES' ? unitQty * unitPrice : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (brandUnitPrices[brand] || 0), 0); const orderWeightKg = mode === 'UNIDADES' ? unitQty * selectedProduct.weightKg : Object.entries(mix).reduce((sum, [brand, quantity]) => sum + quantity * (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg || 0), 0); const weightPerPlanchaKg = mode === 'PLANCHAS' && planchas > 0 ? orderWeightKg / planchas : 0; const pricesValid = mode === 'UNIDADES' ? unitPrice > 0 : Object.entries(mix).filter(([, quantity]) => quantity > 0).every(([brand]) => (brandUnitPrices[brand] || 0) > 0); const bonusProducts = bonusProductsFor(mode, total, planchas, promoterStock, administrative ? new Date(administrative.date + '-05:00') : new Date()); const selectedBonusProduct = bonusProducts.find(product => product.id === selectedBonusProductId) || bonusProducts[0]; const bonus = selectedBonusProduct?.label; const automaticUnitCanjeCount = mode === 'UNIDADES' ? Math.floor(unitQty / 2) : 0; const canjeCount = bonus ? (mode === 'UNIDADES' ? automaticUnitCanjeCount : redemptionCount) : 0; const requiredRedemptions = multiplyRedemptionRequirements(selectedBonusProduct?.components || {}, canjeCount); const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(([itemId, quantity]) => promoterStock[itemId] < quantity); const exceptionNeedsComment = Boolean(mode === 'PLANCHAS' && bonus && canjeCount === 3 && !comment.trim()); const validUnitQty = mode === 'PLANCHAS' || (Number.isInteger(unitQty) && unitQty >= 1 && unitQty <= 5); const validMix = mode === 'UNIDADES' || totalMix === planchas * 6; const saleFormValid = Boolean(clientId && receipt && pricesValid && Number.isFinite(saleAmount) && saleAmount > 0 && validUnitQty && validMix && (!bonus || (exchange && !missingRedemption && !exceptionNeedsComment)) && !(mode === 'PLANCHAS' && planchas > 80));
-     useEffect(() => {
-       if (!receipt || !selectedMarket) { setReceiptUrl(''); return; }
-       let cancelled = false;
-       setReceiptUploading(true); setReceiptUrl('');
-       const saleClient = clients.find(client => client.id === clientId);
-       void uploadEvidenceFile(receipt, 'sale', 'receiptPhoto', { clientName: saleClient?.name || saleClient?.code || 'CLIENTE NO IDENTIFICADO', marketName: selectedMarket.name, recordType: 'VENTA' })
-         .then(saved => { if (!cancelled) setReceiptUrl(saved.url); })
-         .catch(error => { if (!cancelled) notify(error instanceof Error ? `No se pudo subir boleta: ${error.message}` : 'No se pudo subir la boleta a DigitalOcean Spaces.', true); })
-         .finally(() => { if (!cancelled) setReceiptUploading(false); });
-       return () => { cancelled = true; };
-     }, [receipt, selectedMarket?.id, clientId]);
-     useEffect(() => {
-       if (!exchange || !selectedMarket || !bonus) { setExchangeUrl(''); return; }
-       let cancelled = false;
-       setExchangeUploading(true); setExchangeUrl('');
-       const saleClient = clients.find(client => client.id === clientId);
-       void uploadEvidenceFile(exchange, 'sale', 'exchangePhoto', { clientName: saleClient?.name || saleClient?.code || 'CLIENTE NO IDENTIFICADO', marketName: selectedMarket.name, recordType: 'VENTA' })
-         .then(saved => { if (!cancelled) setExchangeUrl(saved.url); })
-         .catch(error => { if (!cancelled) notify(error instanceof Error ? `No se pudo subir foto de canje: ${error.message}` : 'No se pudo subir la foto de canje a DigitalOcean Spaces.', true); })
-         .finally(() => { if (!cancelled) setExchangeUploading(false); });
-       return () => { cancelled = true; };
-     }, [exchange, selectedMarket?.id, clientId, bonus]);
-     useEffect(() => {
-       if (!markPhoto || !selectedMarket) { setMarkPhotoUrl(''); return; }
-       let cancelled = false;
-       setMarkPhotoUploading(true); setMarkPhotoUrl('');
-       const attendanceClient = clients.find(client => client.id === markClientId);
-       void uploadEvidenceFile(markPhoto, 'attendance', 'photo', { clientName: attendanceClient?.name || attendanceClient?.code || 'CLIENTE NO IDENTIFICADO', marketName: selectedMarket.name, recordType: `ASISTENCIA ${markType}` })
-         .then(saved => { if (!cancelled) setMarkPhotoUrl(saved.url); })
-         .catch(error => { if (!cancelled) notify(error instanceof Error ? `No se pudo subir marcación: ${error.message}` : 'No se pudo subir la foto de marcación a DigitalOcean Spaces.', true); })
-         .finally(() => { if (!cancelled) setMarkPhotoUploading(false); });
-       return () => { cancelled = true; };
-     }, [markPhoto, selectedMarket?.id, markClientId, markType]);
-    const mineSales = sales.filter(sale => sale.promoterId === user.id); const mineAttendance = attendance.filter(item => item.promoterId === user.id); const today = attendanceDay(attendanceClock); const todayAttendance = mineAttendance.filter(item => attendanceDay(item.date) === today); const todayAttendanceCount = (type: 'ENTRADA' | 'SALIDA') => todayAttendance.filter(item => item.type === type).length; const attendanceLimitReached = (type: 'ENTRADA' | 'SALIDA') => todayAttendanceCount(type) >= MAX_DAILY_ATTENDANCE_BY_TYPE; const todayAttendanceFor = (id: string) => mineAttendance.filter(item => item.clientId === id && attendanceDay(item.date) === today); const latestAttendanceFor = (id: string) => todayAttendanceFor(id).sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime())[0]; const exitedToday = (id: string) => latestAttendanceFor(id)?.type === 'SALIDA'; const sellingClients = available.filter(client => administrative || (latestAttendanceFor(client.id)?.type === 'ENTRADA' && !exitedToday(client.id))); const canSellForSelectedClient = Boolean(clientId && (administrative || (latestAttendanceFor(clientId)?.type === 'ENTRADA' && !exitedToday(clientId)))); const canConfirm = Boolean(!savingAdminSale && (!administrative || (Number.isFinite(Date.parse(administrative.date + '-05:00')) && Date.parse(administrative.date + '-05:00') <= Date.now())) && canSellForSelectedClient && saleFormValid && receiptUrl && !receiptUploading && (!bonus || (exchangeUrl && !exchangeUploading))); const filteredSales = mineSales.filter(sale => (modeFilter === 'TODO' || sale.mode === modeFilter) && `${sale.id} ${clients.find(client => client.id === sale.clientId)?.name || ''} ${sale.bonus || ''} ${sale.comment || ''}`.toLowerCase().includes(search.toLowerCase())); const filteredAttendance = mineAttendance.filter(item => `${clients.find(client => client.id === item.clientId)?.name || ''} ${item.type}`.toLowerCase().includes(search.toLowerCase()));
-  const saveSale = async () => {
-        if (!selectedMarket) { notify('Selecciona un mercado válido antes de registrar la venta.', true); return; }
-       if (!canSellForSelectedClient) { notify(exitedToday(clientId) ? 'Registra una nueva entrada en este cliente para volver a vender.' : 'Debes registrar una entrada activa en este cliente antes de registrar una venta.', true); return; }
-       if (!pricesValid) { notify(mode === 'UNIDADES' ? 'Ingresa un precio unitario mayor a S/ 0.00.' : 'Ingresa el precio unitario de cada marca utilizada.', true); return; }
-       if (!canConfirm) { notify(mode === 'PLANCHAS' && planchas > 80 ? 'Requiere autorización previa de Trade' : exceptionNeedsComment ? 'Para registrar 3 canjes, agrega el comentario de la excepción.' : bonus && missingRedemption ? `Stock insuficiente de ${redemptionLabel(missingRedemption[0])} para este canje` : Number.isFinite(saleAmount) && saleAmount > 0 ? 'Completa venta y evidencias' : 'Ingresa un precio unitario mayor a S/ 0.00', true); return; }
-         const id = administrative ? adminSaleId.current : `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`; const now = new Date().toISOString(); const sale: Sale = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId, marketId: selectedMarketId, marketRegion: selectedMarket.region || selectedMarket.department, marketDepartment: selectedMarket.department, marketProvince: selectedMarket.province, marketDistrict: selectedMarket.district, mode, units: total, amountSoles: saleAmount, weightKg: orderWeightKg, unitPrices: mode === 'UNIDADES' ? { [selectedProduct.sku]: unitPrice } : brandUnitPrices, planchas: mode === 'PLANCHAS' ? planchas : undefined, mix: mode === 'PLANCHAS' ? mix : { [selectedProduct.brand]: unitQty }, bonus, redemptionCount: canjeCount, redemptionItems: bonus ? requiredRedemptions : undefined, comment: comment.trim() || undefined, receiptPhoto: receiptUrl, exchangePhoto: bonus ? exchangeUrl : undefined, date: administrative ? new Date(administrative.date + '-05:00').toISOString() : now, updatedAt: now, status: 'PENDIENTE' };
-      if (administrative) {
-        if (savingAdminSale) return;
-        setSavingAdminSale(true);
-        try { await administrative.save(sale); }
-        catch (error) { notify(error instanceof Error ? error.message : 'No se pudo guardar la venta.', true); }
-        finally { setSavingAdminSale(false); }
-        return;
-      }
-      const next = [sale, ...sales]; setSales(next); writeStore('bt-sales', next);
-       if (bonus) {
-         const nextPromoterStock = requiredRedemptionEntries(requiredRedemptions).reduce((nextStock, [itemId, quantity]) => ({ ...nextStock, [itemId]: nextStock[itemId] - quantity }), { ...promoterStock });
-         onUpdateUser(withUserStock(user, userTastingStock(user), nextPromoterStock));
-       const currentMovements = readStore<InventoryMovement[]>('bt-inventory-movements', []);
-         const canjeMovements = requiredRedemptionEntries(requiredRedemptions).map(([itemId, quantity]) => ({ id: `CAN-${id}-${itemId}`, marketId: selectedMarketId, kind: 'CANJE' as const, itemId, quantity, actorId: user.id, actorName: user.name, promoterId: user.id, date: now, status: syncStatus() }));
-        const nextMovements = [...canjeMovements, ...currentMovements];
-        setMovements(nextMovements); writeStore('bt-inventory-movements', nextMovements);
-     }
-       setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || '')); setBrandPrices({ TODINNO: String(priceBySku[planchaProducts.TODINNO.sku]?.unitPrice || ''), COSTA: String(priceBySku[planchaProducts.COSTA.sku]?.unitPrice || ''), PASQUALINO: String(priceBySku[planchaProducts.PASQUALINO.sku]?.unitPrice || '') }); setRedemptionCount(1); setComment(''); setReceipt(null); setExchange(null); setReceiptUrl(''); setExchangeUrl(''); setView('LISTA'); notify(bonus ? `${canjeCount} canje${canjeCount === 1 ? '' : 's'} registrado${canjeCount === 1 ? '' : 's'}. Stock actualizado.` : 'Venta sin canje registrada');
+function PromoterApp({
+  administrative,
+  user,
+  markets,
+  clients,
+  assignments,
+  productPrices,
+  sales,
+  setSales,
+  attendance,
+  setAttendance,
+  inventory,
+  setInventory,
+  movements,
+  setMovements,
+  notify,
+  onSessionSelection,
+  onUpdateUser,
+  onLogout,
+  enqueueEvidencePhoto,
+}: {
+  administrative?: {
+    marketId: string;
+    clientId: string;
+    date: string;
+    close: () => void;
+    save: (sale: Sale) => Promise<void>;
   };
-    const finalizeAttendance = (tastingUsed = 0) => {
-      const stock = userTastingStock(user);
-      if (tastingUsed > stock) { notify(`Solo tienes ${stock} panetones de degustación disponibles`, true); return; }
-      const now = new Date(); const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`; const type = markType; const item: Attendance = { id, promoterId: user.id, promoterRole: user.role, promoterRoleLabel: user.roleLabel || user.role, clientId: markClientId, marketId: selectedMarketId, type, photo: markPhotoUrl, date: now.toISOString(), status: syncStatus() };
-      const next = [item, ...attendance]; setAttendance(next); writeStore('bt-attendance', next);
-     if (type === 'SALIDA') {
-        const movement: InventoryMovement = { id: `DEG-${id}`, marketId: selectedMarketId, kind: 'DEGUSTACION', quantity: tastingUsed, actorId: user.id, actorName: user.name, promoterId: user.id, date: now.toISOString(), status: syncStatus() };
-       const nextMovements = tastingUsed > 0 ? [movement, ...movements] : movements;
-        onUpdateUser(withUserStock(user, stock - tastingUsed, userRedemptionStock(user))); setMovements(nextMovements); writeStore('bt-inventory-movements', nextMovements);
-     }
-      setMarkPhoto(null); setMarkPhotoUrl(''); setMarkType(type === 'ENTRADA' ? 'SALIDA' : 'ENTRADA'); setView('LISTA'); notify(type === 'SALIDA' ? 'Salida registrada correctamente. Sesión finalizada.' : 'Entrada registrada correctamente');
-      if (type === 'SALIDA') onLogout();
-   };
-   const saveAttendance = () => {
-     if (!markClientId || !markPhoto || !markPhotoUrl || markPhotoUploading) { notify(markPhotoUploading ? 'Espera a que la foto suba a DigitalOcean Spaces.' : 'Selecciona la tienda y sube la fotografía a DigitalOcean Spaces.', true); return; }
-     const latest = latestAttendanceFor(markClientId);
-     if (attendanceLimitReached(markType)) { notify(`Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === 'ENTRADA' ? 'entradas' : 'salidas'} por hoy.`, true); return; }
-     if (markType === 'SALIDA' && (!latest || latest.type !== 'ENTRADA')) { notify('Primero debes registrar la entrada en esta tienda', true); return; }
-     if (markType === 'ENTRADA' && latest?.type === 'ENTRADA') { notify('Ya tienes una entrada abierta en esta tienda', true); return; }
-      if (markType === 'SALIDA') { setTastingExitPrompt(true); return; }
-     finalizeAttendance();
-   };
-   const saleForm = (<section className="sale-layout"><section className="sale-form"><span className="eyebrow">INFORMACIÓN</span><h2>Registrar venta</h2><p>Completa la compra para evaluar el canje.</p>{!administrative && <div className={`attendance-gate ${sellingClients.length ? 'ready' : 'blocked'}`}><Clock3 /><span>{sellingClients.length ? 'Venta habilitada para clientes con Entrada activa.' : 'Debes marcar Entrada en el cliente antes de registrar una venta.'}</span></div>}{!administrative && <SelectField label="Cliente *" value={clientId} onChange={setClientId} items={sellingClients.map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} placeholder={sellingClients.length ? 'Seleccionar cliente con Entrada activa' : 'Sin clientes con Entrada activa'} />}<Field label="Tipo de ingreso"><div className="mode-switch"><button className={mode === 'UNIDADES' ? 'selected' : ''} onClick={() => setMode('UNIDADES')} data-testid="button-mode-unidades"><ShoppingBag /> Unidades</button><button className={mode === 'PLANCHAS' ? 'selected' : ''} onClick={() => setMode('PLANCHAS')} data-testid="button-mode-planchas"><PackageCheck /> Planchas</button></div></Field>{mode === 'UNIDADES' ? <div className="form-grid"><SelectField label="Panetón / marca" value={sku} onChange={setSku} items={products.map(product => ({ value: product.sku, label: `${product.brand} · ${product.name} · ${formatKilos(product.weightKg)}` }))} /><Field label="Unidades (máximo 5)"><Input type="number" value={unitQtyInput} onChange={value => setUnitQtyInput(value === '' ? '' : String(Math.max(1, Math.min(5, Math.trunc(Number(value))))))} min={1} max={5} testId="input-sale-units" /></Field><Field label="Precio unitario (S/) *" className="full-field"><Input type="number" value={unitPriceSoles} onChange={setUnitPriceSoles} min={0.01} step={0.01} placeholder="0.00" testId="input-unit-price" /></Field></div> : <div className="plancha-box"><Field label="Cantidad de planchas"><Input type="number" value={planchasInput} onChange={value => setPlanchasInput(value === '' ? '' : String(Math.max(1, Math.trunc(Number(value)))))} min={1} testId="input-sale-planchas" /></Field><p className="formula">Total requerido: <strong>{planchas * 6} unidades</strong> · cada marca puede iniciar en 0 · {formatKilos(weightPerPlanchaKg)} por plancha</p><div className="brand-mix">{Object.entries(mixInputs).map(([brand, quantity]) => <Field label={brand} key={brand}><Input type="number" value={quantity} onChange={value => setMixInputs({ ...mixInputs, [brand]: value === '' ? '' : String(Math.max(0, Math.trunc(Number(value)))) })} min={0} /></Field>)}</div><div className="brand-prices">{Object.entries(mix).map(([brand]) => <Field label={`${brand} · precio unitario (S/) *`} key={`price-${brand}`}><Input type="number" value={brandPrices[brand as keyof typeof brandPrices]} onChange={value => setBrandPrices({ ...brandPrices, [brand]: value })} min={0.01} step={0.01} placeholder="0.00" testId={`input-price-${brand.toLowerCase()}`} /></Field>)}</div><div className={`mix-status ${validMix ? 'valid' : 'invalid'}`}>{validMix ? <><CheckCircle2 /> Mix válido: {totalMix} unidades</> : <>Debes sumar {planchas * 6} unidades entre las marcas utilizadas.</>}</div></div>}<div className="order-total"><span>Total calculado</span><strong>{formatSoles(saleAmount)}</strong><small>{mode === 'PLANCHAS' ? `${formatKilos(orderWeightKg)} total · ${formatKilos(weightPerPlanchaKg)} por plancha` : `${formatKilos(orderWeightKg)} de producto`}</small></div><div className={`bonus-box ${bonus ? 'active' : ''}`}><Gift /><div><small>{bonus ? 'CANJE ACTIVADO' : 'SIN CANJE'}</small><strong>{bonus || 'La compra aún no activa una bonificación'}</strong>{bonus && <small>{requiredRedemptionEntries(requiredRedemptions).map(([itemId, quantity]) => `${quantity} ${redemptionLabel(itemId)}`).join(' · ')} · ${redemptionTotal} disponibles</small>}</div></div>{bonus && mode === 'PLANCHAS' && (planchas === 10 || planchas > 80) && <Field label="Dinámica de canje *"><select className="select" value={selectedBonusProduct?.id || ''} onChange={event => setSelectedBonusProductId(event.target.value as CanjeProductId)} data-testid="select-canje-dinamica">{bonusProducts.map(product => <option value={product.id} key={product.id}>{product.label}</option>)}</select></Field>}{bonus && mode === 'UNIDADES' && <p className="sale-form-note">Canje automático: {canjeCount} canje{canjeCount === 1 ? '' : 's'} de Avena por {unitQty} unidades.</p>}{bonus && mode === 'PLANCHAS' && <Field label="Número de canjes utilizados *"><select className="select" value={redemptionCount} onChange={event => setRedemptionCount(Number(event.target.value))} data-testid="select-redemption-count"><option value={1}>1 canje</option><option value={2}>2 canjes</option><option value={3}>3 canjes (excepción)</option></select></Field>}{bonus && missingRedemption && <div className="stock-warning"><PackageCheck /> No hay stock suficiente de {redemptionLabel(missingRedemption[0])} para este canje.</div>}{bonus && canjeCount === 3 && <p className={`sale-form-note ${exceptionNeedsComment ? 'error' : ''}`}>{exceptionNeedsComment ? 'Agrega un comentario para justificar la excepción de 3 canjes.' : 'Excepción de 3 canjes registrada con comentario.'}</p>}<Field label="Comentario (opcional)"><textarea className="input textarea" value={comment} onChange={event => setComment(event.target.value)} placeholder="Agrega una observación de la visita o venta" maxLength={300} rows={3} data-testid="input-sale-comment" /></Field>{mode === 'PLANCHAS' && planchas > 80 && <div className="trade-warning"><ShieldCheck /> Requiere autorización previa de Trade.</div>}<div className="evidence-grid"><PhotoField label="Foto de boleta *" hint="Selecciona una foto desde galería" file={receipt} setFile={setReceipt} uploadedUrl={receiptUrl} uploading={receiptUploading} source="gallery" /><PhotoField label="Cliente con canje" hint={bonus ? 'Selecciona la foto del canje desde galería' : 'No requerida sin canje'} file={exchange} setFile={setExchange} disabled={!bonus} uploadedUrl={exchangeUrl} uploading={exchangeUploading} source="gallery" /></div><div className="form-actions"><Btn variant="outline" onClick={() => administrative ? administrative.close() : setView('LISTA')}>Cancelar</Btn><Btn disabled={!canConfirm} onClick={saveSale} testId="button-save-sale"><CheckCircle2 /> Guardar venta</Btn></div></section><aside className="recent"><h3>Resumen del registro</h3><p>Validación de compra, precio y peso.</p><div className="check-list"><p className="check"><Check /> {administrative ? 'Registro administrativo' : 'Cliente con Entrada activa'}</p><p className="check"><Check /> {total} unidades registradas</p><p className="check"><Check /> Total: {formatSoles(Number.isFinite(saleAmount) ? saleAmount : 0)}</p><p className="check"><Check /> Peso: {formatKilos(orderWeightKg)}</p><p className="check"><Gift /> {bonus ? `${canjeCount} canje${canjeCount === 1 ? '' : 's'} · ${bonus}` : 'Sin canje'}</p></div></aside></section>);
-   if (administrative) return saleForm;
-   if (!selectedMarket || !selectedClientId) return <main className="promoter-page"><div className="promoter-setup"><span className="eyebrow">INICIO DE JORNADA</span><h1>Selecciona tu visita</h1><p>Primero elige el mercado donde trabajarás y luego el cliente que visitarás.</p>{selectableMarkets.length ? <><SelectField label="Mercado *" value={selectedMarketId} onChange={value => { setSelectedMarketId(value); setSelectedClientId(''); }} items={selectableMarkets.map(item => ({ value: item.id, label: `${item.name} · ${item.district}` }))} /><SelectField label="Cliente a visitar *" value={selectedClientId} onChange={setSelectedClientId} items={available.map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} placeholder={selectedMarketId ? (available.length ? 'Seleccionar cliente' : 'No hay clientes en este mercado') : 'Primero selecciona un mercado'} /><p className="setup-hint"><CheckCircle2 /> Al elegir el cliente se habilitarán tus módulos de trabajo.</p></> : <div className="no-market"><MapPin /><h2>{promoterAssignment ? 'Sin mercados asignados' : 'No hay mercados disponibles'}</h2><p>{promoterAssignment ? 'Solicita al analista que te asigne al menos un mercado y sus clientes.' : 'Solicita al analista que cargue un mercado antes de iniciar la jornada.'}</p></div>}</div></main>;
-   return <main className="promoter-page"><div className="promoter-layout"><PromoterNav active={module} onChange={value => { setModule(value); setView('LISTA'); setSearch(''); }} /><div className="promoter-content">
-       <div className="promoter-head"><div><span className="crumb">INICIO / PROCESAMIENTO DE PEDIDOS / {module === 'VENTAS' ? 'VENTAS' : 'TURNOS Y ASISTENCIAS'}</span><h1>{module === 'VENTAS' ? (view === 'LISTA' ? <>Mis ventas <small>{mineSales.length} registros</small></> : 'Añadir venta') : (view === 'LISTA' ? 'Registros de marcación' : 'Añadir registro de marcación')}</h1><p>{selectedMarket.name} · {user.name} · Rol: {user.roleLabel || user.role}</p></div>{view === 'LISTA' && <Btn onClick={() => setView('NUEVA')} testId={`button-new-${module.toLowerCase()}`}><Plus /> Nueva {module === 'VENTAS' ? 'venta' : 'marcación'}</Btn>}</div>
-        <div className="market-banner"><span className="market-pin"><MapPin /></span><div><small>MERCADO SELECCIONADO</small><strong>{selectedMarket.name}</strong><p>{selectedMarket.district} · {selectedMarket.province} · {selectedMarket.department}</p></div><div className="market-stock-mini"><span>Mis premios <strong>{redemptionTotal}</strong></span><span>Mi degustación <strong>{userTastingStock(user)}</strong></span></div><StatusPill status="ACTIVO" /></div>
-     {module === 'VENTAS' && view === 'LISTA' && <div className="filters"><section className="dark-panel"><div className="dark-search"><Search /><Input value={search} onChange={setSearch} placeholder="Escribe para buscar" testId="input-search-sales" /></div>{filteredSales.length ? <div className="sale-table"><div className="sale-row header"><span>Ticket</span><span>Compra</span><span>Totales</span><span>Tienda y ubicación</span><span>Promotor</span><span>Fecha y hora</span></div>{filteredSales.map(sale => <div className="sale-row" key={sale.id}><span><em className="ticket">{sale.id}</em></span><span className="product-cell"><PackageCheck /><span><strong>{sale.mode === 'PLANCHAS' ? `${sale.planchas} plancha(s) · Mix de marcas` : `${sale.units} unidad(es)`}</strong><small>{sale.bonus ? `${sale.redemptionCount ?? 1} canje${(sale.redemptionCount ?? 1) === 1 ? '' : 's'} · ${sale.bonus}` : 'Venta sin canje'}{sale.comment ? ` · ${sale.comment}` : ''}</small></span></span><span><strong>{sale.units} und.</strong><small>{sale.mode} · {formatKilos(sale.weightKg)}</small></span><span className="store-cell"><Store /><span><strong>{clients.find(client => client.id === sale.clientId)?.name}</strong><small>{selectedMarket.name}</small><small>{saleMarketLocationText(sale, markets)}</small></span></span><span><strong>{user.name}</strong><small>Rol: {user.roleLabel || user.role}</small></span><span><strong>{formatDate(sale.date)}</strong><small>{sale.status}</small></span></div>)}</div> : <div className="dark-empty"><ShoppingBag /><h3>Aún no hay ventas</h3><p>Registra tu primera venta en este mercado.</p><Btn onClick={() => setView('NUEVA')}><Plus /> Nueva venta</Btn></div>}</section><aside className="filter-bar"><h3>Filtros</h3><label>Tipo de venta</label><div className="filter-switch">{(['TODO', 'UNIDADES', 'PLANCHAS'] as const).map(value => <button className={modeFilter === value ? 'active' : ''} key={value} onClick={() => setModeFilter(value)} data-testid={`filter-${value.toLowerCase()}`}>{value === 'TODO' ? 'Todo' : value.charAt(0) + value.slice(1).toLowerCase()}</button>)}</div><label>Buscar tienda o ticket</label><Input value={search} onChange={setSearch} placeholder="Escribe para buscar" /></aside></div>}
-      {module === 'MARCACIONES' && view === 'LISTA' && <section className="dark-panel"><div className="dark-search"><Search /><Input value={search} onChange={setSearch} placeholder="Escribe para buscar" testId="input-search-attendance" /></div>{filteredAttendance.length ? <div className="mark-table"><div className="mark-row header"><span>Tienda</span><span>Departamento</span><span>Promotor</span><span>Evento</span><span>Fecha y hora</span><span>Evidencia</span></div>{filteredAttendance.map(item => { const market = markets.find(current => current.id === item.marketId); return <div className="mark-row" key={item.id}><span className="store-cell"><Store /><span><strong>{clients.find(client => client.id === item.clientId)?.name || 'Tienda'}</strong><small>{clients.find(client => client.id === item.clientId)?.code}</small></span></span><span><strong>{market?.department || 'No identificado'}</strong><small>{market?.name || 'Mercado no identificado'}</small></span><span><strong>{user.name}</strong><small>Rol: {user.roleLabel || user.role}</small></span><span><span className={`sales-flag ${item.type === 'ENTRADA' ? 'yes' : 'no'}`}>{item.type}</span></span><span><strong>{formatDate(item.date)}</strong><small>{item.status}</small></span><span className="evidence-cell"><Camera /><small>Foto</small></span></div>; })}</div> : <div className="dark-empty"><Clock3 /><h3>Aún no hay marcaciones</h3><p>Registra tu primera entrada en una tienda.</p><Btn onClick={() => setView('NUEVA')}><Plus /> Nueva marcación</Btn></div>}</section>}
-    {view === 'NUEVA' && module === 'MARCACIONES' && <section className="dark-form"><div className="form-section-title">Información</div><div className="dark-form-body"><SelectField label="Tienda *" value={markClientId} onChange={setMarkClientId} items={available.map(client => ({ value: client.id, label: `${client.code} · ${client.name}` }))} /><SelectField label="Evento *" value={markType} onChange={value => setMarkType(value as 'ENTRADA' | 'SALIDA')} items={[{ value: 'ENTRADA', label: `Entrada (${todayAttendanceCount('ENTRADA')}/${MAX_DAILY_ATTENDANCE_BY_TYPE})` }, { value: 'SALIDA', label: `Salida (${todayAttendanceCount('SALIDA')}/${MAX_DAILY_ATTENDANCE_BY_TYPE})` }]} /><div className={`attendance-gate ${attendanceLimitReached(markType) ? 'blocked' : 'ready'}`}><Clock3 /><span>{attendanceLimitReached(markType) ? `Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === 'ENTRADA' ? 'entradas' : 'salidas'} por hoy.` : `Hoy llevas ${todayAttendanceCount('ENTRADA')} entrada(s) y ${todayAttendanceCount('SALIDA')} salida(s).`}</span></div><PhotoField label="Foto *" hint="Foto del promotor realizando la marcación" file={markPhoto} setFile={setMarkPhoto} uploadedUrl={markPhotoUrl} uploading={markPhotoUploading} /></div><div className="dark-actions"><Btn variant="outline" onClick={() => setView('LISTA')}>Cancelar</Btn><Btn disabled={!markClientId || !markPhotoUrl || markPhotoUploading || attendanceLimitReached(markType)} onClick={saveAttendance} testId="button-save-attendance"><CheckCircle2 /> Guardar marcación</Btn></div></section>}
-     {view === 'NUEVA' && module === 'VENTAS' && saleForm}
-      {tastingExitPrompt && <TastingExitModal available={userTastingStock(user)} onConfirm={tastingUsed => { setTastingExitPrompt(false); finalizeAttendance(tastingUsed); }} close={() => setTastingExitPrompt(false)} />}
-    </div></div></main>;
+  user: AppUser;
+  markets: Market[];
+  clients: Client[];
+  assignments: PromoterAssignment[];
+  productPrices: ProductPrice[];
+  sales: Sale[];
+  setSales: (value: Sale[]) => void;
+  attendance: Attendance[];
+  setAttendance: (value: Attendance[]) => void;
+  inventory: MarketInventory[];
+  setInventory: (value: MarketInventory[]) => void;
+  movements: InventoryMovement[];
+  setMovements: (value: InventoryMovement[]) => void;
+  notify: (message: string, error?: boolean) => void;
+  onSessionSelection: (selection: {
+    marketId: string;
+    clientId: string;
+  }) => void;
+  onUpdateUser: (user: AppUser) => void;
+  onLogout: () => void;
+  enqueueEvidencePhoto: (
+    file: File,
+    entityType: PendingPhotoUpload["entityType"],
+    entityId: string,
+    field: PendingPhotoUpload["field"],
+    context: PhotoUploadContext,
+  ) => void;
+}) {
+  const [attendanceClock, setAttendanceClock] = useState(() => new Date());
+  useEffect(() => {
+    const refresh = () => setAttendanceClock(new Date());
+    const timer = window.setInterval(refresh, 1000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+  const [savingAdminSale, setSavingAdminSale] = useState(false);
+  const adminSaleId = useRef(
+    `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`,
+  );
+  const promoterAssignment = assignments.find((assignment) =>
+    assignmentMatchesUser(assignment, user),
+  );
+  const assignedMarketIds = promoterAssignment
+    ? promoterAssignment.marketIds
+    : user.marketId
+      ? [user.marketId]
+      : [];
+  const selectableMarkets = markets.filter(
+    (market) =>
+      market.status === "ACTIVO" &&
+      (administrative || assignedMarketIds.includes(market.id)),
+  );
+  const [selectedMarketId, setSelectedMarketId] = useState(
+    administrative?.marketId || "",
+  );
+  const [selectedClientId, setSelectedClientId] = useState(
+    administrative?.clientId || "",
+  );
+  const [module, setModule] = useState<"MARCACIONES" | "VENTAS">("MARCACIONES");
+  const [view, setView] = useState<"LISTA" | "NUEVA">("LISTA");
+  const available = clients.filter(
+    (client) =>
+      client.marketId === selectedMarketId &&
+      client.status === "ACTIVO" &&
+      (!promoterAssignment || promoterAssignment.clientIds.includes(client.id)),
+  );
+  const selectedMarket = selectableMarkets.find(
+    (market) => market.id === selectedMarketId,
+  );
+  const [clientId, setClientId] = useState("");
+  const [mode, setMode] = useState<"UNIDADES" | "PLANCHAS">("UNIDADES");
+  const [sku, setSku] = useState(products[0].sku);
+  const [unitQtyInput, setUnitQtyInput] = useState("1");
+  const [unitPriceSoles, setUnitPriceSoles] = useState("");
+  const [brandPrices, setBrandPrices] = useState<Record<string, string>>({});
+  const [planchasInput, setPlanchasInput] = useState("1");
+  const [mixInputs, setMixInputs] = useState<Record<string, string>>({});
+  const [selectedBonusProductId, setSelectedBonusProductId] = useState<
+    CanjeProductId | ""
+  >("");
+  const [redemptionCount, setRedemptionCount] = useState(1);
+  const [comment, setComment] = useState("");
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [exchange, setExchange] = useState<File | null>(null);
+  const [receiptUrl, setReceiptUrl] = useState("");
+  const [exchangeUrl, setExchangeUrl] = useState("");
+  const [receiptUploading, setReceiptUploading] = useState(false);
+  const [exchangeUploading, setExchangeUploading] = useState(false);
+  const [markClientId, setMarkClientId] = useState("");
+  const [markType, setMarkType] = useState<"ENTRADA" | "SALIDA">("ENTRADA");
+  const [markPhoto, setMarkPhoto] = useState<File | null>(null);
+  const [markPhotoUrl, setMarkPhotoUrl] = useState("");
+  const [markPhotoUploading, setMarkPhotoUploading] = useState(false);
+  const [tastingExitPrompt, setTastingExitPrompt] = useState(false);
+  const [search, setSearch] = useState("");
+  const [modeFilter, setModeFilter] = useState<
+    "TODO" | "UNIDADES" | "PLANCHAS"
+  >("TODO");
+  const priceBySku = useMemo(
+    () => Object.fromEntries(productPrices.map((price) => [price.sku, price])),
+    [productPrices],
+  );
+  const availableProducts = useMemo(
+    () =>
+      normalizedProducts(productPrices).filter(
+        (product) => product.status === "ACTIVO",
+      ),
+    [productPrices],
+  );
+  const unitProducts = availableProducts.filter((product) =>
+    product.saleModes?.includes("UNIDADES"),
+  );
+  const planchaCatalogProducts = availableProducts.filter((product) =>
+    product.saleModes?.includes("PLANCHAS"),
+  );
+  useEffect(() => {
+    const price = priceBySku[sku]?.unitPrice;
+    setUnitPriceSoles(price ? String(price) : "");
+  }, [sku, priceBySku]);
+  useEffect(() => {
+    setBrandPrices(
+      Object.fromEntries(
+        planchaCatalogProducts.map((product) => [
+          product.brand,
+          String(product.unitPrice || ""),
+        ]),
+      ),
+    );
+    setMixInputs((current) =>
+      Object.fromEntries(
+        planchaCatalogProducts.map((product) => [
+          product.brand,
+          current[product.brand] || "0",
+        ]),
+      ),
+    );
+  }, [productPrices]);
+  useEffect(() => {
+    if (!unitProducts.some((product) => product.sku === sku) && unitProducts[0])
+      setSku(unitProducts[0].sku);
+  }, [productPrices, sku]);
+  useEffect(() => {
+    setClientId(selectedClientId);
+    setMarkClientId(selectedClientId);
+    onSessionSelection({
+      marketId: selectedMarketId,
+      clientId: selectedClientId,
+    });
+  }, [selectedMarketId, selectedClientId]);
+  const unitQty = Number(unitQtyInput) || 0;
+  const planchas = Number(planchasInput) || 0;
+  const mix = Object.fromEntries(
+    Object.entries(mixInputs).map(([brand, value]) => [
+      brand,
+      Number(value) || 0,
+    ]),
+  );
+  const selectedProduct =
+    unitProducts.find((product) => product.sku === sku) ||
+    unitProducts[0] ||
+    normalizedProducts([])[0];
+  const planchaProductByBrand = Object.fromEntries(
+    planchaCatalogProducts.map((product) => [product.brand, product]),
+  );
+  const brandUnitPrices = Object.fromEntries(
+    Object.keys(mix).map((brand) => [
+      brand,
+      parseSoles(brandPrices[brand] || ""),
+    ]),
+  ) as Record<string, number>;
+  const promoterStock = administrative
+    ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
+    : userRedemptionStock(user);
+  const redemptionTotal = sumRedemptionStock(promoterStock);
+  const totalMix = Object.values(mix).reduce(
+    (sum, quantity) => sum + quantity,
+    0,
+  );
+  const total = mode === "UNIDADES" ? unitQty : totalMix;
+  const unitPrice = parseSoles(unitPriceSoles);
+  const saleAmount =
+    mode === "UNIDADES"
+      ? unitQty * unitPrice
+      : Object.entries(mix).reduce(
+          (sum, [brand, quantity]) =>
+            sum + quantity * (brandUnitPrices[brand] || 0),
+          0,
+        );
+  const orderWeightKg =
+    mode === "UNIDADES"
+      ? unitQty * selectedProduct.weightKg
+      : Object.entries(mix).reduce(
+          (sum, [brand, quantity]) =>
+            sum + quantity * (planchaProductByBrand[brand]?.weightKg || 0),
+          0,
+        );
+  const weightPerPlanchaKg =
+    mode === "PLANCHAS" && planchas > 0 ? orderWeightKg / planchas : 0;
+  const pricesValid =
+    mode === "UNIDADES"
+      ? unitPrice > 0
+      : Object.entries(mix)
+          .filter(([, quantity]) => quantity > 0)
+          .every(([brand]) => (brandUnitPrices[brand] || 0) > 0);
+  const bonusProducts = bonusProductsFor(
+    mode,
+    total,
+    planchas,
+    promoterStock,
+    administrative ? new Date(administrative.date + "-05:00") : new Date(),
+  );
+  const selectedBonusProduct =
+    bonusProducts.find((product) => product.id === selectedBonusProductId) ||
+    bonusProducts[0];
+  const bonus = selectedBonusProduct?.label;
+  const automaticUnitCanjeCount =
+    mode === "UNIDADES" ? Math.floor(unitQty / 2) : 0;
+  const canjeCount = bonus
+    ? mode === "UNIDADES"
+      ? automaticUnitCanjeCount
+      : redemptionCount
+    : 0;
+  const requiredRedemptions = multiplyRedemptionRequirements(
+    selectedBonusProduct?.components || {},
+    canjeCount,
+  );
+  const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
+    ([itemId, quantity]) => promoterStock[itemId] < quantity,
+  );
+  const exceptionNeedsComment = Boolean(
+    mode === "PLANCHAS" && bonus && canjeCount === 3 && !comment.trim(),
+  );
+  const validUnitQty =
+    mode === "PLANCHAS" ||
+    (Number.isInteger(unitQty) && unitQty >= 1 && unitQty <= 5);
+  const validMix = mode === "UNIDADES" || totalMix === planchas * 6;
+  const saleFormValid = Boolean(
+    clientId &&
+    receipt &&
+    pricesValid &&
+    Number.isFinite(saleAmount) &&
+    saleAmount > 0 &&
+    validUnitQty &&
+    validMix &&
+    (!bonus || (exchange && !missingRedemption && !exceptionNeedsComment)) &&
+    !(mode === "PLANCHAS" && planchas > 80),
+  );
+  useEffect(() => {
+    if (!receipt || !selectedMarket) {
+      setReceiptUrl("");
+      return;
+    }
+    let cancelled = false;
+    setReceiptUploading(true);
+    setReceiptUrl("");
+    const saleClient = clients.find((client) => client.id === clientId);
+    void uploadEvidenceFile(receipt, "sale", "receiptPhoto", {
+      clientName:
+        saleClient?.name || saleClient?.code || "CLIENTE NO IDENTIFICADO",
+      marketName: selectedMarket.name,
+      recordType: "VENTA",
+    })
+      .then((saved) => {
+        if (!cancelled) setReceiptUrl(saved.url);
+      })
+      .catch((error) => {
+        if (!cancelled)
+          notify(
+            error instanceof Error
+              ? `No se pudo subir boleta: ${error.message}`
+              : "No se pudo subir la boleta a DigitalOcean Spaces.",
+            true,
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setReceiptUploading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [receipt, selectedMarket?.id, clientId]);
+  useEffect(() => {
+    if (!exchange || !selectedMarket || !bonus) {
+      setExchangeUrl("");
+      return;
+    }
+    let cancelled = false;
+    setExchangeUploading(true);
+    setExchangeUrl("");
+    const saleClient = clients.find((client) => client.id === clientId);
+    void uploadEvidenceFile(exchange, "sale", "exchangePhoto", {
+      clientName:
+        saleClient?.name || saleClient?.code || "CLIENTE NO IDENTIFICADO",
+      marketName: selectedMarket.name,
+      recordType: "VENTA",
+    })
+      .then((saved) => {
+        if (!cancelled) setExchangeUrl(saved.url);
+      })
+      .catch((error) => {
+        if (!cancelled)
+          notify(
+            error instanceof Error
+              ? `No se pudo subir foto de canje: ${error.message}`
+              : "No se pudo subir la foto de canje a DigitalOcean Spaces.",
+            true,
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setExchangeUploading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [exchange, selectedMarket?.id, clientId, bonus]);
+  useEffect(() => {
+    if (!markPhoto || !selectedMarket) {
+      setMarkPhotoUrl("");
+      return;
+    }
+    let cancelled = false;
+    setMarkPhotoUploading(true);
+    setMarkPhotoUrl("");
+    const attendanceClient = clients.find(
+      (client) => client.id === markClientId,
+    );
+    void uploadEvidenceFile(markPhoto, "attendance", "photo", {
+      clientName:
+        attendanceClient?.name ||
+        attendanceClient?.code ||
+        "CLIENTE NO IDENTIFICADO",
+      marketName: selectedMarket.name,
+      recordType: `ASISTENCIA ${markType}`,
+    })
+      .then((saved) => {
+        if (!cancelled) setMarkPhotoUrl(saved.url);
+      })
+      .catch((error) => {
+        if (!cancelled)
+          notify(
+            error instanceof Error
+              ? `No se pudo subir marcación: ${error.message}`
+              : "No se pudo subir la foto de marcación a DigitalOcean Spaces.",
+            true,
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setMarkPhotoUploading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [markPhoto, selectedMarket?.id, markClientId, markType]);
+  const mineSales = sales.filter((sale) => sale.promoterId === user.id);
+  const mineAttendance = attendance.filter(
+    (item) => item.promoterId === user.id,
+  );
+  const today = attendanceDay(attendanceClock);
+  const todayAttendance = mineAttendance.filter(
+    (item) => attendanceDay(item.date) === today,
+  );
+  const todayAttendanceCount = (type: "ENTRADA" | "SALIDA") =>
+    todayAttendance.filter((item) => item.type === type).length;
+  const attendanceLimitReached = (type: "ENTRADA" | "SALIDA") =>
+    todayAttendanceCount(type) >= MAX_DAILY_ATTENDANCE_BY_TYPE;
+  const todayAttendanceFor = (id: string) =>
+    mineAttendance.filter(
+      (item) => item.clientId === id && attendanceDay(item.date) === today,
+    );
+  const latestAttendanceFor = (id: string) =>
+    todayAttendanceFor(id).sort(
+      (first, second) =>
+        new Date(second.date).getTime() - new Date(first.date).getTime(),
+    )[0];
+  const exitedToday = (id: string) =>
+    latestAttendanceFor(id)?.type === "SALIDA";
+  const sellingClients = available.filter(
+    (client) =>
+      administrative ||
+      (latestAttendanceFor(client.id)?.type === "ENTRADA" &&
+        !exitedToday(client.id)),
+  );
+  const canSellForSelectedClient = Boolean(
+    clientId &&
+    (administrative ||
+      (latestAttendanceFor(clientId)?.type === "ENTRADA" &&
+        !exitedToday(clientId))),
+  );
+  const canConfirm = Boolean(
+    !savingAdminSale &&
+    (!administrative ||
+      (Number.isFinite(Date.parse(administrative.date + "-05:00")) &&
+        Date.parse(administrative.date + "-05:00") <= Date.now())) &&
+    canSellForSelectedClient &&
+    saleFormValid &&
+    receiptUrl &&
+    !receiptUploading &&
+    (!bonus || (exchangeUrl && !exchangeUploading)),
+  );
+  const filteredSales = mineSales.filter(
+    (sale) =>
+      (modeFilter === "TODO" || sale.mode === modeFilter) &&
+      `${sale.id} ${clients.find((client) => client.id === sale.clientId)?.name || ""} ${sale.bonus || ""} ${sale.comment || ""}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+  );
+  const filteredAttendance = mineAttendance.filter((item) =>
+    `${clients.find((client) => client.id === item.clientId)?.name || ""} ${item.type}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+  const saveSale = async () => {
+    if (!selectedMarket) {
+      notify("Selecciona un mercado válido antes de registrar la venta.", true);
+      return;
+    }
+    if (!canSellForSelectedClient) {
+      notify(
+        exitedToday(clientId)
+          ? "Registra una nueva entrada en este cliente para volver a vender."
+          : "Debes registrar una entrada activa en este cliente antes de registrar una venta.",
+        true,
+      );
+      return;
+    }
+    if (!pricesValid) {
+      notify(
+        mode === "UNIDADES"
+          ? "Ingresa un precio unitario mayor a S/ 0.00."
+          : "Ingresa el precio unitario de cada marca utilizada.",
+        true,
+      );
+      return;
+    }
+    if (!canConfirm) {
+      notify(
+        mode === "PLANCHAS" && planchas > 80
+          ? "Requiere autorización previa de Trade"
+          : exceptionNeedsComment
+            ? "Para registrar 3 canjes, agrega el comentario de la excepción."
+            : bonus && missingRedemption
+              ? `Stock insuficiente de ${redemptionLabel(missingRedemption[0])} para este canje`
+              : Number.isFinite(saleAmount) && saleAmount > 0
+                ? "Completa venta y evidencias"
+                : "Ingresa un precio unitario mayor a S/ 0.00",
+        true,
+      );
+      return;
+    }
+    const id = administrative
+      ? adminSaleId.current
+      : `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    const sale: Sale = {
+      id,
+      promoterId: user.id,
+      promoterRole: user.role,
+      promoterRoleLabel: user.roleLabel || user.role,
+      clientId,
+      marketId: selectedMarketId,
+      marketRegion: selectedMarket.region || selectedMarket.department,
+      marketDepartment: selectedMarket.department,
+      marketProvince: selectedMarket.province,
+      marketDistrict: selectedMarket.district,
+      mode,
+      units: total,
+      amountSoles: saleAmount,
+      weightKg: orderWeightKg,
+      unitPrices:
+        mode === "UNIDADES"
+          ? { [selectedProduct.sku]: unitPrice }
+          : brandUnitPrices,
+      planchas: mode === "PLANCHAS" ? planchas : undefined,
+      mix: mode === "PLANCHAS" ? mix : { [selectedProduct.brand]: unitQty },
+      bonus,
+      redemptionCount: canjeCount,
+      redemptionItems: bonus ? requiredRedemptions : undefined,
+      comment: comment.trim() || undefined,
+      receiptPhoto: receiptUrl,
+      exchangePhoto: bonus ? exchangeUrl : undefined,
+      date: administrative
+        ? new Date(administrative.date + "-05:00").toISOString()
+        : now,
+      updatedAt: now,
+      status: "PENDIENTE",
+    };
+    if (administrative) {
+      if (savingAdminSale) return;
+      setSavingAdminSale(true);
+      try {
+        await administrative.save(sale);
+      } catch (error) {
+        notify(
+          error instanceof Error
+            ? error.message
+            : "No se pudo guardar la venta.",
+          true,
+        );
+      } finally {
+        setSavingAdminSale(false);
+      }
+      return;
+    }
+    const next = [sale, ...sales];
+    setSales(next);
+    writeStore("bt-sales", next);
+    if (bonus) {
+      const nextPromoterStock = requiredRedemptionEntries(
+        requiredRedemptions,
+      ).reduce(
+        (nextStock, [itemId, quantity]) => ({
+          ...nextStock,
+          [itemId]: nextStock[itemId] - quantity,
+        }),
+        { ...promoterStock },
+      );
+      onUpdateUser(
+        withUserStock(user, userTastingStock(user), nextPromoterStock),
+      );
+      const currentMovements = readStore<InventoryMovement[]>(
+        "bt-inventory-movements",
+        [],
+      );
+      const canjeMovements = requiredRedemptionEntries(requiredRedemptions).map(
+        ([itemId, quantity]) => ({
+          id: `CAN-${id}-${itemId}`,
+          marketId: selectedMarketId,
+          kind: "CANJE" as const,
+          itemId,
+          quantity,
+          actorId: user.id,
+          actorName: user.name,
+          promoterId: user.id,
+          date: now,
+          status: syncStatus(),
+        }),
+      );
+      const nextMovements = [...canjeMovements, ...currentMovements];
+      setMovements(nextMovements);
+      writeStore("bt-inventory-movements", nextMovements);
+    }
+    setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
+    setBrandPrices(
+      Object.fromEntries(
+        planchaCatalogProducts.map((product) => [
+          product.brand,
+          String(product.unitPrice || ""),
+        ]),
+      ),
+    );
+    setRedemptionCount(1);
+    setComment("");
+    setReceipt(null);
+    setExchange(null);
+    setReceiptUrl("");
+    setExchangeUrl("");
+    setView("LISTA");
+    notify(
+      bonus
+        ? `${canjeCount} canje${canjeCount === 1 ? "" : "s"} registrado${canjeCount === 1 ? "" : "s"}. Stock actualizado.`
+        : "Venta sin canje registrada",
+    );
+  };
+  const finalizeAttendance = (tastingUsed = 0) => {
+    const stock = userTastingStock(user);
+    if (tastingUsed > stock) {
+      notify(`Solo tienes ${stock} panetones de degustación disponibles`, true);
+      return;
+    }
+    const now = new Date();
+    const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`;
+    const type = markType;
+    const item: Attendance = {
+      id,
+      promoterId: user.id,
+      promoterRole: user.role,
+      promoterRoleLabel: user.roleLabel || user.role,
+      clientId: markClientId,
+      marketId: selectedMarketId,
+      type,
+      photo: markPhotoUrl,
+      date: now.toISOString(),
+      status: syncStatus(),
+    };
+    const next = [item, ...attendance];
+    setAttendance(next);
+    writeStore("bt-attendance", next);
+    if (type === "SALIDA") {
+      const movement: InventoryMovement = {
+        id: `DEG-${id}`,
+        marketId: selectedMarketId,
+        kind: "DEGUSTACION",
+        quantity: tastingUsed,
+        actorId: user.id,
+        actorName: user.name,
+        promoterId: user.id,
+        date: now.toISOString(),
+        status: syncStatus(),
+      };
+      const nextMovements =
+        tastingUsed > 0 ? [movement, ...movements] : movements;
+      onUpdateUser(
+        withUserStock(user, stock - tastingUsed, userRedemptionStock(user)),
+      );
+      setMovements(nextMovements);
+      writeStore("bt-inventory-movements", nextMovements);
+    }
+    setMarkPhoto(null);
+    setMarkPhotoUrl("");
+    setMarkType(type === "ENTRADA" ? "SALIDA" : "ENTRADA");
+    setView("LISTA");
+    notify(
+      type === "SALIDA"
+        ? "Salida registrada correctamente. Sesión finalizada."
+        : "Entrada registrada correctamente",
+    );
+    if (type === "SALIDA") onLogout();
+  };
+  const saveAttendance = () => {
+    if (!markClientId || !markPhoto || !markPhotoUrl || markPhotoUploading) {
+      notify(
+        markPhotoUploading
+          ? "Espera a que la foto suba a DigitalOcean Spaces."
+          : "Selecciona la tienda y sube la fotografía a DigitalOcean Spaces.",
+        true,
+      );
+      return;
+    }
+    const latest = latestAttendanceFor(markClientId);
+    if (attendanceLimitReached(markType)) {
+      notify(
+        `Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === "ENTRADA" ? "entradas" : "salidas"} por hoy.`,
+        true,
+      );
+      return;
+    }
+    if (markType === "SALIDA" && (!latest || latest.type !== "ENTRADA")) {
+      notify("Primero debes registrar la entrada en esta tienda", true);
+      return;
+    }
+    if (markType === "ENTRADA" && latest?.type === "ENTRADA") {
+      notify("Ya tienes una entrada abierta en esta tienda", true);
+      return;
+    }
+    if (markType === "SALIDA") {
+      setTastingExitPrompt(true);
+      return;
+    }
+    finalizeAttendance();
+  };
+  const saleForm = (
+    <section className="sale-layout">
+      <section className="sale-form">
+        <span className="eyebrow">INFORMACIÓN</span>
+        <h2>Registrar venta</h2>
+        <p>Completa la compra para evaluar el canje.</p>
+        {!administrative && (
+          <div
+            className={`attendance-gate ${sellingClients.length ? "ready" : "blocked"}`}
+          >
+            <Clock3 />
+            <span>
+              {sellingClients.length
+                ? "Venta habilitada para clientes con Entrada activa."
+                : "Debes marcar Entrada en el cliente antes de registrar una venta."}
+            </span>
+          </div>
+        )}
+        {!administrative && (
+          <SelectField
+            label="Cliente *"
+            value={clientId}
+            onChange={setClientId}
+            items={sellingClients.map((client) => ({
+              value: client.id,
+              label: `${client.code} · ${client.name}`,
+            }))}
+            placeholder={
+              sellingClients.length
+                ? "Seleccionar cliente con Entrada activa"
+                : "Sin clientes con Entrada activa"
+            }
+          />
+        )}
+        <Field label="Tipo de ingreso">
+          <div className="mode-switch">
+            <button
+              className={mode === "UNIDADES" ? "selected" : ""}
+              onClick={() => setMode("UNIDADES")}
+              data-testid="button-mode-unidades"
+            >
+              <ShoppingBag /> Unidades
+            </button>
+            <button
+              className={mode === "PLANCHAS" ? "selected" : ""}
+              onClick={() => setMode("PLANCHAS")}
+              data-testid="button-mode-planchas"
+            >
+              <PackageCheck /> Planchas
+            </button>
+          </div>
+        </Field>
+        {mode === "UNIDADES" ? (
+          <div className="form-grid">
+            <SelectField
+              label="Panetón / marca"
+              value={sku}
+              onChange={setSku}
+              items={unitProducts.map((product) => ({
+                value: product.sku,
+                label: `${product.brand} · ${product.product} · ${formatKilos(product.weightKg || 0)}`,
+              }))}
+            />
+            <Field label="Unidades (máximo 5)">
+              <Input
+                type="number"
+                value={unitQtyInput}
+                onChange={(value) =>
+                  setUnitQtyInput(
+                    value === ""
+                      ? ""
+                      : String(
+                          Math.max(1, Math.min(5, Math.trunc(Number(value)))),
+                        ),
+                  )
+                }
+                min={1}
+                max={5}
+                testId="input-sale-units"
+              />
+            </Field>
+            <Field label="Precio unitario (S/) *" className="full-field">
+              <Input
+                type="number"
+                value={unitPriceSoles}
+                onChange={setUnitPriceSoles}
+                min={0.01}
+                step={0.01}
+                placeholder="0.00"
+                testId="input-unit-price"
+              />
+            </Field>
+          </div>
+        ) : (
+          <div className="plancha-box">
+            <Field label="Cantidad de planchas">
+              <Input
+                type="number"
+                value={planchasInput}
+                onChange={(value) =>
+                  setPlanchasInput(
+                    value === ""
+                      ? ""
+                      : String(Math.max(1, Math.trunc(Number(value)))),
+                  )
+                }
+                min={1}
+                testId="input-sale-planchas"
+              />
+            </Field>
+            <p className="formula">
+              Total requerido: <strong>{planchas * 6} unidades</strong> · cada
+              marca puede iniciar en 0 · {formatKilos(weightPerPlanchaKg)} por
+              plancha
+            </p>
+            <div className="brand-mix">
+              {Object.entries(mixInputs).map(([brand, quantity]) => (
+                <Field label={brand} key={brand}>
+                  <Input
+                    type="number"
+                    value={quantity}
+                    onChange={(value) =>
+                      setMixInputs({
+                        ...mixInputs,
+                        [brand]:
+                          value === ""
+                            ? ""
+                            : String(Math.max(0, Math.trunc(Number(value)))),
+                      })
+                    }
+                    min={0}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className="brand-prices">
+              {Object.entries(mix).map(([brand]) => (
+                <Field
+                  label={`${brand} · precio unitario (S/) *`}
+                  key={`price-${brand}`}
+                >
+                  <Input
+                    type="number"
+                    value={brandPrices[brand] || ""}
+                    onChange={(value) =>
+                      setBrandPrices({ ...brandPrices, [brand]: value })
+                    }
+                    min={0.01}
+                    step={0.01}
+                    placeholder="0.00"
+                    testId={`input-price-${brand.toLowerCase()}`}
+                  />
+                </Field>
+              ))}
+            </div>
+            <div className={`mix-status ${validMix ? "valid" : "invalid"}`}>
+              {validMix ? (
+                <>
+                  <CheckCircle2 /> Mix válido: {totalMix} unidades
+                </>
+              ) : (
+                <>
+                  Debes sumar {planchas * 6} unidades entre las marcas
+                  utilizadas.
+                </>
+              )}
+            </div>
+          </div>
+        )}
+        <div className="order-total">
+          <span>Total calculado</span>
+          <strong>{formatSoles(saleAmount)}</strong>
+          <small>
+            {mode === "PLANCHAS"
+              ? `${formatKilos(orderWeightKg)} total · ${formatKilos(weightPerPlanchaKg)} por plancha`
+              : `${formatKilos(orderWeightKg)} de producto`}
+          </small>
+        </div>
+        <div className={`bonus-box ${bonus ? "active" : ""}`}>
+          <Gift />
+          <div>
+            <small>{bonus ? "CANJE ACTIVADO" : "SIN CANJE"}</small>
+            <strong>
+              {bonus || "La compra aún no activa una bonificación"}
+            </strong>
+            {bonus && (
+              <small>
+                {requiredRedemptionEntries(requiredRedemptions)
+                  .map(
+                    ([itemId, quantity]) =>
+                      `${quantity} ${redemptionLabel(itemId)}`,
+                  )
+                  .join(" · ")}{" "}
+                · ${redemptionTotal} disponibles
+              </small>
+            )}
+          </div>
+        </div>
+        {bonus && mode === "PLANCHAS" && (planchas === 10 || planchas > 80) && (
+          <Field label="Dinámica de canje *">
+            <select
+              className="select"
+              value={selectedBonusProduct?.id || ""}
+              onChange={(event) =>
+                setSelectedBonusProductId(event.target.value as CanjeProductId)
+              }
+              data-testid="select-canje-dinamica"
+            >
+              {bonusProducts.map((product) => (
+                <option value={product.id} key={product.id}>
+                  {product.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {bonus && mode === "UNIDADES" && (
+          <p className="sale-form-note">
+            Canje automático: {canjeCount} canje{canjeCount === 1 ? "" : "s"} de
+            Avena por {unitQty} unidades.
+          </p>
+        )}
+        {bonus && mode === "PLANCHAS" && (
+          <Field label="Número de canjes utilizados *">
+            <select
+              className="select"
+              value={redemptionCount}
+              onChange={(event) =>
+                setRedemptionCount(Number(event.target.value))
+              }
+              data-testid="select-redemption-count"
+            >
+              <option value={1}>1 canje</option>
+              <option value={2}>2 canjes</option>
+              <option value={3}>3 canjes (excepción)</option>
+            </select>
+          </Field>
+        )}
+        {bonus && missingRedemption && (
+          <div className="stock-warning">
+            <PackageCheck /> No hay stock suficiente de{" "}
+            {redemptionLabel(missingRedemption[0])} para este canje.
+          </div>
+        )}
+        {bonus && canjeCount === 3 && (
+          <p
+            className={`sale-form-note ${exceptionNeedsComment ? "error" : ""}`}
+          >
+            {exceptionNeedsComment
+              ? "Agrega un comentario para justificar la excepción de 3 canjes."
+              : "Excepción de 3 canjes registrada con comentario."}
+          </p>
+        )}
+        <Field label="Comentario (opcional)">
+          <textarea
+            className="input textarea"
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            placeholder="Agrega una observación de la visita o venta"
+            maxLength={300}
+            rows={3}
+            data-testid="input-sale-comment"
+          />
+        </Field>
+        {mode === "PLANCHAS" && planchas > 80 && (
+          <div className="trade-warning">
+            <ShieldCheck /> Requiere autorización previa de Trade.
+          </div>
+        )}
+        <div className="evidence-grid">
+          <PhotoField
+            label="Foto de boleta *"
+            hint="Selecciona una foto desde galería"
+            file={receipt}
+            setFile={setReceipt}
+            uploadedUrl={receiptUrl}
+            uploading={receiptUploading}
+            source="gallery"
+          />
+          <PhotoField
+            label="Cliente con canje"
+            hint={
+              bonus
+                ? "Selecciona la foto del canje desde galería"
+                : "No requerida sin canje"
+            }
+            file={exchange}
+            setFile={setExchange}
+            disabled={!bonus}
+            uploadedUrl={exchangeUrl}
+            uploading={exchangeUploading}
+            source="gallery"
+          />
+        </div>
+        <div className="form-actions">
+          <Btn
+            variant="outline"
+            onClick={() =>
+              administrative ? administrative.close() : setView("LISTA")
+            }
+          >
+            Cancelar
+          </Btn>
+          <Btn
+            disabled={!canConfirm}
+            onClick={saveSale}
+            testId="button-save-sale"
+          >
+            <CheckCircle2 /> Guardar venta
+          </Btn>
+        </div>
+      </section>
+      <aside className="recent">
+        <h3>Resumen del registro</h3>
+        <p>Validación de compra, precio y peso.</p>
+        <div className="check-list">
+          <p className="check">
+            <Check />{" "}
+            {administrative
+              ? "Registro administrativo"
+              : "Cliente con Entrada activa"}
+          </p>
+          <p className="check">
+            <Check /> {total} unidades registradas
+          </p>
+          <p className="check">
+            <Check /> Total:{" "}
+            {formatSoles(Number.isFinite(saleAmount) ? saleAmount : 0)}
+          </p>
+          <p className="check">
+            <Check /> Peso: {formatKilos(orderWeightKg)}
+          </p>
+          <p className="check">
+            <Gift />{" "}
+            {bonus
+              ? `${canjeCount} canje${canjeCount === 1 ? "" : "s"} · ${bonus}`
+              : "Sin canje"}
+          </p>
+        </div>
+      </aside>
+    </section>
+  );
+  if (administrative) return saleForm;
+  if (!selectedMarket || !selectedClientId)
+    return (
+      <main className="promoter-page">
+        <div className="promoter-setup">
+          <span className="eyebrow">INICIO DE JORNADA</span>
+          <h1>Selecciona tu visita</h1>
+          <p>
+            Primero elige el mercado donde trabajarás y luego el cliente que
+            visitarás.
+          </p>
+          {selectableMarkets.length ? (
+            <>
+              <SelectField
+                label="Mercado *"
+                value={selectedMarketId}
+                onChange={(value) => {
+                  setSelectedMarketId(value);
+                  setSelectedClientId("");
+                }}
+                items={selectableMarkets.map((item) => ({
+                  value: item.id,
+                  label: `${item.name} · ${item.district}`,
+                }))}
+              />
+              <SelectField
+                label="Cliente a visitar *"
+                value={selectedClientId}
+                onChange={setSelectedClientId}
+                items={available.map((client) => ({
+                  value: client.id,
+                  label: `${client.code} · ${client.name}`,
+                }))}
+                placeholder={
+                  selectedMarketId
+                    ? available.length
+                      ? "Seleccionar cliente"
+                      : "No hay clientes en este mercado"
+                    : "Primero selecciona un mercado"
+                }
+              />
+              <p className="setup-hint">
+                <CheckCircle2 /> Al elegir el cliente se habilitarán tus módulos
+                de trabajo.
+              </p>
+            </>
+          ) : (
+            <div className="no-market">
+              <MapPin />
+              <h2>
+                {promoterAssignment
+                  ? "Sin mercados asignados"
+                  : "No hay mercados disponibles"}
+              </h2>
+              <p>
+                {promoterAssignment
+                  ? "Solicita al analista que te asigne al menos un mercado y sus clientes."
+                  : "Solicita al analista que cargue un mercado antes de iniciar la jornada."}
+              </p>
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  return (
+    <main className="promoter-page">
+      <div className="promoter-layout">
+        <PromoterNav
+          active={module}
+          onChange={(value) => {
+            setModule(value);
+            setView("LISTA");
+            setSearch("");
+          }}
+        />
+        <div className="promoter-content">
+          <div className="promoter-head">
+            <div>
+              <span className="crumb">
+                INICIO / PROCESAMIENTO DE PEDIDOS /{" "}
+                {module === "VENTAS" ? "VENTAS" : "TURNOS Y ASISTENCIAS"}
+              </span>
+              <h1>
+                {module === "VENTAS" ? (
+                  view === "LISTA" ? (
+                    <>
+                      Mis ventas <small>{mineSales.length} registros</small>
+                    </>
+                  ) : (
+                    "Añadir venta"
+                  )
+                ) : view === "LISTA" ? (
+                  "Registros de marcación"
+                ) : (
+                  "Añadir registro de marcación"
+                )}
+              </h1>
+              <p>
+                {selectedMarket.name} · {user.name} · Rol:{" "}
+                {user.roleLabel || user.role}
+              </p>
+            </div>
+            {view === "LISTA" && (
+              <Btn
+                onClick={() => setView("NUEVA")}
+                testId={`button-new-${module.toLowerCase()}`}
+              >
+                <Plus /> Nueva {module === "VENTAS" ? "venta" : "marcación"}
+              </Btn>
+            )}
+          </div>
+          <div className="market-banner">
+            <span className="market-pin">
+              <MapPin />
+            </span>
+            <div>
+              <small>MERCADO SELECCIONADO</small>
+              <strong>{selectedMarket.name}</strong>
+              <p>
+                {selectedMarket.district} · {selectedMarket.province} ·{" "}
+                {selectedMarket.department}
+              </p>
+            </div>
+            <div className="market-stock-mini">
+              <span>
+                Mis premios <strong>{redemptionTotal}</strong>
+              </span>
+              <span>
+                Mi degustación <strong>{userTastingStock(user)}</strong>
+              </span>
+            </div>
+            <StatusPill status="ACTIVO" />
+          </div>
+          {module === "VENTAS" && view === "LISTA" && (
+            <div className="filters">
+              <section className="dark-panel">
+                <div className="dark-search">
+                  <Search />
+                  <Input
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Escribe para buscar"
+                    testId="input-search-sales"
+                  />
+                </div>
+                {filteredSales.length ? (
+                  <div className="sale-table">
+                    <div className="sale-row header">
+                      <span>Ticket</span>
+                      <span>Compra</span>
+                      <span>Totales</span>
+                      <span>Tienda y ubicación</span>
+                      <span>Promotor</span>
+                      <span>Fecha y hora</span>
+                    </div>
+                    {filteredSales.map((sale) => (
+                      <div className="sale-row" key={sale.id}>
+                        <span>
+                          <em className="ticket">{sale.id}</em>
+                        </span>
+                        <span className="product-cell">
+                          <PackageCheck />
+                          <span>
+                            <strong>
+                              {sale.mode === "PLANCHAS"
+                                ? `${sale.planchas} plancha(s) · Mix de marcas`
+                                : `${sale.units} unidad(es)`}
+                            </strong>
+                            <small>
+                              {sale.bonus
+                                ? `${sale.redemptionCount ?? 1} canje${(sale.redemptionCount ?? 1) === 1 ? "" : "s"} · ${sale.bonus}`
+                                : "Venta sin canje"}
+                              {sale.comment ? ` · ${sale.comment}` : ""}
+                            </small>
+                          </span>
+                        </span>
+                        <span>
+                          <strong>{sale.units} und.</strong>
+                          <small>
+                            {sale.mode} · {formatKilos(sale.weightKg)}
+                          </small>
+                        </span>
+                        <span className="store-cell">
+                          <Store />
+                          <span>
+                            <strong>
+                              {
+                                clients.find(
+                                  (client) => client.id === sale.clientId,
+                                )?.name
+                              }
+                            </strong>
+                            <small>{selectedMarket.name}</small>
+                            <small>
+                              {saleMarketLocationText(sale, markets)}
+                            </small>
+                          </span>
+                        </span>
+                        <span>
+                          <strong>{user.name}</strong>
+                          <small>Rol: {user.roleLabel || user.role}</small>
+                        </span>
+                        <span>
+                          <strong>{formatDate(sale.date)}</strong>
+                          <small>{sale.status}</small>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="dark-empty">
+                    <ShoppingBag />
+                    <h3>Aún no hay ventas</h3>
+                    <p>Registra tu primera venta en este mercado.</p>
+                    <Btn onClick={() => setView("NUEVA")}>
+                      <Plus /> Nueva venta
+                    </Btn>
+                  </div>
+                )}
+              </section>
+              <aside className="filter-bar">
+                <h3>Filtros</h3>
+                <label>Tipo de venta</label>
+                <div className="filter-switch">
+                  {(["TODO", "UNIDADES", "PLANCHAS"] as const).map((value) => (
+                    <button
+                      className={modeFilter === value ? "active" : ""}
+                      key={value}
+                      onClick={() => setModeFilter(value)}
+                      data-testid={`filter-${value.toLowerCase()}`}
+                    >
+                      {value === "TODO"
+                        ? "Todo"
+                        : value.charAt(0) + value.slice(1).toLowerCase()}
+                    </button>
+                  ))}
+                </div>
+                <label>Buscar tienda o ticket</label>
+                <Input
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="Escribe para buscar"
+                />
+              </aside>
+            </div>
+          )}
+          {module === "MARCACIONES" && view === "LISTA" && (
+            <section className="dark-panel">
+              <div className="dark-search">
+                <Search />
+                <Input
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="Escribe para buscar"
+                  testId="input-search-attendance"
+                />
+              </div>
+              {filteredAttendance.length ? (
+                <div className="mark-table">
+                  <div className="mark-row header">
+                    <span>Tienda</span>
+                    <span>Departamento</span>
+                    <span>Promotor</span>
+                    <span>Evento</span>
+                    <span>Fecha y hora</span>
+                    <span>Evidencia</span>
+                  </div>
+                  {filteredAttendance.map((item) => {
+                    const market = markets.find(
+                      (current) => current.id === item.marketId,
+                    );
+                    return (
+                      <div className="mark-row" key={item.id}>
+                        <span className="store-cell">
+                          <Store />
+                          <span>
+                            <strong>
+                              {clients.find(
+                                (client) => client.id === item.clientId,
+                              )?.name || "Tienda"}
+                            </strong>
+                            <small>
+                              {
+                                clients.find(
+                                  (client) => client.id === item.clientId,
+                                )?.code
+                              }
+                            </small>
+                          </span>
+                        </span>
+                        <span>
+                          <strong>
+                            {market?.department || "No identificado"}
+                          </strong>
+                          <small>
+                            {market?.name || "Mercado no identificado"}
+                          </small>
+                        </span>
+                        <span>
+                          <strong>{user.name}</strong>
+                          <small>Rol: {user.roleLabel || user.role}</small>
+                        </span>
+                        <span>
+                          <span
+                            className={`sales-flag ${item.type === "ENTRADA" ? "yes" : "no"}`}
+                          >
+                            {item.type}
+                          </span>
+                        </span>
+                        <span>
+                          <strong>{formatDate(item.date)}</strong>
+                          <small>{item.status}</small>
+                        </span>
+                        <span className="evidence-cell">
+                          <Camera />
+                          <small>Foto</small>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="dark-empty">
+                  <Clock3 />
+                  <h3>Aún no hay marcaciones</h3>
+                  <p>Registra tu primera entrada en una tienda.</p>
+                  <Btn onClick={() => setView("NUEVA")}>
+                    <Plus /> Nueva marcación
+                  </Btn>
+                </div>
+              )}
+            </section>
+          )}
+          {view === "NUEVA" && module === "MARCACIONES" && (
+            <section className="dark-form">
+              <div className="form-section-title">Información</div>
+              <div className="dark-form-body">
+                <SelectField
+                  label="Tienda *"
+                  value={markClientId}
+                  onChange={setMarkClientId}
+                  items={available.map((client) => ({
+                    value: client.id,
+                    label: `${client.code} · ${client.name}`,
+                  }))}
+                />
+                <SelectField
+                  label="Evento *"
+                  value={markType}
+                  onChange={(value) =>
+                    setMarkType(value as "ENTRADA" | "SALIDA")
+                  }
+                  items={[
+                    {
+                      value: "ENTRADA",
+                      label: `Entrada (${todayAttendanceCount("ENTRADA")}/${MAX_DAILY_ATTENDANCE_BY_TYPE})`,
+                    },
+                    {
+                      value: "SALIDA",
+                      label: `Salida (${todayAttendanceCount("SALIDA")}/${MAX_DAILY_ATTENDANCE_BY_TYPE})`,
+                    },
+                  ]}
+                />
+                <div
+                  className={`attendance-gate ${attendanceLimitReached(markType) ? "blocked" : "ready"}`}
+                >
+                  <Clock3 />
+                  <span>
+                    {attendanceLimitReached(markType)
+                      ? `Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === "ENTRADA" ? "entradas" : "salidas"} por hoy.`
+                      : `Hoy llevas ${todayAttendanceCount("ENTRADA")} entrada(s) y ${todayAttendanceCount("SALIDA")} salida(s).`}
+                  </span>
+                </div>
+                <PhotoField
+                  label="Foto *"
+                  hint="Foto del promotor realizando la marcación"
+                  file={markPhoto}
+                  setFile={setMarkPhoto}
+                  uploadedUrl={markPhotoUrl}
+                  uploading={markPhotoUploading}
+                />
+              </div>
+              <div className="dark-actions">
+                <Btn variant="outline" onClick={() => setView("LISTA")}>
+                  Cancelar
+                </Btn>
+                <Btn
+                  disabled={
+                    !markClientId ||
+                    !markPhotoUrl ||
+                    markPhotoUploading ||
+                    attendanceLimitReached(markType)
+                  }
+                  onClick={saveAttendance}
+                  testId="button-save-attendance"
+                >
+                  <CheckCircle2 /> Guardar marcación
+                </Btn>
+              </div>
+            </section>
+          )}
+          {view === "NUEVA" && module === "VENTAS" && saleForm}
+          {tastingExitPrompt && (
+            <TastingExitModal
+              available={userTastingStock(user)}
+              onConfirm={(tastingUsed) => {
+                setTastingExitPrompt(false);
+                finalizeAttendance(tastingUsed);
+              }}
+              close={() => setTastingExitPrompt(false)}
+            />
+          )}
+        </div>
+      </div>
+    </main>
+  );
 }
 
-function ClientApp({ user, clients, sales, markets }: { user: AppUser; clients: Client[]; sales: Sale[]; markets: Market[] }) {
-  const client = clients.find(item => item.id === user.clientId || item.code === user.clientId);
-  const market = client ? markets.find(item => item.id === client.marketId) : undefined;
-  const clientSales = client ? sales.filter(sale => sale.clientId === client.id).sort((first, second) => second.date.localeCompare(first.date)) : [];
-  const totalUnits = clientSales.reduce((sum, sale) => sum + (Number(sale.units) || 0), 0);
-  const totalSoles = clientSales.reduce((sum, sale) => sum + (Number(sale.amountSoles) || 0), 0);
+function ClientApp({
+  user,
+  clients,
+  sales,
+  markets,
+}: {
+  user: AppUser;
+  clients: Client[];
+  sales: Sale[];
+  markets: Market[];
+}) {
+  const client = clients.find(
+    (item) => item.id === user.clientId || item.code === user.clientId,
+  );
+  const market = client
+    ? markets.find((item) => item.id === client.marketId)
+    : undefined;
+  const clientSales = client
+    ? sales
+        .filter((sale) => sale.clientId === client.id)
+        .sort((first, second) => second.date.localeCompare(first.date))
+    : [];
+  const totalUnits = clientSales.reduce(
+    (sum, sale) => sum + (Number(sale.units) || 0),
+    0,
+  );
+  const totalSoles = clientSales.reduce(
+    (sum, sale) => sum + (Number(sale.amountSoles) || 0),
+    0,
+  );
 
-  return <main className="client-page"><div className="client-content"><div className="client-heading"><div><span className="eyebrow">PORTAL CLIENTE</span><h1>Hola, {user.name}</h1><p>Consulta la información registrada de tu tienda.</p></div><span className="client-badge"><UserRound /> CLIENTE</span></div>{client ? <><section className="client-profile panel"><div className="panel-header"><div><h2>{client.name}</h2><p>{client.code}{market ? ` · ${market.name}` : ''}</p></div><StatusPill status={client.status} /></div><div className="panel-body client-profile-grid"><div><small>CELULAR</small><strong>{client.phone || 'No registrado'}</strong></div><div><small>MERCADO</small><strong>{market?.name || 'No identificado'}</strong></div><div><small>DISTRITO</small><strong>{market?.district || 'No identificado'}</strong></div></div></section><div className="client-stats"><article><ShoppingBag /><div><small>COMPRAS REGISTRADAS</small><strong>{clientSales.length}</strong></div></article><article><PackageCheck /><div><small>UNIDADES</small><strong>{totalUnits.toLocaleString('es-PE')}</strong></div></article><article><CheckCircle2 /><div><small>TOTAL ACUMULADO</small><strong>{formatSoles(totalSoles)}</strong></div></article></div><section className="panel"><div className="panel-header"><div><h2>Historial de compras</h2><p>Registro de ventas asociadas a tu tienda.</p></div></div><div className="panel-body">{clientSales.length ? <div className="client-sales-list">{clientSales.map(sale => <article className="client-sale-row" key={sale.id}><div><strong>{sale.id}</strong><small>{formatDate(sale.date)} · {sale.mode === 'PLANCHAS' ? `${sale.planchas || 0} plancha(s)` : `${sale.units} unidad(es)`}</small></div><strong>{formatSoles(sale.amountSoles)}</strong></article>)}</div> : <Empty title="Aún no hay compras registradas" detail="Cuando se registre una compra para tu tienda aparecerá aquí." />}</div></section></> : <section className="panel client-unlinked"><div className="panel-body"><UserRound /><h2>Cuenta creada, falta vincular tu tienda</h2><p>Tu acceso ya está habilitado, pero el usuario todavía no está asociado a un cliente de la campaña. Asocia su ID o código de cliente desde la administración.</p></div></section>}</div></main>;
+  return (
+    <main className="client-page">
+      <div className="client-content">
+        <div className="client-heading">
+          <div>
+            <span className="eyebrow">PORTAL CLIENTE</span>
+            <h1>Hola, {user.name}</h1>
+            <p>Consulta la información registrada de tu tienda.</p>
+          </div>
+          <span className="client-badge">
+            <UserRound /> CLIENTE
+          </span>
+        </div>
+        {client ? (
+          <>
+            <section className="client-profile panel">
+              <div className="panel-header">
+                <div>
+                  <h2>{client.name}</h2>
+                  <p>
+                    {client.code}
+                    {market ? ` · ${market.name}` : ""}
+                  </p>
+                </div>
+                <StatusPill status={client.status} />
+              </div>
+              <div className="panel-body client-profile-grid">
+                <div>
+                  <small>CELULAR</small>
+                  <strong>{client.phone || "No registrado"}</strong>
+                </div>
+                <div>
+                  <small>MERCADO</small>
+                  <strong>{market?.name || "No identificado"}</strong>
+                </div>
+                <div>
+                  <small>DISTRITO</small>
+                  <strong>{market?.district || "No identificado"}</strong>
+                </div>
+              </div>
+            </section>
+            <div className="client-stats">
+              <article>
+                <ShoppingBag />
+                <div>
+                  <small>COMPRAS REGISTRADAS</small>
+                  <strong>{clientSales.length}</strong>
+                </div>
+              </article>
+              <article>
+                <PackageCheck />
+                <div>
+                  <small>UNIDADES</small>
+                  <strong>{totalUnits.toLocaleString("es-PE")}</strong>
+                </div>
+              </article>
+              <article>
+                <CheckCircle2 />
+                <div>
+                  <small>TOTAL ACUMULADO</small>
+                  <strong>{formatSoles(totalSoles)}</strong>
+                </div>
+              </article>
+            </div>
+            <section className="panel">
+              <div className="panel-header">
+                <div>
+                  <h2>Historial de compras</h2>
+                  <p>Registro de ventas asociadas a tu tienda.</p>
+                </div>
+              </div>
+              <div className="panel-body">
+                {clientSales.length ? (
+                  <div className="client-sales-list">
+                    {clientSales.map((sale) => (
+                      <article className="client-sale-row" key={sale.id}>
+                        <div>
+                          <strong>{sale.id}</strong>
+                          <small>
+                            {formatDate(sale.date)} ·{" "}
+                            {sale.mode === "PLANCHAS"
+                              ? `${sale.planchas || 0} plancha(s)`
+                              : `${sale.units} unidad(es)`}
+                          </small>
+                        </div>
+                        <strong>{formatSoles(sale.amountSoles)}</strong>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <Empty
+                    title="Aún no hay compras registradas"
+                    detail="Cuando se registre una compra para tu tienda aparecerá aquí."
+                  />
+                )}
+              </div>
+            </section>
+          </>
+        ) : (
+          <section className="panel client-unlinked">
+            <div className="panel-body">
+              <UserRound />
+              <h2>Cuenta creada, falta vincular tu tienda</h2>
+              <p>
+                Tu acceso ya está habilitado, pero el usuario todavía no está
+                asociado a un cliente de la campaña. Asocia su ID o código de
+                cliente desde la administración.
+              </p>
+            </div>
+          </section>
+        )}
+      </div>
+    </main>
+  );
 }
 
 export default function App() {
-   clearTestDataOnce();
-   clearCatalogDataOnce();
-   keepAnalystUsersOnce();
-     const [theme, setTheme] = useState<'light' | 'dark'>(() => localStorage.getItem('bt-theme') === 'dark' ? 'dark' : 'light');
-     const [user, setUser] = useState<AppUser | null>(() => readStore<AppUser | null>('bt-session', null)); const [markets, setMarkets] = useState<Market[]>(() => readStore('bt-markets', [])); const [users, setUsers] = useState<AppUser[]>(() => readStore('bt-users', [])); const [clients, setClients] = useState<Client[]>(() => readStore('bt-clients', [])); const [productPrices, setProductPrices] = useState<ProductPrice[]>(() => readStore(PRODUCT_PRICES_STORE_KEY, [])); const [sales, setSales] = useState<Sale[]>(() => readStore('bt-sales', [])); const [attendance, setAttendance] = useState<Attendance[]>(() => sortNewestByDate(readStore<Attendance[]>('bt-attendance', []))); const [inventory, setInventory] = useState<MarketInventory[]>(() => reconcileInventory(readStore<MarketInventory[]>('bt-inventory', []), readStore<InventoryMovement[]>('bt-inventory-movements', []))); const [movements, setMovements] = useState<InventoryMovement[]>(() => readStore('bt-inventory-movements', [])); const [assignments, setAssignments] = useState<PromoterAssignment[]>(() => readStore('bt-promoter-assignments', [])); const [closures, setClosures] = useState<SessionClosure[]>(() => readStore('bt-session-closures', [])); const [referencesReady, setReferencesReady] = useState(false); const [cloudReady, setCloudReady] = useState(false); const [cloudSyncTick, setCloudSyncTick] = useState(0); const [toast, setToast] = useState<Toast | null>(null); const [promoterSession, setPromoterSession] = useState({ marketId: '', clientId: '' }); const photoUploadRunning = useRef(false);
-    const notify = (message: string, error = false) => setToast({ message, error });
-      const photoUploadErrorShown = useRef(false);
-      const photoContextRef = useRef({ sales, attendance, clients, markets });
-      photoContextRef.current = { sales, attendance, clients, markets };
-     const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
-       const updatedAt = new Date().toISOString();
-       if (upload.entityType === 'sale') {
-         setSales(current => {
-           const next = current.map(sale => sale.id === upload.entityId ? (upload.field === 'exchangePhoto' ? { ...sale, exchangePhoto: url, updatedAt } : { ...sale, receiptPhoto: url, updatedAt }) : sale);
-           writeStore('bt-sales', next);
-           return next;
-         });
-       } else {
-         setAttendance(current => {
-           const next = current.map(item => item.id === upload.entityId ? { ...item, photo: url, date: item.date || updatedAt } : item);
-           writeStore('bt-attendance', next);
-           return next;
-         });
-       }
-       setCloudSyncTick(value => value + 1);
-     };
-     const flushEvidencePhotos = async () => {
-       if (photoUploadRunning.current || !navigator.onLine) return;
-       photoUploadRunning.current = true;
-       try {
-         for (const upload of await pendingPhotoUploads()) {
-           try {
-              const current = photoContextRef.current;
-              const record = upload.entityType === 'sale'
-                ? current.sales.find(item => item.id === upload.entityId)
-                : current.attendance.find(item => item.id === upload.entityId);
-              const client = record ? current.clients.find(item => item.id === record.clientId) : undefined;
-              const market = record ? current.markets.find(item => item.id === record.marketId) : undefined;
-              const enrichedUpload = {
-                ...upload,
-                clientName: upload.clientName || client?.name || client?.code,
-                marketName: upload.marketName || market?.name,
-                recordType: upload.recordType || (upload.entityType === 'sale' ? 'VENTA' : `ASISTENCIA ${record && 'type' in record ? record.type : ''}`.trim()),
-              };
-              const saved = await uploadPhoto(enrichedUpload);
-              applyUploadedPhoto(enrichedUpload, saved.url);
-             await removePhotoUpload(upload.id);
-              photoUploadErrorShown.current = false;
-            } catch (error) {
-              if (!photoUploadErrorShown.current) {
-                notify(error instanceof Error ? `Foto pendiente: ${error.message}` : 'Foto pendiente: no se pudo subir a DigitalOcean.', true);
-                photoUploadErrorShown.current = true;
-              }
-             break;
-           }
-         }
-       } finally {
-         photoUploadRunning.current = false;
-       }
-     };
-      const enqueueEvidencePhoto = (file: File, entityType: PendingPhotoUpload['entityType'], entityId: string, field: PendingPhotoUpload['field'], context: PhotoUploadContext) => {
-        void queuePhotoUpload(file, entityType, entityId, field, context).then(flushEvidencePhotos).catch(() => notify('No se pudo guardar la foto en la cola del dispositivo.', true));
-     };
-     useEffect(() => {
-       setReferencesReady(true);
-     }, []);
-    useEffect(() => {
-       if (!referencesReady) return;
-      let cancelled = false;
-      const hydrateCloudStorage = async () => {
+  clearTestDataOnce();
+  clearCatalogDataOnce();
+  keepAnalystUsersOnce();
+  const [theme, setTheme] = useState<"light" | "dark">(() =>
+    localStorage.getItem("bt-theme") === "dark" ? "dark" : "light",
+  );
+  const [user, setUser] = useState<AppUser | null>(() =>
+    readStore<AppUser | null>("bt-session", null),
+  );
+  const [markets, setMarkets] = useState<Market[]>(() =>
+    readStore("bt-markets", []),
+  );
+  const [users, setUsers] = useState<AppUser[]>(() =>
+    readStore("bt-users", []),
+  );
+  const [clients, setClients] = useState<Client[]>(() =>
+    readStore("bt-clients", []),
+  );
+  const [productPrices, setProductPrices] = useState<ProductPrice[]>(() =>
+    readStore(PRODUCT_PRICES_STORE_KEY, []),
+  );
+  const [categories, setCategories] = useState<Category[]>(() =>
+    readStore(CATEGORIES_STORE_KEY, []),
+  );
+  const [sales, setSales] = useState<Sale[]>(() => readStore("bt-sales", []));
+  const [attendance, setAttendance] = useState<Attendance[]>(() =>
+    sortNewestByDate(readStore<Attendance[]>("bt-attendance", [])),
+  );
+  const [inventory, setInventory] = useState<MarketInventory[]>(() =>
+    reconcileInventory(
+      readStore<MarketInventory[]>("bt-inventory", []),
+      readStore<InventoryMovement[]>("bt-inventory-movements", []),
+    ),
+  );
+  const [movements, setMovements] = useState<InventoryMovement[]>(() =>
+    readStore("bt-inventory-movements", []),
+  );
+  const [assignments, setAssignments] = useState<PromoterAssignment[]>(() =>
+    readStore("bt-promoter-assignments", []),
+  );
+  const [closures, setClosures] = useState<SessionClosure[]>(() =>
+    readStore("bt-session-closures", []),
+  );
+  const [referencesReady, setReferencesReady] = useState(false);
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudSyncTick, setCloudSyncTick] = useState(0);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [promoterSession, setPromoterSession] = useState({
+    marketId: "",
+    clientId: "",
+  });
+  const photoUploadRunning = useRef(false);
+  const notify = (message: string, error = false) =>
+    setToast({ message, error });
+  const photoUploadErrorShown = useRef(false);
+  const photoContextRef = useRef({ sales, attendance, clients, markets });
+  photoContextRef.current = { sales, attendance, clients, markets };
+  const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
+    const updatedAt = new Date().toISOString();
+    if (upload.entityType === "sale") {
+      setSales((current) => {
+        const next = current.map((sale) =>
+          sale.id === upload.entityId
+            ? upload.field === "exchangePhoto"
+              ? { ...sale, exchangePhoto: url, updatedAt }
+              : { ...sale, receiptPhoto: url, updatedAt }
+            : sale,
+        );
+        writeStore("bt-sales", next);
+        return next;
+      });
+    } else {
+      setAttendance((current) => {
+        const next = current.map((item) =>
+          item.id === upload.entityId
+            ? { ...item, photo: url, date: item.date || updatedAt }
+            : item,
+        );
+        writeStore("bt-attendance", next);
+        return next;
+      });
+    }
+    setCloudSyncTick((value) => value + 1);
+  };
+  const flushEvidencePhotos = async () => {
+    if (photoUploadRunning.current || !navigator.onLine) return;
+    photoUploadRunning.current = true;
+    try {
+      for (const upload of await pendingPhotoUploads()) {
         try {
-           const response = await fetch(APP_STORAGE_READ);
-          if (!response.ok) throw new Error('Sincronización inicial no disponible');
-           const payload = await response.json() as { catalogRevision?: string | null; snapshot?: Partial<CloudSnapshot> };
-          if (cancelled || !payload.snapshot) return;
-           if (payload.catalogRevision) localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
-          const snapshot = payload.snapshot;
-          const localUsers = readStore<AppUser[]>('bt-users', []);
-          const nextMarkets = Array.isArray(snapshot.markets) ? snapshot.markets : [];
-           const nextUsers = mergeUsersByDni([], (Array.isArray(snapshot.users) ? snapshot.users : []).map(cloudUser => {
-             const localUser = localUsers.find(item => item.id === cloudUser.id || item.dni === cloudUser.dni);
-             return { ...cloudUser, password: localUser?.password };
-           }));
-          const nextClients = Array.isArray(snapshot.clients) ? snapshot.clients : [];
-        const cloudSales = Array.isArray(snapshot.sales) ? snapshot.sales : [];
-        const localSales = readStore<Sale[]>('bt-sales', []);
-        const nextSales = mergeSales(localSales, cloudSales).map(sale => enrichSaleMarketLocation(sale, nextMarkets));
-           const cloudAttendance = Array.isArray(snapshot.attendance) ? snapshot.attendance : [];
-           const localAttendance = readStore<Attendance[]>('bt-attendance', []);
-           const nextAttendance = mergeAttendance(localAttendance, cloudAttendance);
-          const cloudMovements = Array.isArray(snapshot.movements) ? snapshot.movements : [];
-          const localMovements = readStore<InventoryMovement[]>('bt-inventory-movements', []);
-          const nextMovements = mergeMovements(localMovements, cloudMovements);
-           const nextInventory = reconcileInventory(Array.isArray(snapshot.inventory) ? snapshot.inventory : [], nextMovements);
-          const nextAssignments = Array.isArray(snapshot.assignments) ? snapshot.assignments : [];
-          const nextClosures = Array.isArray(snapshot.closures) ? snapshot.closures : [];
-           const nextProductPrices = Array.isArray(snapshot.productPrices) ? snapshot.productPrices : productPrices;
-        setMarkets(nextMarkets); setUsers(nextUsers); setClients(nextClients); setSales(nextSales); setAttendance(nextAttendance); setInventory(nextInventory); setMovements(nextMovements); setAssignments(nextAssignments); setClosures(nextClosures);
-           setProductPrices(nextProductPrices);
-           writeStore('bt-markets', nextMarkets); writeStore('bt-users', nextUsers); writeStore('bt-clients', nextClients); writeStore('bt-sales', nextSales); writeStore('bt-attendance', nextAttendance); writeStore('bt-inventory', nextInventory); writeStore('bt-inventory-movements', nextMovements); writeStore('bt-promoter-assignments', nextAssignments); writeStore('bt-session-closures', nextClosures); writeStore(PRODUCT_PRICES_STORE_KEY, nextProductPrices);
-        } catch {
-          // La operación continúa en localStorage y se reintentará al volver a estar en línea.
-        } finally {
-          if (!cancelled) setCloudReady(true);
+          const current = photoContextRef.current;
+          const record =
+            upload.entityType === "sale"
+              ? current.sales.find((item) => item.id === upload.entityId)
+              : current.attendance.find((item) => item.id === upload.entityId);
+          const client = record
+            ? current.clients.find((item) => item.id === record.clientId)
+            : undefined;
+          const market = record
+            ? current.markets.find((item) => item.id === record.marketId)
+            : undefined;
+          const enrichedUpload = {
+            ...upload,
+            clientName: upload.clientName || client?.name || client?.code,
+            marketName: upload.marketName || market?.name,
+            recordType:
+              upload.recordType ||
+              (upload.entityType === "sale"
+                ? "VENTA"
+                : `ASISTENCIA ${record && "type" in record ? record.type : ""}`.trim()),
+          };
+          const saved = await uploadPhoto(enrichedUpload);
+          applyUploadedPhoto(enrichedUpload, saved.url);
+          await removePhotoUpload(upload.id);
+          photoUploadErrorShown.current = false;
+        } catch (error) {
+          if (!photoUploadErrorShown.current) {
+            notify(
+              error instanceof Error
+                ? `Foto pendiente: ${error.message}`
+                : "Foto pendiente: no se pudo subir a DigitalOcean.",
+              true,
+            );
+            photoUploadErrorShown.current = true;
+          }
+          break;
         }
-      };
-      void hydrateCloudStorage();
-      return () => { cancelled = true; };
-     }, [referencesReady]);
-     useEffect(() => {
-       if (!referencesReady) return;
-       let cancelled = false;
-       const refreshAssignments = async () => {
-         if (!navigator.onLine) return;
-         try {
-            const response = await fetch(APP_STORAGE_ASSIGNMENTS);
-           if (!response.ok) throw new Error('Asignaciones no disponibles');
-           const payload = await response.json() as { assignments?: PromoterAssignment[] };
-           if (cancelled || !Array.isArray(payload.assignments)) return;
-           setAssignments(current => {
-             const next = mergeAssignments(current, payload.assignments || []);
-             writeStore('bt-promoter-assignments', next);
-             return next;
-           });
-         } catch {
-           // Se conserva la última asignación local válida.
-         }
-       };
-       void refreshAssignments();
-       const interval = window.setInterval(refreshAssignments, 15_000);
-       window.addEventListener('online', refreshAssignments);
-       return () => {
-         cancelled = true;
-         window.clearInterval(interval);
-         window.removeEventListener('online', refreshAssignments);
-       };
-     }, [referencesReady]);
-    useEffect(() => {
-      if (!cloudReady) return;
-      const timeout = window.setTimeout(() => {
-        const snapshot: CloudSnapshot = {
-          markets,
-          users: users.map(({ password: _password, ...currentUser }) => currentUser),
-          clients,
-          sales,
-          attendance,
-          inventory,
-          movements,
-          assignments,
-          closures,
-           productPrices,
-        };
-          void fetch(APP_STORAGE_SYNC, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ snapshot, catalogRevision: localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined }),
-         }).then(async response => {
-           if (!response.ok) return;
-           const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
-           if (!payload.snapshot) return;
-           setSales(current => {
-             const nextSales = mergeSales(current, payload.snapshot?.sales || []);
-             if (JSON.stringify(nextSales) === JSON.stringify(current)) return current;
-             writeStore('bt-sales', nextSales);
-             return nextSales;
-           });
-           setAttendance(current => {
-             const nextAttendance = mergeAttendance(current, payload.snapshot?.attendance || []);
-             if (JSON.stringify(nextAttendance) === JSON.stringify(current)) return current;
-             writeStore('bt-attendance', nextAttendance);
-             return nextAttendance;
-           });
-           setMovements(current => {
-             const nextMovements = mergeMovements(current, payload.snapshot?.movements || []);
-             if (JSON.stringify(nextMovements) === JSON.stringify(current)) return current;
-             writeStore('bt-inventory-movements', nextMovements);
-             return nextMovements;
-           });
-         }).catch(() => undefined);
-      }, 1500);
-      return () => window.clearTimeout(timeout);
-     }, [cloudReady, cloudSyncTick, markets, users, clients, productPrices, sales, attendance, inventory, movements, assignments, closures]);
-    useEffect(() => {
-       const retry = () => {
-         setCloudSyncTick(value => value + 1);
-         void flushEvidencePhotos();
-       };
-       void flushEvidencePhotos();
-        const interval = window.setInterval(flushEvidencePhotos, 30_000);
-      window.addEventListener('online', retry);
-       return () => {
-         window.clearInterval(interval);
-         window.removeEventListener('online', retry);
-       };
-    }, []);
+      }
+    } finally {
+      photoUploadRunning.current = false;
+    }
+  };
+  const enqueueEvidencePhoto = (
+    file: File,
+    entityType: PendingPhotoUpload["entityType"],
+    entityId: string,
+    field: PendingPhotoUpload["field"],
+    context: PhotoUploadContext,
+  ) => {
+    void queuePhotoUpload(file, entityType, entityId, field, context)
+      .then(flushEvidencePhotos)
+      .catch(() =>
+        notify("No se pudo guardar la foto en la cola del dispositivo.", true),
+      );
+  };
   useEffect(() => {
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => undefined);
-    if (navigator.storage?.persist) navigator.storage.persist().catch(() => undefined);
+    setReferencesReady(true);
   }, []);
-    useEffect(() => {
-      document.documentElement.dataset.theme = theme;
-      document.documentElement.style.colorScheme = theme;
-      localStorage.setItem('bt-theme', theme);
-      document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0f1726' : '#192d47');
-    }, [theme]);
-    useEffect(() => {
-      if (!markets.length) return;
-      setSales(current => {
-        let changed = false;
-        const next = current.map(sale => {
-          const enriched = enrichSaleMarketLocation(sale, markets);
-          if (enriched !== sale) changed = true;
-          return enriched;
-        });
-        if (!changed) return current;
-        writeStore('bt-sales', next);
-        return next;
-      });
-    }, [markets]);
-    useEffect(() => { writeStore('bt-markets', markets); }, [markets]); useEffect(() => { writeStore('bt-users', users); }, [users]); useEffect(() => { writeStore('bt-clients', clients); }, [clients]); useEffect(() => { writeStore('bt-sales', sales); }, [sales]); useEffect(() => { writeStore('bt-attendance', attendance); }, [attendance]); useEffect(() => { writeStore('bt-inventory', inventory); }, [inventory]); useEffect(() => { writeStore('bt-inventory-movements', movements); }, [movements]); useEffect(() => { writeStore('bt-promoter-assignments', assignments); }, [assignments]); useEffect(() => { writeStore('bt-session-closures', closures); }, [closures]);
-    const completeLogin = (authenticated: AppUser) => {
-      setUser(authenticated);
-      setUsers(current => {
-        const next = mergeUsersByDni(current, [authenticated]);
-        writeStore('bt-users', next);
-        return next;
-      });
+  useEffect(() => {
+    if (!referencesReady) return;
+    let cancelled = false;
+    const hydrateCloudStorage = async () => {
+      try {
+        const response = await fetch(APP_STORAGE_READ);
+        if (!response.ok)
+          throw new Error("Sincronización inicial no disponible");
+        const payload = (await response.json()) as {
+          catalogRevision?: string | null;
+          snapshot?: Partial<CloudSnapshot>;
+        };
+        if (cancelled || !payload.snapshot) return;
+        if (payload.catalogRevision)
+          localStorage.setItem(
+            CATALOG_REVISION_STORE_KEY,
+            payload.catalogRevision,
+          );
+        const snapshot = payload.snapshot;
+        const localUsers = readStore<AppUser[]>("bt-users", []);
+        const nextMarkets = Array.isArray(snapshot.markets)
+          ? snapshot.markets
+          : [];
+        const nextUsers = mergeUsersByDni(
+          [],
+          (Array.isArray(snapshot.users) ? snapshot.users : []).map(
+            (cloudUser) => {
+              const localUser = localUsers.find(
+                (item) =>
+                  item.id === cloudUser.id || item.dni === cloudUser.dni,
+              );
+              return { ...cloudUser, password: localUser?.password };
+            },
+          ),
+        );
+        const nextClients = Array.isArray(snapshot.clients)
+          ? snapshot.clients
+          : [];
+        const cloudSales = Array.isArray(snapshot.sales) ? snapshot.sales : [];
+        const localSales = readStore<Sale[]>("bt-sales", []);
+        const nextSales = mergeSales(localSales, cloudSales).map((sale) =>
+          enrichSaleMarketLocation(sale, nextMarkets),
+        );
+        const cloudAttendance = Array.isArray(snapshot.attendance)
+          ? snapshot.attendance
+          : [];
+        const localAttendance = readStore<Attendance[]>("bt-attendance", []);
+        const nextAttendance = mergeAttendance(
+          localAttendance,
+          cloudAttendance,
+        );
+        const cloudMovements = Array.isArray(snapshot.movements)
+          ? snapshot.movements
+          : [];
+        const localMovements = readStore<InventoryMovement[]>(
+          "bt-inventory-movements",
+          [],
+        );
+        const nextMovements = mergeMovements(localMovements, cloudMovements);
+        const nextInventory = reconcileInventory(
+          Array.isArray(snapshot.inventory) ? snapshot.inventory : [],
+          nextMovements,
+        );
+        const nextAssignments = Array.isArray(snapshot.assignments)
+          ? snapshot.assignments
+          : [];
+        const nextClosures = Array.isArray(snapshot.closures)
+          ? snapshot.closures
+          : [];
+        const nextProductPrices = Array.isArray(snapshot.productPrices)
+          ? snapshot.productPrices
+          : productPrices;
+        const nextCategories = Array.isArray(snapshot.categories)
+          ? snapshot.categories
+          : categories;
+        setMarkets(nextMarkets);
+        setUsers(nextUsers);
+        setClients(nextClients);
+        setSales(nextSales);
+        setAttendance(nextAttendance);
+        setInventory(nextInventory);
+        setMovements(nextMovements);
+        setAssignments(nextAssignments);
+        setClosures(nextClosures);
+        setProductPrices(nextProductPrices);
+        setCategories(nextCategories);
+        writeStore("bt-markets", nextMarkets);
+        writeStore("bt-users", nextUsers);
+        writeStore("bt-clients", nextClients);
+        writeStore("bt-sales", nextSales);
+        writeStore("bt-attendance", nextAttendance);
+        writeStore("bt-inventory", nextInventory);
+        writeStore("bt-inventory-movements", nextMovements);
+        writeStore("bt-promoter-assignments", nextAssignments);
+        writeStore("bt-session-closures", nextClosures);
+        writeStore(PRODUCT_PRICES_STORE_KEY, nextProductPrices);
+        writeStore(CATEGORIES_STORE_KEY, nextCategories);
+      } catch {
+        // La operación continúa en localStorage y se reintentará al volver a estar en línea.
+      } finally {
+        if (!cancelled) setCloudReady(true);
+      }
     };
-     const updatePromoterUser = (updated: AppUser) => {
-       setUsers(current => {
-         const next = current.map(item => item.id === updated.id || item.dni === updated.dni ? { ...item, ...updated } : item);
-         writeStore('bt-users', next);
-         return next;
-       });
-       setUser(current => current && (current.id === updated.id || current.dni === updated.dni) ? { ...current, ...updated } : current);
-     };
-    const activeUser = useMemo(() => user ? users.find(item => item.dni === user.dni) || user : null, [user, users]);
-   const logoutImmediately = () => { localStorage.removeItem('bt-session'); setPromoterSession({ marketId: '', clientId: '' }); setUser(null); };
-        return <>{activeUser ? <Shell user={activeUser} logout={logoutImmediately} theme={theme} toggleTheme={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}>{isPromoterRole(activeUser.role) ? <PromoterApp user={activeUser} markets={markets} clients={clients} assignments={assignments} productPrices={productPrices} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} setInventory={setInventory} movements={movements} setMovements={setMovements} notify={notify} onSessionSelection={setPromoterSession} onUpdateUser={updatePromoterUser} onLogout={logoutImmediately} enqueueEvidencePhoto={enqueueEvidencePhoto} /> : activeUser.role === 'CLIENTE' ? <ClientApp user={activeUser} clients={clients} sales={sales} markets={markets} /> : <AnalystApp user={activeUser} productPrices={productPrices} markets={markets} setMarkets={setMarkets} users={users} setUsers={setUsers} clients={clients} setClients={setClients} sales={sales} setSales={setSales} attendance={attendance} setAttendance={setAttendance} inventory={inventory} movements={movements} assignments={assignments} setAssignments={setAssignments} setInventory={setInventory} setMovements={setMovements} closures={closures} setClosures={setClosures} notify={notify} />}</Shell> : referencesReady || users.length ? <Login users={users} onLogin={completeLogin} notify={notify} /> : <main className="login-shell"><section className="login-panel"><div className="login-card"><div className="mobile-logo"><Logo /></div><div className="login-heading"><span className="icon-disc"><RefreshCw /></span><div><h2>Cargando acceso</h2><p>Estamos conectando con el servidor.</p></div></div></div></section></main>}<ToastView toast={toast} clear={() => setToast(null)} /></>;
+    void hydrateCloudStorage();
+    return () => {
+      cancelled = true;
+    };
+  }, [referencesReady]);
+  useEffect(() => {
+    if (!referencesReady) return;
+    let cancelled = false;
+    const refreshAssignments = async () => {
+      if (!navigator.onLine) return;
+      try {
+        const response = await fetch(APP_STORAGE_ASSIGNMENTS);
+        if (!response.ok) throw new Error("Asignaciones no disponibles");
+        const payload = (await response.json()) as {
+          assignments?: PromoterAssignment[];
+        };
+        if (cancelled || !Array.isArray(payload.assignments)) return;
+        setAssignments((current) => {
+          const next = mergeAssignments(current, payload.assignments || []);
+          writeStore("bt-promoter-assignments", next);
+          return next;
+        });
+      } catch {
+        // Se conserva la última asignación local válida.
+      }
+    };
+    void refreshAssignments();
+    const interval = window.setInterval(refreshAssignments, 15_000);
+    window.addEventListener("online", refreshAssignments);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("online", refreshAssignments);
+    };
+  }, [referencesReady]);
+  useEffect(() => {
+    if (!cloudReady) return;
+    const timeout = window.setTimeout(() => {
+      const snapshot: CloudSnapshot = {
+        markets,
+        users: users.map(
+          ({ password: _password, ...currentUser }) => currentUser,
+        ),
+        clients,
+        sales,
+        attendance,
+        inventory,
+        movements,
+        assignments,
+        closures,
+        productPrices,
+        categories,
+      };
+      void fetch(APP_STORAGE_SYNC, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          snapshot,
+          catalogRevision:
+            localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined,
+        }),
+      })
+        .then(async (response) => {
+          if (!response.ok) return;
+          const payload = (await response.json()) as {
+            snapshot?: Partial<CloudSnapshot>;
+          };
+          if (!payload.snapshot) return;
+          setSales((current) => {
+            const nextSales = mergeSales(
+              current,
+              payload.snapshot?.sales || [],
+            );
+            if (JSON.stringify(nextSales) === JSON.stringify(current))
+              return current;
+            writeStore("bt-sales", nextSales);
+            return nextSales;
+          });
+          setAttendance((current) => {
+            const nextAttendance = mergeAttendance(
+              current,
+              payload.snapshot?.attendance || [],
+            );
+            if (JSON.stringify(nextAttendance) === JSON.stringify(current))
+              return current;
+            writeStore("bt-attendance", nextAttendance);
+            return nextAttendance;
+          });
+          setMovements((current) => {
+            const nextMovements = mergeMovements(
+              current,
+              payload.snapshot?.movements || [],
+            );
+            if (JSON.stringify(nextMovements) === JSON.stringify(current))
+              return current;
+            writeStore("bt-inventory-movements", nextMovements);
+            return nextMovements;
+          });
+        })
+        .catch(() => undefined);
+    }, 1500);
+    return () => window.clearTimeout(timeout);
+  }, [
+    cloudReady,
+    cloudSyncTick,
+    markets,
+    users,
+    clients,
+    productPrices,
+    categories,
+    sales,
+    attendance,
+    inventory,
+    movements,
+    assignments,
+    closures,
+  ]);
+  useEffect(() => {
+    const retry = () => {
+      setCloudSyncTick((value) => value + 1);
+      void flushEvidencePhotos();
+    };
+    void flushEvidencePhotos();
+    const interval = window.setInterval(flushEvidencePhotos, 30_000);
+    window.addEventListener("online", retry);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("online", retry);
+    };
+  }, []);
+  useEffect(() => {
+    if ("serviceWorker" in navigator)
+      navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    if (navigator.storage?.persist)
+      navigator.storage.persist().catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    localStorage.setItem("bt-theme", theme);
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", theme === "dark" ? "#0f1726" : "#192d47");
+  }, [theme]);
+  useEffect(() => {
+    if (!markets.length) return;
+    setSales((current) => {
+      let changed = false;
+      const next = current.map((sale) => {
+        const enriched = enrichSaleMarketLocation(sale, markets);
+        if (enriched !== sale) changed = true;
+        return enriched;
+      });
+      if (!changed) return current;
+      writeStore("bt-sales", next);
+      return next;
+    });
+  }, [markets]);
+  useEffect(() => {
+    writeStore("bt-markets", markets);
+  }, [markets]);
+  useEffect(() => {
+    writeStore("bt-users", users);
+  }, [users]);
+  useEffect(() => {
+    writeStore("bt-clients", clients);
+  }, [clients]);
+  useEffect(() => {
+    writeStore("bt-sales", sales);
+  }, [sales]);
+  useEffect(() => {
+    writeStore("bt-attendance", attendance);
+  }, [attendance]);
+  useEffect(() => {
+    writeStore("bt-inventory", inventory);
+  }, [inventory]);
+  useEffect(() => {
+    writeStore("bt-inventory-movements", movements);
+  }, [movements]);
+  useEffect(() => {
+    writeStore("bt-promoter-assignments", assignments);
+  }, [assignments]);
+  useEffect(() => {
+    writeStore("bt-session-closures", closures);
+  }, [closures]);
+  const completeLogin = (authenticated: AppUser) => {
+    setUser(authenticated);
+    setUsers((current) => {
+      const next = mergeUsersByDni(current, [authenticated]);
+      writeStore("bt-users", next);
+      return next;
+    });
+  };
+  const updatePromoterUser = (updated: AppUser) => {
+    setUsers((current) => {
+      const next = current.map((item) =>
+        item.id === updated.id || item.dni === updated.dni
+          ? { ...item, ...updated }
+          : item,
+      );
+      writeStore("bt-users", next);
+      return next;
+    });
+    setUser((current) =>
+      current && (current.id === updated.id || current.dni === updated.dni)
+        ? { ...current, ...updated }
+        : current,
+    );
+  };
+  const activeUser = useMemo(
+    () => (user ? users.find((item) => item.dni === user.dni) || user : null),
+    [user, users],
+  );
+  const logoutImmediately = () => {
+    localStorage.removeItem("bt-session");
+    setPromoterSession({ marketId: "", clientId: "" });
+    setUser(null);
+  };
+  return (
+    <>
+      {activeUser ? (
+        <Shell
+          user={activeUser}
+          logout={logoutImmediately}
+          theme={theme}
+          toggleTheme={() =>
+            setTheme((current) => (current === "dark" ? "light" : "dark"))
+          }
+        >
+          {isPromoterRole(activeUser.role) ? (
+            <PromoterApp
+              user={activeUser}
+              markets={markets}
+              clients={clients}
+              assignments={assignments}
+              productPrices={productPrices}
+              sales={sales}
+              setSales={setSales}
+              attendance={attendance}
+              setAttendance={setAttendance}
+              inventory={inventory}
+              setInventory={setInventory}
+              movements={movements}
+              setMovements={setMovements}
+              notify={notify}
+              onSessionSelection={setPromoterSession}
+              onUpdateUser={updatePromoterUser}
+              onLogout={logoutImmediately}
+              enqueueEvidencePhoto={enqueueEvidencePhoto}
+            />
+          ) : activeUser.role === "CLIENTE" ? (
+            <ClientApp
+              user={activeUser}
+              clients={clients}
+              sales={sales}
+              markets={markets}
+            />
+          ) : (
+            <AnalystApp
+              user={activeUser}
+              productPrices={productPrices}
+              setProductPrices={setProductPrices}
+              categories={categories}
+              setCategories={setCategories}
+              markets={markets}
+              setMarkets={setMarkets}
+              users={users}
+              setUsers={setUsers}
+              clients={clients}
+              setClients={setClients}
+              sales={sales}
+              setSales={setSales}
+              attendance={attendance}
+              setAttendance={setAttendance}
+              inventory={inventory}
+              movements={movements}
+              assignments={assignments}
+              setAssignments={setAssignments}
+              setInventory={setInventory}
+              setMovements={setMovements}
+              closures={closures}
+              setClosures={setClosures}
+              notify={notify}
+            />
+          )}
+        </Shell>
+      ) : referencesReady || users.length ? (
+        <Login users={users} onLogin={completeLogin} notify={notify} />
+      ) : (
+        <main className="login-shell">
+          <section className="login-panel">
+            <div className="login-card">
+              <div className="mobile-logo">
+                <Logo />
+              </div>
+              <div className="login-heading">
+                <span className="icon-disc">
+                  <RefreshCw />
+                </span>
+                <div>
+                  <h2>Cargando acceso</h2>
+                  <p>Estamos conectando con el servidor.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      )}
+      <ToastView toast={toast} clear={() => setToast(null)} />
+    </>
+  );
 }

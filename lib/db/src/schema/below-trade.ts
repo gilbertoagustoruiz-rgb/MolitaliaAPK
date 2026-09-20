@@ -9,8 +9,12 @@ import {
 } from "drizzle-orm/pg-core";
 
 const timestamps = {
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 };
 
 export const appMetadataTable = pgTable("app_metadata", {
@@ -19,14 +23,23 @@ export const appMetadataTable = pgTable("app_metadata", {
   ...timestamps,
 });
 
-export const appStorageTombstonesTable = pgTable("app_storage_tombstones", {
-  collection: text("collection").notNull(),
-  recordId: text("record_id").notNull(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull().defaultNow(),
-  ...timestamps,
-}, (table) => [
-  uniqueIndex("app_storage_tombstones_collection_record_unique").on(table.collection, table.recordId),
-]);
+export const appStorageTombstonesTable = pgTable(
+  "app_storage_tombstones",
+  {
+    collection: text("collection").notNull(),
+    recordId: text("record_id").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("app_storage_tombstones_collection_record_unique").on(
+      table.collection,
+      table.recordId,
+    ),
+  ],
+);
 
 export const marketsTable = pgTable("markets", {
   id: text("id").primaryKey(),
@@ -41,17 +54,21 @@ export const marketsTable = pgTable("markets", {
   ...timestamps,
 });
 
-export const usersTable = pgTable("users", {
-  id: text("id").primaryKey(),
-  dni: text("dni").notNull(),
-  name: text("name").notNull(),
-  role: text("role").notNull(),
-  status: text("status").notNull(),
-  passwordHash: text("password_hash"),
-  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt: text("record_updated_at"),
-  ...timestamps,
-}, (table) => [uniqueIndex("users_dni_unique").on(table.dni)]);
+export const usersTable = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    dni: text("dni").notNull(),
+    name: text("name").notNull(),
+    role: text("role").notNull(),
+    status: text("status").notNull(),
+    passwordHash: text("password_hash"),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    recordUpdatedAt: text("record_updated_at"),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("users_dni_unique").on(table.dni)],
+);
 
 export const clientsTable = pgTable("clients", {
   id: text("id").primaryKey(),
@@ -71,7 +88,9 @@ export const salesTable = pgTable("sales", {
   marketId: text("market_id").notNull(),
   mode: text("mode").notNull(),
   units: integer("units").notNull().default(0),
-  amountSoles: numeric("amount_soles", { precision: 12, scale: 2 }).notNull().default("0"),
+  amountSoles: numeric("amount_soles", { precision: 12, scale: 2 })
+    .notNull()
+    .default("0"),
   weightKg: numeric("weight_kg", { precision: 12, scale: 3 }),
   saleDate: timestamp("sale_date", { withTimezone: true }).notNull(),
   status: text("status").notNull(),
@@ -99,7 +118,9 @@ export const attendanceTable = pgTable("attendance", {
 export const inventoryTable = pgTable("inventory", {
   marketId: text("market_id").primaryKey(),
   tastingStock: integer("tasting_stock").notNull().default(0),
-  redemptionStock: jsonb("redemption_stock").$type<Record<string, number>>().notNull(),
+  redemptionStock: jsonb("redemption_stock")
+    .$type<Record<string, number>>()
+    .notNull(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
   recordUpdatedAt: text("record_updated_at"),
   ...timestamps,
@@ -151,5 +172,14 @@ export const productPricesTable = pgTable("product_prices", {
   totalPrice: numeric("total_price", { precision: 12, scale: 2 }).notNull(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
   recordUpdatedAt: text("record_updated_at").notNull(),
+  ...timestamps,
+});
+
+export const clientCategoriesTable = pgTable("client_categories", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  status: text("status").notNull().default("ACTIVO"),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  recordUpdatedAt: text("record_updated_at"),
   ...timestamps,
 });
