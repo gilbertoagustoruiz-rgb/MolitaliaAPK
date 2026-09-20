@@ -29,14 +29,54 @@ export async function ensureDatabaseSchema() {
       ('801384','Mini Costa Jurassic 80 g',1,5,5,jsonb_build_object('sku','801384','product','Mini Costa Jurassic 80 g','brand','COSTA JURASSIC','weightKg',0.08,'saleModes',jsonb_build_array('UNIDADES'),'unitsPerPackage',1,'unitPrice',5,'totalPrice',5,'status','ACTIVO'),now()),
       ('800659','Todinnito 85 g',1,5,5,jsonb_build_object('sku','800659','product','Todinnito 85 g','brand','TODINNITO','weightKg',0.085,'saleModes',jsonb_build_array('UNIDADES'),'unitsPerPackage',1,'unitPrice',5,'totalPrice',5,'status','ACTIVO'),now())
     ON CONFLICT (sku) DO NOTHING;
-    UPDATE product_prices SET data = data || jsonb_build_object(
-      'sku',sku,'product',product,
-      'brand',CASE sku WHEN '801177' THEN 'TODINNO' WHEN '801200' THEN 'COSTA' WHEN '800891' THEN 'PASQUALINO' WHEN '801201' THEN 'COSTA MINIONS' WHEN '801384' THEN 'COSTA JURASSIC' ELSE 'TODINNITO' END,
-      'weightKg',CASE sku WHEN '801177' THEN 0.9 WHEN '801200' THEN 0.8 WHEN '800891' THEN 0.8 WHEN '801201' THEN 0.08 WHEN '801384' THEN 0.08 ELSE 0.085 END,
-      'saleModes',CASE WHEN sku IN ('801177','801200','800891') THEN jsonb_build_array('UNIDADES','PLANCHAS') ELSE jsonb_build_array('UNIDADES') END,
-      'unitsPerPackage',units_per_package,'unitPrice',unit_price,'totalPrice',total_price,'status',COALESCE(data->>'status','ACTIVO')
+    UPDATE product_prices
+    SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object(
+      'sku',sku,'product',product,'brand','TODINNO','weightKg',0.9,
+      'saleModes',jsonb_build_array('UNIDADES','PLANCHAS'),
+      'unitsPerPackage',units_per_package,'unitPrice',unit_price,
+      'totalPrice',total_price,'status',COALESCE(data->>'status','ACTIVO')
     ),record_updated_at=COALESCE(record_updated_at,now())
-    WHERE sku IN ('801177','801200','800891','801201','801384','800659');
+    WHERE sku='801177';
+    UPDATE product_prices
+    SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object(
+      'sku',sku,'product',product,'brand','COSTA','weightKg',0.8,
+      'saleModes',jsonb_build_array('UNIDADES','PLANCHAS'),
+      'unitsPerPackage',units_per_package,'unitPrice',unit_price,
+      'totalPrice',total_price,'status',COALESCE(data->>'status','ACTIVO')
+    ),record_updated_at=COALESCE(record_updated_at,now())
+    WHERE sku='801200';
+    UPDATE product_prices
+    SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object(
+      'sku',sku,'product',product,'brand','PASQUALINO','weightKg',0.8,
+      'saleModes',jsonb_build_array('UNIDADES','PLANCHAS'),
+      'unitsPerPackage',units_per_package,'unitPrice',unit_price,
+      'totalPrice',total_price,'status',COALESCE(data->>'status','ACTIVO')
+    ),record_updated_at=COALESCE(record_updated_at,now())
+    WHERE sku='800891';
+    UPDATE product_prices
+    SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object(
+      'sku',sku,'product',product,'brand','COSTA MINIONS','weightKg',0.08,
+      'saleModes',jsonb_build_array('UNIDADES'),
+      'unitsPerPackage',units_per_package,'unitPrice',unit_price,
+      'totalPrice',total_price,'status',COALESCE(data->>'status','ACTIVO')
+    ),record_updated_at=COALESCE(record_updated_at,now())
+    WHERE sku='801201';
+    UPDATE product_prices
+    SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object(
+      'sku',sku,'product',product,'brand','COSTA JURASSIC','weightKg',0.08,
+      'saleModes',jsonb_build_array('UNIDADES'),
+      'unitsPerPackage',units_per_package,'unitPrice',unit_price,
+      'totalPrice',total_price,'status',COALESCE(data->>'status','ACTIVO')
+    ),record_updated_at=COALESCE(record_updated_at,now())
+    WHERE sku='801384';
+    UPDATE product_prices
+    SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object(
+      'sku',sku,'product',product,'brand','TODINNITO','weightKg',0.085,
+      'saleModes',jsonb_build_array('UNIDADES'),
+      'unitsPerPackage',units_per_package,'unitPrice',unit_price,
+      'totalPrice',total_price,'status',COALESCE(data->>'status','ACTIVO')
+    ),record_updated_at=COALESCE(record_updated_at,now())
+    WHERE sku='800659';
     CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date DESC); CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(event_date DESC); CREATE INDEX IF NOT EXISTS idx_movements_date ON inventory_movements(movement_date DESC); CREATE INDEX IF NOT EXISTS idx_closures_date ON session_closures(closure_date DESC);
   `);
 }
