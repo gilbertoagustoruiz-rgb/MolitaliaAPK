@@ -1594,6 +1594,84 @@ router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
   }
 });
 
+router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
+  if (!(await authorizedCatalogActor(req))) {
+    res.status(403).json({
+      message: "Solo Analista y Admin pueden crear usuarios.",
+    });
+    return;
+  }
+  const input = req.body?.user;
+  const dni = isRecord(input) ? value(input, "dni") : "";
+  const name = isRecord(input) ? value(input, "name") : "";
+  const role = isRecord(input) ? value(input, "role") : "";
+  const password = isRecord(input) ? value(input, "password") : "";
+  const validRoles = new Set([
+    "PROMOTOR",
+    "PROMOTOR ROTATIVO",
+    "PROMOTOR PERMANENTE",
+    "COORDINADOR",
+    "SUPERVISOR",
+    "ANALISTA",
+    "TRADE",
+    "ADMIN",
+    "CLIENTE",
+  ]);
+  if (
+    !isRecord(input) ||
+    !/^\d{8}$/.test(dni) ||
+    !name ||
+    !validRoles.has(role) ||
+    password.length < 8
+  ) {
+    res.status(400).json({
+      message:
+        "Completa DNI de 8 dígitos, nombre, rol y una clave de al menos 8 caracteres.",
+    });
+    return;
+  }
+  if (
+    ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"].includes(
+      role,
+    ) &&
+    !value(input, "marketId")
+  ) {
+    res.status(400).json({ message: "Selecciona el mercado del promotor." });
+    return;
+  }
+  if (role === "CLIENTE" && !value(input, "clientId")) {
+    res.status(400).json({ message: "Selecciona el cliente vinculado." });
+    return;
+  }
+  try {
+    const existing = await pool.query("SELECT id FROM users WHERE dni=$1", [
+      dni,
+    ]);
+    if (existing.rows.length) {
+      res.status(409).json({ message: "Ya existe un usuario con este DNI." });
+      return;
+    }
+    const userRecord: StoredRecord = {
+      ...input,
+      id: value(input, "id") || `USR-${randomUUID()}`,
+      dni,
+      name,
+      role,
+      roleLabel: value(input, "roleLabel") || role,
+      status: "ACTIVO",
+      updatedAt: new Date().toISOString(),
+    };
+    await upsertRecord(pool as unknown as QueryClient, "users", userRecord);
+    res.status(201).json({
+      user: publicUser(userRecord),
+      snapshot: await readSnapshot(),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to create user");
+    res.status(500).json({ message: "No se pudo crear el usuario." });
+  }
+});
+
 router.delete(
   "/app-storage/admin/markets/:id",
   async (req, res): Promise<void> => {
@@ -1993,40 +2071,10 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error("En unidades puedes registrar de 1 a 5.");
     const mix = isRecord(input.mix) ? input.mix : {};
     const prices = isRecord(input.unitPrices) ? input.unitPrices : {};
-    const catalogResult = await db.query(
-      "SELECT sku,data FROM product_prices WHERE COALESCE(data->>'status','ACTIVO')='ACTIVO'",
-    );
-    const catalog = catalogResult.rows.map((row) => ({
-      sku: String(row.sku),
-      data: isRecord(row.data) ? row.data : {},
-    }));
-    const allowedBrands = new Set(
-      catalog
-        .filter(
-          (item) =>
-            Array.isArray(item.data.saleModes) &&
-            item.data.saleModes.includes(mode),
-        )
-        .map((item) => value(item.data, "brand")),
-    );
-    const unitSku = Object.keys(prices)[0] || "";
-    if (
-      mode === "UNIDADES" &&
-      !catalog.some(
-        (item) =>
-          item.sku === unitSku &&
-          Array.isArray(item.data.saleModes) &&
-          item.data.saleModes.includes("UNIDADES"),
-      )
-    )
-      throw new Error("Selecciona un producto unitario activo del catálogo.");
     if (
       !Object.keys(mix).length ||
       Object.entries(mix).some(
-        ([brand, n]) =>
-          !allowedBrands.has(brand) ||
-          !Number.isInteger(Number(n)) ||
-          Number(n) < 0,
+        ([, n]) => !Number.isInteger(Number(n)) || Number(n) < 0,
       ) ||
       Object.values(mix).reduce((sum: number, n) => sum + Number(n), 0) !==
         units

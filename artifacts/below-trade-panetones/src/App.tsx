@@ -2759,7 +2759,7 @@ function NewUserModal({
 }: {
   markets: { value: string; label: string }[];
   clients: Client[];
-  onSave: (user: AppUser) => void;
+  onSave: (user: AppUser) => Promise<boolean>;
   close: () => void;
 }) {
   const [dni, setDni] = useState("");
@@ -2768,7 +2768,7 @@ function NewUserModal({
   const [clientId, setClientId] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("PROMOTOR ROTATIVO");
-  const save = () => {
+  const save = async () => {
     if (
       dni.length !== 8 ||
       !name.trim() ||
@@ -2777,7 +2777,7 @@ function NewUserModal({
       (role === "CLIENTE" && !clientId)
     )
       return;
-    onSave({
+    const saved = await onSave({
       id: `USR-${Date.now()}`,
       dni,
       name: name.trim(),
@@ -2794,7 +2794,7 @@ function NewUserModal({
           }
         : {}),
     });
-    close();
+    if (saved) close();
   };
   return (
     <Modal
@@ -2875,7 +2875,7 @@ function NewMarketModal({
   onSave,
   close,
 }: {
-  onSave: (market: Market) => void | Promise<void>;
+  onSave: (market: Market) => Promise<boolean>;
   close: () => void;
 }) {
   const [name, setName] = useState("");
@@ -2891,7 +2891,7 @@ function NewMarketModal({
       !district.trim()
     )
       return;
-    await onSave({
+    const saved = await onSave({
       id: `MKT-${Date.now()}`,
       name: name.trim().toUpperCase(),
       region: region.trim().toUpperCase() || department.trim().toUpperCase(),
@@ -2900,7 +2900,7 @@ function NewMarketModal({
       district: district.trim().toUpperCase(),
       status: "ACTIVO",
     });
-    close();
+    if (saved) close();
   };
   return (
     <Modal
@@ -3179,7 +3179,7 @@ function NewClientModal({
   markets: { value: string; label: string }[];
   categories: Category[];
   count: number;
-  onSave: (client: Client) => void | Promise<void>;
+  onSave: (client: Client) => Promise<boolean>;
   close: () => void;
 }) {
   const activeCategories = categories.filter(
@@ -3193,7 +3193,7 @@ function NewClientModal({
   const [marketId, setMarketId] = useState("");
   const save = async () => {
     if (!name.trim() || !marketId) return;
-    await onSave({
+    const saved = await onSave({
       id: `${Date.now()}`,
       code: `CLI-${String(count + 1).padStart(6, "0")}`,
       name: name.trim(),
@@ -3202,7 +3202,7 @@ function NewClientModal({
       marketId,
       status: "ACTIVO",
     });
-    close();
+    if (saved) close();
   };
   return (
     <Modal
@@ -6723,6 +6723,7 @@ function AnalystApp({
     const headers = new Headers(init?.headers);
     if (
       path.startsWith("/records/") ||
+      path === "/users" ||
       path === "/sales" ||
       path.startsWith("/catalog/")
     ) {
@@ -6817,12 +6818,22 @@ function AnalystApp({
       return false;
     }
   };
-  const saveUser = (newUser: AppUser) => {
-    const next = [...users, newUser];
-    setUsers(next);
-    writeStore("bt-users", next);
-    setModal(null);
-    notify("Usuario creado con clave temporal");
+  const saveUser = async (newUser: AppUser) => {
+    try {
+      await adminRequest("/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user: newUser }),
+      });
+      notify("Usuario creado y guardado en DigitalOcean");
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo crear el usuario",
+        true,
+      );
+      return false;
+    }
   };
   const saveMarket = async (market: Market) => {
     try {
@@ -6834,11 +6845,13 @@ function AnalystApp({
       writeStore("bt-markets", [...markets, market]);
       setModal(null);
       notify("Mercado creado como ACTIVO");
+      return true;
     } catch (error) {
       notify(
         error instanceof Error ? error.message : "No se pudo crear el mercado",
         true,
       );
+      return false;
     }
   };
   const deleteMarket = async (market: Market) => {
@@ -6870,11 +6883,13 @@ function AnalystApp({
         body: JSON.stringify({ client }),
       });
       notify("Cliente creado como ACTIVO");
+      return true;
     } catch (error) {
       notify(
         error instanceof Error ? error.message : "No se pudo crear el cliente",
         true,
       );
+      return false;
     }
   };
   const saveClientEdit = async (client: Client) => {
@@ -7256,7 +7271,6 @@ function AnalystApp({
     ["clientes", "Clientes"],
     ...(canManageCatalogs
       ? [
-          ["productos", "Productos"],
           ["categorias", "Categorías"],
         ]
       : []),
@@ -8366,16 +8380,6 @@ function AnalystApp({
           promoter={users.find((item) => item.id === editingSale.promoterId)}
           onSave={saveSaleEdit}
           close={() => setEditingSale(null)}
-        />
-      )}
-      {(modal === "product" || editingProduct) && (
-        <CatalogProductModal
-          product={editingProduct || undefined}
-          onSave={saveCatalogProduct}
-          close={() => {
-            setModal(null);
-            setEditingProduct(null);
-          }}
         />
       )}
       {(modal === "category" || editingCategory) && (
