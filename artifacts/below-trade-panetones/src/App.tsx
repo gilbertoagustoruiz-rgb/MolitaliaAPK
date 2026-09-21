@@ -2768,15 +2768,14 @@ function NewUserModal({
   const [clientId, setClientId] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("PROMOTOR ROTATIVO");
+  const canSave =
+    dni.length === 8 &&
+    Boolean(name.trim()) &&
+    password.length >= 8 &&
+    (!isZoneManagerRole(role) || Boolean(marketId)) &&
+    (role !== "CLIENTE" || Boolean(clientId));
   const save = async () => {
-    if (
-      dni.length !== 8 ||
-      !name.trim() ||
-      password.length < 8 ||
-      (isZoneManagerRole(role) && !marketId) ||
-      (role === "CLIENTE" && !clientId)
-    )
-      return;
+    if (!canSave) return;
     const saved = await onSave({
       id: `USR-${Date.now()}`,
       dni,
@@ -2858,13 +2857,14 @@ function NewUserModal({
             type="password"
             testId="input-new-user-password"
           />
+          <small>Debe tener al menos 8 caracteres.</small>
         </Field>
       </div>
       <div className="modal-actions">
         <Btn variant="outline" onClick={close}>
           Cancelar
         </Btn>
-        <Btn onClick={save} testId="button-create-user">
+        <Btn disabled={!canSave} onClick={save} testId="button-create-user">
           Crear usuario
         </Btn>
       </div>
