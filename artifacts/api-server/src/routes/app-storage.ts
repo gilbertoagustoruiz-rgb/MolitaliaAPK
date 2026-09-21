@@ -1336,8 +1336,8 @@ router.all(
           required(["name", "role", "status"]);
           if (!/^\d{8}$/.test(value(next, "dni")))
             throw new Error("El DNI debe tener 8 dígitos.");
-          if (value(input, "password") && value(input, "password").length < 8)
-            throw new Error("La clave debe tener al menos 8 caracteres.");
+          if (value(input, "password") && value(input, "password").length < 3)
+            throw new Error("La clave debe tener al menos 3 caracteres.");
           if (!value(input, "password")) delete next.password;
         }
         if (name === "attendance" || name === "movements") {
@@ -1622,11 +1622,11 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
     !/^\d{8}$/.test(dni) ||
     !name ||
     !validRoles.has(role) ||
-    password.length < 8
+    password.length < 3
   ) {
     res.status(400).json({
       message:
-        "Completa DNI de 8 dígitos, nombre, rol y una clave de al menos 8 caracteres.",
+        "Completa DNI de 8 dígitos, nombre, rol y una clave de al menos 3 caracteres.",
     });
     return;
   }

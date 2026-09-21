@@ -2771,7 +2771,7 @@ function NewUserModal({
   const canSave =
     dni.length === 8 &&
     Boolean(name.trim()) &&
-    password.length >= 8 &&
+    password.length >= 3 &&
     (!isZoneManagerRole(role) || Boolean(marketId)) &&
     (role !== "CLIENTE" || Boolean(clientId));
   const save = async () => {
@@ -2857,7 +2857,7 @@ function NewUserModal({
             type="password"
             testId="input-new-user-password"
           />
-          <small>Debe tener al menos 8 caracteres.</small>
+          <small>Debe tener al menos 3 caracteres.</small>
         </Field>
       </div>
       <div className="modal-actions">
