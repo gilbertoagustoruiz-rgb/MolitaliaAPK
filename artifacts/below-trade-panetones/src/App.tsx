@@ -128,6 +128,8 @@ type Sale = {
   promoterRole?: Role;
   promoterRoleLabel?: string;
   clientId: string;
+  /** Puede estar vacío únicamente en ventas históricas. */
+  finalClientName?: string;
   marketId: string;
   marketRegion?: string;
   marketDepartment?: string;
@@ -3375,6 +3377,9 @@ function SaleEditModal({
   close: () => void;
 }) {
   const [clientId, setClientId] = useState(sale.clientId);
+  const [finalClientName, setFinalClientName] = useState(
+    sale.finalClientName || "",
+  );
   const [amountSoles, setAmountSoles] = useState(String(sale.amountSoles));
   const [saleDate, setSaleDate] = useState(() => {
     const date = new Date(sale.date);
@@ -3450,6 +3455,7 @@ function SaleEditModal({
   const save = async () => {
     if (
       !clientId ||
+      !finalClientName.trim() ||
       !Number.isFinite(parsedAmount) ||
       parsedAmount <= 0 ||
       Number.isNaN(parsedDate.getTime()) ||
@@ -3464,6 +3470,7 @@ function SaleEditModal({
         {
           ...sale,
           clientId,
+          finalClientName: finalClientName.trim(),
           amountSoles: parsedAmount,
           date: parsedDate.toISOString(),
           comment: comment.trim() || undefined,
@@ -3500,6 +3507,15 @@ function SaleEditModal({
             label: `${client.code} · ${client.name}`,
           }))}
         />
+        <Field label="Nombre Cliente Final *">
+          <Input
+            value={finalClientName}
+            onChange={setFinalClientName}
+            placeholder="Nombre de quien realiza la compra"
+            maxLength={120}
+            testId="input-edit-sale-final-client"
+          />
+        </Field>
         <Field label="Importe total (S/) *">
           <Input
             type="number"
@@ -3602,6 +3618,7 @@ function SaleEditModal({
         <Btn
           disabled={
             !clientId ||
+            !finalClientName.trim() ||
             !Number.isFinite(parsedAmount) ||
             parsedAmount <= 0 ||
             Number.isNaN(parsedDate.getTime()) ||
@@ -5488,6 +5505,7 @@ function CoordinatorApp({
         "Promotor",
         "Rol",
         "Cliente",
+        "Nombre cliente final",
         "Mercado",
         "Unidades",
         "Total",
@@ -5509,6 +5527,7 @@ function CoordinatorApp({
             "",
           allowedClients.find((client) => client.id === sale.clientId)?.name ||
             "",
+          sale.finalClientName || "",
           marketMap[sale.marketId]?.name || "",
           sale.units,
           formatSoles(sale.amountSoles),
@@ -5989,6 +6008,7 @@ function AnalystApp({
         "Promotor",
         "Rol promotor",
         "Cliente",
+        "Nombre cliente final",
         "Mercado",
         "Región",
         "Departamento",
@@ -6036,6 +6056,7 @@ function AnalystApp({
             promoter?.role ||
             "ROL NO IDENTIFICADO",
           clients.find((client) => client.id === sale.clientId)?.name,
+          sale.finalClientName || "",
           marketMap[sale.marketId]?.name,
           location.region,
           location.department,
@@ -8543,6 +8564,7 @@ function PromoterApp({
     (market) => market.id === selectedMarketId,
   );
   const [clientId, setClientId] = useState("");
+  const [finalClientName, setFinalClientName] = useState("");
   const [mode, setMode] = useState<"UNIDADES" | "PLANCHAS">("UNIDADES");
   const [sku, setSku] = useState(products[0].sku);
   const [unitQtyInput, setUnitQtyInput] = useState("1");
@@ -8711,6 +8733,7 @@ function PromoterApp({
   const validMix = mode === "UNIDADES" || totalMix === planchas * 6;
   const saleFormValid = Boolean(
     clientId &&
+    finalClientName.trim() &&
     receipt &&
     pricesValid &&
     Number.isFinite(saleAmount) &&
@@ -8875,7 +8898,7 @@ function PromoterApp({
   const filteredSales = mineSales.filter(
     (sale) =>
       (modeFilter === "TODO" || sale.mode === modeFilter) &&
-      `${sale.id} ${clients.find((client) => client.id === sale.clientId)?.name || ""} ${sale.bonus || ""} ${sale.comment || ""}`
+      `${sale.id} ${sale.finalClientName || ""} ${clients.find((client) => client.id === sale.clientId)?.name || ""} ${sale.bonus || ""} ${sale.comment || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
@@ -8932,6 +8955,7 @@ function PromoterApp({
       promoterRole: user.role,
       promoterRoleLabel: user.roleLabel || user.role,
       clientId,
+      finalClientName: finalClientName.trim(),
       marketId: selectedMarketId,
       marketRegion: selectedMarket.region || selectedMarket.department,
       marketDepartment: selectedMarket.department,
@@ -9157,6 +9181,15 @@ function PromoterApp({
             }
           />
         )}
+        <Field label="Nombre Cliente Final *">
+          <Input
+            value={finalClientName}
+            onChange={setFinalClientName}
+            placeholder="Nombre de quien realiza la compra"
+            maxLength={120}
+            testId="input-sale-final-client"
+          />
+        </Field>
         <Field label="Tipo de ingreso">
           <div className="mode-switch">
             <button

@@ -2057,11 +2057,14 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (!customer.rows.length || !market.rows.length)
       throw new Error("Selecciona un cliente activo del mercado elegido.");
     const date = new Date(value(input, "date"));
+    const finalClientName = value(input, "finalClientName").trim();
     const units = Number(input.units);
     const planchas = Number(input.planchas);
     const mode = value(input, "mode");
     if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
       throw new Error("La fecha de venta no puede estar vacía ni ser futura.");
+    if (!finalClientName)
+      throw new Error("Completa el nombre del cliente final.");
     if (
       !Number.isInteger(units) ||
       units < 1 ||
@@ -2198,6 +2201,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     const updatedAt = new Date().toISOString();
     const sale = {
       ...input,
+      finalClientName,
       amountSoles: amount,
       date: date.toISOString(),
       updatedAt,
@@ -2258,13 +2262,14 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     !id ||
     !isRecord(input) ||
     !value(input, "clientId") ||
+    !value(input, "finalClientName") ||
     !Number.isFinite(amountSoles) ||
     amountSoles <= 0 ||
     Number.isNaN(saleDate.getTime())
   ) {
     res.status(400).json({
       message:
-        "La venta requiere cliente, fecha válida e importe mayor a cero.",
+        "La venta requiere cliente final, fecha válida e importe mayor a cero.",
     });
     return;
   }
@@ -2367,6 +2372,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       ...currentSale.data,
       id,
       clientId: value(input, "clientId"),
+      finalClientName: value(input, "finalClientName").trim(),
       amountSoles,
       date: saleDate.toISOString(),
       comment: value(input, "comment") || undefined,
