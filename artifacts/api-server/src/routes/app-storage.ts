@@ -161,7 +161,11 @@ async function verifyPassword(password: string, stored: string) {
 
 function publicUser(record: StoredRecord) {
   const { password: _password, ...safe } = record;
-  return safe;
+  return {
+    ...safe,
+    id: value(safe, "id"),
+    dni: value(safe, "dni"),
+  };
 }
 
 function isRecord(value: unknown): value is StoredRecord {
@@ -377,15 +381,86 @@ async function readSnapshot(
           ? "closure_date DESC, created_at DESC"
           : "created_at";
     const result = await client.query(
-      `SELECT data FROM ${table} ORDER BY ${orderBy}`,
+      name === "attendance"
+        ? `SELECT data,promoter_id FROM ${table} ORDER BY ${orderBy}`
+        : `SELECT data FROM ${table} ORDER BY ${orderBy}`,
     );
-    snapshot[name] = result.rows.map((row) =>
-      name === "users"
-        ? publicUser(row.data as StoredRecord)
-        : (row.data as StoredRecord),
+    snapshot[name] = result.rows.map((row) => {
+      const source = row.data as StoredRecord;
+      if (name === "users") return publicUser(source);
+      // Algunas marcaciones históricas tienen el ID solo en la columna
+      // relacional. Lo exponemos también dentro del registro para que el
+      // frontend pueda relacionarlo de forma consistente.
+      if (name === "attendance" && !value(source, "promoterId"))
+        return { ...source, promoterId: String(row.promoter_id || "") };
+      return source;
+    });
+  }
+  const usersById = new Map(
+    snapshot.users.map((user) => [value(user, "id"), user]),
+  );
+  const usersByDni = new Map(
+    snapshot.users.map((user) => [value(user, "dni"), user]),
+  );
+  snapshot.attendance = snapshot.attendance.map((record) => {
+    const promoter =
+      usersById.get(value(record, "promoterId")) ||
+      usersByDni.get(value(record, "promoterDni"));
+    return promoter
+      ? {
+          ...record,
+          promoterId: value(promoter, "id"),
+          promoterDni: value(promoter, "dni"),
+          promoterRole: value(record, "promoterRole") || value(promoter, "role"),
+          promoterRoleLabel:
+            value(record, "promoterRoleLabel") ||
+            value(promoter, "roleLabel") ||
+            value(promoter, "role"),
+        }
+      : record;
+  });
+  return snapshot;
+}
+
+async function repairAttendancePromoterReferences() {
+  const [usersResult, attendanceResult] = await Promise.all([
+    pool.query("SELECT id,dni,data FROM users"),
+    pool.query("SELECT id,promoter_id,data FROM attendance"),
+  ]);
+  const users = usersResult.rows.map((row) => ({
+    id: String(row.id || value(row.data as StoredRecord, "id")),
+    dni: String(row.dni || value(row.data as StoredRecord, "dni")),
+    data: row.data as StoredRecord,
+  }));
+  const byId = new Map(users.map((user) => [user.id, user]));
+  const byDni = new Map(users.map((user) => [user.dni, user]));
+  for (const row of attendanceResult.rows) {
+    const source = row.data as StoredRecord;
+    const promoter =
+      byId.get(value(source, "promoterId")) ||
+      byId.get(String(row.promoter_id || "")) ||
+      byDni.get(value(source, "promoterDni"));
+    if (!promoter) continue;
+    const corrected = {
+      ...source,
+      promoterId: promoter.id,
+      promoterDni: promoter.dni,
+      promoterRole: value(source, "promoterRole") || value(promoter.data, "role"),
+      promoterRoleLabel:
+        value(source, "promoterRoleLabel") ||
+        value(promoter.data, "roleLabel") ||
+        value(promoter.data, "role"),
+    };
+    if (
+      value(source, "promoterId") === promoter.id &&
+      value(source, "promoterDni") === promoter.dni
+    )
+      continue;
+    await pool.query(
+      "UPDATE attendance SET promoter_id=$2,data=$3,updated_at=now() WHERE id=$1",
+      [String(row.id), promoter.id, corrected],
     );
   }
-  return snapshot;
 }
 
 async function setBackupMetadata(key: string, valueToStore: string | null) {
@@ -1055,6 +1130,7 @@ if (googleSheetsBackupEnabled) {
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
+    await repairAttendancePromoterReferences();
     await ensurePromoterStockBaseline().catch((error) => {
       req.log.error(
         { err: error },

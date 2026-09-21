@@ -155,6 +155,7 @@ type Sale = {
 type Attendance = {
   id: string;
   promoterId: string;
+  promoterDni?: string;
   promoterRole?: Role;
   promoterRoleLabel?: string;
   clientId: string;
@@ -9072,6 +9073,7 @@ function PromoterApp({
     const item: Attendance = {
       id,
       promoterId: user.id,
+      promoterDni: user.dni,
       promoterRole: user.role,
       promoterRoleLabel: user.roleLabel || user.role,
       clientId: markClientId,
