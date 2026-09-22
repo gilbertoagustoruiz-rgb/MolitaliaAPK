@@ -8871,19 +8871,31 @@ function PromoterApp({
       (first, second) =>
         new Date(second.date).getTime() - new Date(first.date).getTime(),
     )[0];
+  const isRotativePromoter = user.role === "PROMOTOR ROTATIVO";
+  const latestAttendanceToday = [...todayAttendance].sort(
+    (first, second) =>
+      new Date(second.date).getTime() - new Date(first.date).getTime(),
+  )[0];
+  const hasRotativeActiveSession = Boolean(
+    isRotativePromoter && latestAttendanceToday?.type === "ENTRADA",
+  );
   const exitedToday = (id: string) =>
     latestAttendanceFor(id)?.type === "SALIDA";
   const sellingClients = available.filter(
     (client) =>
       administrative ||
-      (latestAttendanceFor(client.id)?.type === "ENTRADA" &&
-        !exitedToday(client.id)),
+      (isRotativePromoter
+        ? hasRotativeActiveSession
+        : latestAttendanceFor(client.id)?.type === "ENTRADA" &&
+          !exitedToday(client.id)),
   );
   const canSellForSelectedClient = Boolean(
     clientId &&
     (administrative ||
-      (latestAttendanceFor(clientId)?.type === "ENTRADA" &&
-        !exitedToday(clientId))),
+      (isRotativePromoter
+        ? hasRotativeActiveSession
+        : latestAttendanceFor(clientId)?.type === "ENTRADA" &&
+          !exitedToday(clientId))),
   );
   const canConfirm = Boolean(
     !savingAdminSale &&
@@ -8915,7 +8927,9 @@ function PromoterApp({
     }
     if (!canSellForSelectedClient) {
       notify(
-        exitedToday(clientId)
+        isRotativePromoter
+          ? "Primero registra una Entrada activa para poder vender en tus clientes asignados."
+          : exitedToday(clientId)
           ? "Registra una nueva entrada en este cliente para volver a vender."
           : "Debes registrar una entrada activa en este cliente antes de registrar una venta.",
         true,
@@ -9127,7 +9141,9 @@ function PromoterApp({
       );
       return;
     }
-    const latest = latestAttendanceFor(markClientId);
+    const latest = isRotativePromoter
+      ? latestAttendanceToday
+      : latestAttendanceFor(markClientId);
     if (attendanceLimitReached(markType)) {
       notify(
         `Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === "ENTRADA" ? "entradas" : "salidas"} por hoy.`,
@@ -9136,11 +9152,21 @@ function PromoterApp({
       return;
     }
     if (markType === "SALIDA" && (!latest || latest.type !== "ENTRADA")) {
-      notify("Primero debes registrar la entrada en esta tienda", true);
+      notify(
+        isRotativePromoter
+          ? "Primero debes registrar una entrada activa para finalizar tu jornada."
+          : "Primero debes registrar la entrada en esta tienda",
+        true,
+      );
       return;
     }
     if (markType === "ENTRADA" && latest?.type === "ENTRADA") {
-      notify("Ya tienes una entrada abierta en esta tienda", true);
+      notify(
+        isRotativePromoter
+          ? "Ya tienes una entrada activa. Puedes registrar ventas en tus clientes asignados o marcar tu salida."
+          : "Ya tienes una entrada abierta en esta tienda",
+        true,
+      );
       return;
     }
     if (markType === "SALIDA") {
@@ -9162,8 +9188,12 @@ function PromoterApp({
             <Clock3 />
             <span>
               {sellingClients.length
-                ? "Venta habilitada para clientes con Entrada activa."
-                : "Debes marcar Entrada en el cliente antes de registrar una venta."}
+                ? isRotativePromoter
+                  ? "Venta habilitada para todos tus clientes asignados mientras tengas una Entrada activa."
+                  : "Venta habilitada para clientes con Entrada activa."
+                : isRotativePromoter
+                  ? "Debes marcar una Entrada antes de registrar ventas."
+                  : "Debes marcar Entrada en el cliente antes de registrar una venta."}
             </span>
           </div>
         )}
@@ -9178,8 +9208,12 @@ function PromoterApp({
             }))}
             placeholder={
               sellingClients.length
-                ? "Seleccionar cliente con Entrada activa"
-                : "Sin clientes con Entrada activa"
+                ? isRotativePromoter
+                  ? "Seleccionar cliente asignado"
+                  : "Seleccionar cliente con Entrada activa"
+                : isRotativePromoter
+                  ? "Sin Entrada activa"
+                  : "Sin clientes con Entrada activa"
             }
           />
         )}

@@ -525,11 +525,33 @@ async function createAutomaticClosuresForDay(day: string) {
        WHERE latest.event_type='ENTRADA'`,
       [bounds.start, bounds.end],
     );
+    const latestEvents = await client.query(
+      `SELECT DISTINCT ON (promoter_id) promoter_id,event_type
+       FROM attendance
+       WHERE event_date >= $1::timestamptz AND event_date <= $2::timestamptz
+       ORDER BY promoter_id,event_date DESC,created_at DESC`,
+      [bounds.start, bounds.end],
+    );
+    const latestEventByPromoter = new Map(
+      latestEvents.rows.map((row) => [
+        String(row.promoter_id || ""),
+        String(row.event_type || ""),
+      ]),
+    );
     for (const row of openPromoters.rows) {
       const promoterId = String(row.promoter_id || "");
       const marketId = String(row.market_id || "");
       if (!promoterId || !marketId) continue;
       const userData = isRecord(row.user_data) ? row.user_data : {};
+      // El promotor rotativo tiene una jornada global: puede entrar en un
+      // cliente, vender en otros y salir en cualquiera de ellos. Una salida
+      // posterior cierra esa jornada y no debe generar cierres automáticos
+      // para el cliente de entrada.
+      if (
+        value(userData, "role") === "PROMOTOR ROTATIVO" &&
+        latestEventByPromoter.get(promoterId) !== "ENTRADA"
+      )
+        continue;
       const closure: StoredRecord = {
         id: `CIERRE-AUTO-${day}-${promoterId}-${row.client_id}`,
         promoterId,
