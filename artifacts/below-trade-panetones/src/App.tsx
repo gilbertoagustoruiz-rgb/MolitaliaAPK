@@ -3456,7 +3456,7 @@ function SaleEditModal({
   const save = async () => {
     if (
       !clientId ||
-      !finalClientName.trim() ||
+      (selectedCanje && !finalClientName.trim()) ||
       !Number.isFinite(parsedAmount) ||
       parsedAmount <= 0 ||
       Number.isNaN(parsedDate.getTime()) ||
@@ -3471,7 +3471,9 @@ function SaleEditModal({
         {
           ...sale,
           clientId,
-          finalClientName: finalClientName.trim(),
+          finalClientName: selectedCanje
+            ? finalClientName.trim()
+            : undefined,
           amountSoles: parsedAmount,
           date: parsedDate.toISOString(),
           comment: comment.trim() || undefined,
@@ -3508,15 +3510,17 @@ function SaleEditModal({
             label: `${client.code} · ${client.name}`,
           }))}
         />
-        <Field label="Nombre Cliente Final *">
-          <Input
-            value={finalClientName}
-            onChange={setFinalClientName}
-            placeholder="Nombre de quien realiza la compra"
-            maxLength={120}
-            testId="input-edit-sale-final-client"
-          />
-        </Field>
+        {selectedCanje && (
+          <Field label="Nombre Cliente Final *">
+            <Input
+              value={finalClientName}
+              onChange={setFinalClientName}
+              placeholder="Nombre de quien recibe el canje"
+              maxLength={120}
+              testId="input-edit-sale-final-client"
+            />
+          </Field>
+        )}
         <Field label="Importe total (S/) *">
           <Input
             type="number"
@@ -3619,7 +3623,7 @@ function SaleEditModal({
         <Btn
           disabled={
             !clientId ||
-            !finalClientName.trim() ||
+            (selectedCanje && !finalClientName.trim()) ||
             !Number.isFinite(parsedAmount) ||
             parsedAmount <= 0 ||
             Number.isNaN(parsedDate.getTime()) ||
@@ -8734,7 +8738,7 @@ function PromoterApp({
   const validMix = mode === "UNIDADES" || totalMix === planchas * 6;
   const saleFormValid = Boolean(
     clientId &&
-    finalClientName.trim() &&
+    (!bonus || finalClientName.trim()) &&
     receipt &&
     pricesValid &&
     Number.isFinite(saleAmount) &&
@@ -8970,7 +8974,7 @@ function PromoterApp({
       promoterRole: user.role,
       promoterRoleLabel: user.roleLabel || user.role,
       clientId,
-      finalClientName: finalClientName.trim(),
+      finalClientName: bonus ? finalClientName.trim() : undefined,
       marketId: selectedMarketId,
       marketRegion: selectedMarket.region || selectedMarket.department,
       marketDepartment: selectedMarket.department,
@@ -9217,15 +9221,17 @@ function PromoterApp({
             }
           />
         )}
-        <Field label="Nombre Cliente Final *">
-          <Input
-            value={finalClientName}
-            onChange={setFinalClientName}
-            placeholder="Nombre de quien realiza la compra"
-            maxLength={120}
-            testId="input-sale-final-client"
-          />
-        </Field>
+        {bonus && (
+          <Field label="Nombre Cliente Final *">
+            <Input
+              value={finalClientName}
+              onChange={setFinalClientName}
+              placeholder="Nombre de quien recibe el canje"
+              maxLength={120}
+              testId="input-sale-final-client"
+            />
+          </Field>
+        )}
         <Field label="Tipo de ingreso">
           <div className="mode-switch">
             <button

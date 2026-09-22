@@ -2161,8 +2161,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     const mode = value(input, "mode");
     if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
       throw new Error("La fecha de venta no puede estar vacía ni ser futura.");
-    if (!finalClientName)
-      throw new Error("Completa el nombre del cliente final.");
     if (
       !Number.isInteger(units) ||
       units < 1 ||
@@ -2210,6 +2208,8 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error("Verifica los precios unitarios y el total.");
     const photoValid = (photo: string) => /^(https:\/\/|\/api\/)/.test(photo);
     const bonus = value(input, "bonus");
+    if (bonus && !finalClientName)
+      throw new Error("Completa el nombre del cliente final para el canje.");
     if (
       !photoValid(value(input, "receiptPhoto")) ||
       (bonus && !photoValid(value(input, "exchangePhoto")))
@@ -2299,7 +2299,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     const updatedAt = new Date().toISOString();
     const sale = {
       ...input,
-      finalClientName,
+      finalClientName: bonus ? finalClientName : undefined,
       amountSoles: amount,
       date: date.toISOString(),
       updatedAt,
@@ -2356,18 +2356,19 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
   const saleDate = isRecord(input)
     ? new Date(value(input, "date"))
     : new Date(Number.NaN);
+  const bonus = isRecord(input) ? value(input, "bonus") : "";
   if (
     !id ||
     !isRecord(input) ||
     !value(input, "clientId") ||
-    !value(input, "finalClientName") ||
+    (bonus && !value(input, "finalClientName")) ||
     !Number.isFinite(amountSoles) ||
     amountSoles <= 0 ||
     Number.isNaN(saleDate.getTime())
   ) {
     res.status(400).json({
       message:
-        "La venta requiere cliente final, fecha válida e importe mayor a cero.",
+        "La venta requiere cliente final cuando tiene canje, fecha válida e importe mayor a cero.",
     });
     return;
   }
@@ -2470,7 +2471,9 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       ...currentSale.data,
       id,
       clientId: value(input, "clientId"),
-      finalClientName: value(input, "finalClientName").trim(),
+      finalClientName: bonus
+        ? value(input, "finalClientName").trim()
+        : undefined,
       amountSoles,
       date: saleDate.toISOString(),
       comment: value(input, "comment") || undefined,
