@@ -2212,9 +2212,12 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error("Completa el nombre del cliente final para el canje.");
     if (
       !photoValid(value(input, "receiptPhoto")) ||
-      (bonus && !photoValid(value(input, "exchangePhoto")))
+      ((bonus || mode === "PLANCHAS") &&
+        !photoValid(value(input, "exchangePhoto")))
     )
-      throw new Error("Primero sube las fotografías de boleta y canje.");
+      throw new Error(
+        "Primero sube las dos fotografías requeridas: boleta y cliente/canje.",
+      );
     const count = Number(input.redemptionCount || 0);
     if (
       (bonus && (!Number.isInteger(count) || count < 1 || count > 3)) ||
@@ -2483,7 +2486,8 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         : 0,
       redemptionItems: value(input, "bonus") ? requested : undefined,
       receiptPhoto: value(input, "receiptPhoto"),
-      exchangePhoto: value(input, "bonus")
+      exchangePhoto:
+        value(input, "bonus") || value(currentSale.data, "mode") === "PLANCHAS"
         ? value(input, "exchangePhoto") || undefined
         : undefined,
       status: "SINCRONIZADA",

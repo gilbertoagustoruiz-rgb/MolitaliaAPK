@@ -3451,8 +3451,11 @@ function SaleEditModal({
   const missingStock = requiredRedemptionEntries(newRequirements).find(
     ([itemId, quantity]) => restoredStock[itemId] < quantity,
   );
+  const exchangeEvidenceRequired = Boolean(
+    selectedCanje || sale.mode === "PLANCHAS",
+  );
   const exchangeEvidenceReady =
-    !selectedCanje || Boolean(exchange || sale.exchangePhoto);
+    !exchangeEvidenceRequired || Boolean(exchange || sale.exchangePhoto);
   const save = async () => {
     if (
       !clientId ||
@@ -3481,9 +3484,9 @@ function SaleEditModal({
           redemptionCount: selectedCanje ? redemptionCount : 0,
           redemptionItems: selectedCanje ? newRequirements : undefined,
           receiptPhoto: receipt ? `BOLETA - ${sale.id}.jpg` : sale.receiptPhoto,
-          exchangePhoto: selectedCanje
+          exchangePhoto: exchangeEvidenceRequired
             ? exchange
-              ? `${selectedCanje.label} - CLIENTE - ${sale.id}.jpg`
+              ? `${selectedCanje?.label || "CLIENTE"} - CLIENTE - ${sale.id}.jpg`
               : sale.exchangePhoto
             : undefined,
         },
@@ -3602,13 +3605,13 @@ function SaleEditModal({
           <PhotoField
             label="Reemplazar foto de canje"
             hint={
-              selectedCanje
+              exchangeEvidenceRequired
                 ? "Obligatoria si el canje no tenía evidencia"
                 : "No requerida sin canje"
             }
             file={exchange}
             setFile={setExchange}
-            disabled={!selectedCanje}
+            disabled={!exchangeEvidenceRequired}
           />
         </div>
       </div>
@@ -8732,6 +8735,9 @@ function PromoterApp({
   const exceptionNeedsComment = Boolean(
     mode === "PLANCHAS" && bonus && canjeCount === 3 && !comment.trim(),
   );
+  const exchangeEvidenceRequired = Boolean(
+    bonus || mode === "PLANCHAS",
+  );
   const validUnitQty =
     mode === "PLANCHAS" ||
     (Number.isInteger(unitQty) && unitQty >= 1 && unitQty <= 5);
@@ -8745,7 +8751,8 @@ function PromoterApp({
     saleAmount > 0 &&
     validUnitQty &&
     validMix &&
-    (!bonus || (exchange && !missingRedemption && !exceptionNeedsComment)) &&
+    (!exchangeEvidenceRequired ||
+      (exchange && !missingRedemption && !exceptionNeedsComment)) &&
     !(mode === "PLANCHAS" && planchas > 80),
   );
   useEffect(() => {
@@ -8783,7 +8790,7 @@ function PromoterApp({
     };
   }, [receipt, selectedMarket?.id, clientId]);
   useEffect(() => {
-    if (!exchange || !selectedMarket || !bonus) {
+    if (!exchange || !selectedMarket || !exchangeEvidenceRequired) {
       setExchangeUrl("");
       return;
     }
@@ -8815,7 +8822,7 @@ function PromoterApp({
     return () => {
       cancelled = true;
     };
-  }, [exchange, selectedMarket?.id, clientId, bonus]);
+  }, [exchange, selectedMarket?.id, clientId, exchangeEvidenceRequired]);
   useEffect(() => {
     if (!markPhoto || !selectedMarket) {
       setMarkPhotoUrl("");
@@ -8854,9 +8861,12 @@ function PromoterApp({
       cancelled = true;
     };
   }, [markPhoto, selectedMarket?.id, markClientId, markType]);
-  const mineSales = sales.filter((sale) => sale.promoterId === user.id);
+  const samePromoter = (promoterId: string, promoterDni?: string) =>
+    String(promoterId) === String(user.id) ||
+    Boolean(promoterDni && String(promoterDni) === String(user.dni));
+  const mineSales = sales.filter((sale) => samePromoter(sale.promoterId));
   const mineAttendance = attendance.filter(
-    (item) => item.promoterId === user.id,
+    (item) => samePromoter(item.promoterId, item.promoterDni),
   );
   const today = attendanceDay(attendanceClock);
   const todayAttendance = mineAttendance.filter(
@@ -8910,7 +8920,7 @@ function PromoterApp({
     saleFormValid &&
     receiptUrl &&
     !receiptUploading &&
-    (!bonus || (exchangeUrl && !exchangeUploading)),
+    (!exchangeEvidenceRequired || (exchangeUrl && !exchangeUploading)),
   );
   const filteredSales = mineSales.filter(
     (sale) =>
@@ -8995,7 +9005,7 @@ function PromoterApp({
       redemptionItems: bonus ? requiredRedemptions : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
-      exchangePhoto: bonus ? exchangeUrl : undefined,
+      exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
       date: administrative
         ? new Date(administrative.date + "-05:00").toISOString()
         : now,
@@ -9220,17 +9230,6 @@ function PromoterApp({
                   : "Sin clientes con Entrada activa"
             }
           />
-        )}
-        {bonus && (
-          <Field label="Nombre Cliente Final *">
-            <Input
-              value={finalClientName}
-              onChange={setFinalClientName}
-              placeholder="Nombre de quien recibe el canje"
-              maxLength={120}
-              testId="input-sale-final-client"
-            />
-          </Field>
         )}
         <Field label="Tipo de ingreso">
           <div className="mode-switch">
@@ -9478,20 +9477,33 @@ function PromoterApp({
             source="gallery"
           />
           <PhotoField
-            label="Cliente con canje"
+            label={bonus ? "Cliente con canje *" : "Cliente *"}
             hint={
               bonus
                 ? "Selecciona la foto del canje desde galería"
-                : "No requerida sin canje"
+                : mode === "PLANCHAS"
+                  ? "Selecciona la foto del cliente desde galería"
+                  : "No requerida sin canje"
             }
             file={exchange}
             setFile={setExchange}
-            disabled={!bonus}
+            disabled={!exchangeEvidenceRequired}
             uploadedUrl={exchangeUrl}
             uploading={exchangeUploading}
             source="gallery"
           />
         </div>
+        {bonus && (
+          <Field label="Nombre Cliente Final *">
+            <Input
+              value={finalClientName}
+              onChange={setFinalClientName}
+              placeholder="Nombre de quien recibe el canje"
+              maxLength={120}
+              testId="input-sale-final-client"
+            />
+          </Field>
+        )}
         <div className="form-actions">
           <Btn
             variant="outline"
