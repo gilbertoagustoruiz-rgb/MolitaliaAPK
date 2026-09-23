@@ -1053,6 +1053,149 @@ if (googleSheetsBackupEnabled) {
   googleSheetsBackupInterval.unref();
 }
 
+async function authorizedTradeActor(req: Request) {
+  const dni = req.get("x-admin-dni") || "";
+  const key = req.get("x-admin-key") || "";
+  if (!dni || !key) return null;
+  const credentials = await pool.query(
+    "SELECT id,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
+    [dni],
+  );
+  const actor = credentials.rows[0];
+  if (
+    !actor ||
+    actor.status !== "ACTIVO" ||
+    !["ADMIN", "ANALISTA", "TRADE"].includes(String(actor.data?.role || "")) ||
+    !actor.password_hash ||
+    !(await verifyPassword(key, actor.password_hash))
+  ) return null;
+  return { id: String(actor.id), data: actor.data as StoredRecord };
+}
+
+router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
+  try {
+    const result = await pool.query(
+      "SELECT data,status,requested_at,resolved_at,resolved_by,resolution_comment FROM trade_approvals ORDER BY requested_at DESC,created_at DESC",
+    );
+    res.json({
+      approvals: result.rows.map((row) => ({
+        ...(isRecord(row.data) ? row.data : {}),
+        status: row.status,
+        requestedAt: row.requested_at,
+        resolvedAt: row.resolved_at,
+        resolvedBy: row.resolved_by,
+        resolutionComment: row.resolution_comment,
+      })),
+    });
+  } catch {
+    res.status(500).json({ message: "No se pudieron leer las aprobaciones Trade." });
+  }
+});
+
+router.post("/app-storage/trade-approvals", async (req, res): Promise<void> => {
+  const sale = req.body?.sale;
+  if (!isRecord(sale) || value(sale, "mode") !== "PLANCHAS" || numeric(sale, "planchas") <= 80) {
+    res.status(400).json({ message: "La solicitud debe corresponder a una venta mayor a 80 planchas." });
+    return;
+  }
+  const id = value(req.body, "id") || `TRD-${randomUUID()}`;
+  const requestedAt = new Date().toISOString();
+  const approval = {
+    id,
+    promoterId: value(sale, "promoterId"),
+    promoterRole: value(sale, "promoterRole"),
+    promoterRoleLabel: value(sale, "promoterRoleLabel"),
+    clientId: value(sale, "clientId"),
+    finalClientName: value(sale, "finalClientName") || undefined,
+    marketId: value(sale, "marketId"),
+    sale: { ...sale, id: value(sale, "id") || `VTA-${randomUUID()}`, status: "PENDIENTE_APROBACION_TRADE" },
+    status: "PENDIENTE",
+    requestedAt,
+  };
+  try {
+    await pool.query(
+      `INSERT INTO trade_approvals (id,promoter_id,client_id,market_id,status,requested_at,data)
+       VALUES ($1,$2,$3,$4,'PENDIENTE',$5,$6)
+       ON CONFLICT (id) DO NOTHING`,
+      [id, approval.promoterId, approval.clientId, approval.marketId, requestedAt, approval],
+    );
+    res.status(201).json({ approval });
+  } catch {
+    res.status(500).json({ message: "No se pudo guardar la solicitud Trade." });
+  }
+});
+
+router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) {
+    res.status(403).json({ message: "Se requiere un usuario Admin, Analista o Trade autorizado." });
+    return;
+  }
+  const decision = String(req.body?.decision || "").toUpperCase();
+  if (!["APROBADA", "RECHAZADA"].includes(decision)) {
+    res.status(400).json({ message: "Decisión no válida." });
+    return;
+  }
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const found = await db.query("SELECT * FROM trade_approvals WHERE id=$1 FOR UPDATE", [req.params.id]);
+    if (!found.rows[0]) throw new Error("La solicitud no existe.");
+    if (found.rows[0].status !== "PENDIENTE") throw new Error("La solicitud ya fue resuelta.");
+    const approvalData = isRecord(found.rows[0].data) ? found.rows[0].data : {};
+    const sale = isRecord(approvalData.sale) ? approvalData.sale : null;
+    if (!sale) throw new Error("La solicitud no contiene la venta.");
+    const resolvedAt = new Date().toISOString();
+    if (decision === "APROBADA") {
+      const approvedSale = {
+        ...sale,
+        status: "PENDIENTE",
+        tradeApprovalId: String(req.params.id),
+        tradeApprovedAt: resolvedAt,
+        tradeApprovedBy: actor.id,
+        updatedAt: resolvedAt,
+      };
+      await upsertRecord(db as unknown as QueryClient, "sales", approvedSale);
+      const requirements = isRecord(approvedSale.redemptionItems) ? approvedSale.redemptionItems : {};
+      for (const itemId of redemptionItemIds) {
+        const quantity = Math.max(0, Number(requirements[itemId]) || 0);
+        if (!quantity) continue;
+        await upsertRecord(db as unknown as QueryClient, "movements", {
+          id: `CAN-${value(approvedSale, "id")}-${itemId}`,
+          marketId: value(approvedSale, "marketId"),
+          kind: "CANJE",
+          itemId,
+          quantity,
+          actorId: value(approvedSale, "promoterId"),
+          actorName: value(approvalData, "promoterName"),
+          promoterId: value(approvedSale, "promoterId"),
+          date: resolvedAt,
+          status: "PENDIENTE",
+        });
+      }
+    }
+    const nextData = {
+      ...approvalData,
+      status: decision,
+      resolvedAt,
+      resolvedBy: actor.id,
+      resolvedByName: value(actor.data, "name"),
+      resolutionComment: String(req.body?.comment || "").trim() || undefined,
+    };
+    await db.query(
+      `UPDATE trade_approvals SET status=$2,resolved_at=$3,resolved_by=$4,resolution_comment=$5,data=$6,updated_at=now() WHERE id=$1`,
+      [req.params.id, decision, resolvedAt, actor.id, nextData.resolutionComment || null, nextData],
+    );
+    await db.query("COMMIT");
+    res.json({ approval: nextData, snapshot: decision === "APROBADA" ? await readSnapshot() : undefined });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo resolver la solicitud." });
+  } finally {
+    db.release();
+  }
+});
+
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
     await ensurePromoterStockBaseline().catch((error) => {
