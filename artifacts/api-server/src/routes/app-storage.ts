@@ -161,11 +161,7 @@ async function verifyPassword(password: string, stored: string) {
 
 function publicUser(record: StoredRecord) {
   const { password: _password, ...safe } = record;
-  return {
-    ...safe,
-    id: value(safe, "id"),
-    dni: value(safe, "dni"),
-  };
+  return safe;
 }
 
 function isRecord(value: unknown): value is StoredRecord {
@@ -381,86 +377,15 @@ async function readSnapshot(
           ? "closure_date DESC, created_at DESC"
           : "created_at";
     const result = await client.query(
-      name === "attendance"
-        ? `SELECT data,promoter_id FROM ${table} ORDER BY ${orderBy}`
-        : `SELECT data FROM ${table} ORDER BY ${orderBy}`,
+      `SELECT data FROM ${table} ORDER BY ${orderBy}`,
     );
-    snapshot[name] = result.rows.map((row) => {
-      const source = row.data as StoredRecord;
-      if (name === "users") return publicUser(source);
-      // Algunas marcaciones históricas tienen el ID solo en la columna
-      // relacional. Lo exponemos también dentro del registro para que el
-      // frontend pueda relacionarlo de forma consistente.
-      if (name === "attendance" && !value(source, "promoterId"))
-        return { ...source, promoterId: String(row.promoter_id || "") };
-      return source;
-    });
+    snapshot[name] = result.rows.map((row) =>
+      name === "users"
+        ? publicUser(row.data as StoredRecord)
+        : (row.data as StoredRecord),
+    );
   }
-  const usersById = new Map(
-    snapshot.users.map((user) => [value(user, "id"), user]),
-  );
-  const usersByDni = new Map(
-    snapshot.users.map((user) => [value(user, "dni"), user]),
-  );
-  snapshot.attendance = snapshot.attendance.map((record) => {
-    const promoter =
-      usersById.get(value(record, "promoterId")) ||
-      usersByDni.get(value(record, "promoterDni"));
-    return promoter
-      ? {
-          ...record,
-          promoterId: value(promoter, "id"),
-          promoterDni: value(promoter, "dni"),
-          promoterRole: value(record, "promoterRole") || value(promoter, "role"),
-          promoterRoleLabel:
-            value(record, "promoterRoleLabel") ||
-            value(promoter, "roleLabel") ||
-            value(promoter, "role"),
-        }
-      : record;
-  });
   return snapshot;
-}
-
-async function repairAttendancePromoterReferences() {
-  const [usersResult, attendanceResult] = await Promise.all([
-    pool.query("SELECT id,dni,data FROM users"),
-    pool.query("SELECT id,promoter_id,data FROM attendance"),
-  ]);
-  const users = usersResult.rows.map((row) => ({
-    id: String(row.id || value(row.data as StoredRecord, "id")),
-    dni: String(row.dni || value(row.data as StoredRecord, "dni")),
-    data: row.data as StoredRecord,
-  }));
-  const byId = new Map(users.map((user) => [user.id, user]));
-  const byDni = new Map(users.map((user) => [user.dni, user]));
-  for (const row of attendanceResult.rows) {
-    const source = row.data as StoredRecord;
-    const promoter =
-      byId.get(value(source, "promoterId")) ||
-      byId.get(String(row.promoter_id || "")) ||
-      byDni.get(value(source, "promoterDni"));
-    if (!promoter) continue;
-    const corrected = {
-      ...source,
-      promoterId: promoter.id,
-      promoterDni: promoter.dni,
-      promoterRole: value(source, "promoterRole") || value(promoter.data, "role"),
-      promoterRoleLabel:
-        value(source, "promoterRoleLabel") ||
-        value(promoter.data, "roleLabel") ||
-        value(promoter.data, "role"),
-    };
-    if (
-      value(source, "promoterId") === promoter.id &&
-      value(source, "promoterDni") === promoter.dni
-    )
-      continue;
-    await pool.query(
-      "UPDATE attendance SET promoter_id=$2,data=$3,updated_at=now() WHERE id=$1",
-      [String(row.id), promoter.id, corrected],
-    );
-  }
 }
 
 async function setBackupMetadata(key: string, valueToStore: string | null) {
@@ -525,33 +450,11 @@ async function createAutomaticClosuresForDay(day: string) {
        WHERE latest.event_type='ENTRADA'`,
       [bounds.start, bounds.end],
     );
-    const latestEvents = await client.query(
-      `SELECT DISTINCT ON (promoter_id) promoter_id,event_type
-       FROM attendance
-       WHERE event_date >= $1::timestamptz AND event_date <= $2::timestamptz
-       ORDER BY promoter_id,event_date DESC,created_at DESC`,
-      [bounds.start, bounds.end],
-    );
-    const latestEventByPromoter = new Map(
-      latestEvents.rows.map((row) => [
-        String(row.promoter_id || ""),
-        String(row.event_type || ""),
-      ]),
-    );
     for (const row of openPromoters.rows) {
       const promoterId = String(row.promoter_id || "");
       const marketId = String(row.market_id || "");
       if (!promoterId || !marketId) continue;
       const userData = isRecord(row.user_data) ? row.user_data : {};
-      // El promotor rotativo tiene una jornada global: puede entrar en un
-      // cliente, vender en otros y salir en cualquiera de ellos. Una salida
-      // posterior cierra esa jornada y no debe generar cierres automáticos
-      // para el cliente de entrada.
-      if (
-        value(userData, "role") === "PROMOTOR ROTATIVO" &&
-        latestEventByPromoter.get(promoterId) !== "ENTRADA"
-      )
-        continue;
       const closure: StoredRecord = {
         id: `CIERRE-AUTO-${day}-${promoterId}-${row.client_id}`,
         promoterId,
@@ -1152,7 +1055,6 @@ if (googleSheetsBackupEnabled) {
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    await repairAttendancePromoterReferences();
     await ensurePromoterStockBaseline().catch((error) => {
       req.log.error(
         { err: error },
@@ -2155,7 +2057,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (!customer.rows.length || !market.rows.length)
       throw new Error("Selecciona un cliente activo del mercado elegido.");
     const date = new Date(value(input, "date"));
-    const finalClientName = value(input, "finalClientName").trim();
     const units = Number(input.units);
     const planchas = Number(input.planchas);
     const mode = value(input, "mode");
@@ -2208,16 +2109,11 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error("Verifica los precios unitarios y el total.");
     const photoValid = (photo: string) => /^(https:\/\/|\/api\/)/.test(photo);
     const bonus = value(input, "bonus");
-    if (bonus && !finalClientName)
-      throw new Error("Completa el nombre del cliente final para el canje.");
     if (
       !photoValid(value(input, "receiptPhoto")) ||
-      ((bonus || mode === "PLANCHAS") &&
-        !photoValid(value(input, "exchangePhoto")))
+      (bonus && !photoValid(value(input, "exchangePhoto")))
     )
-      throw new Error(
-        "Primero sube las dos fotografías requeridas: boleta y cliente/canje.",
-      );
+      throw new Error("Primero sube las fotografías de boleta y canje.");
     const count = Number(input.redemptionCount || 0);
     if (
       (bonus && (!Number.isInteger(count) || count < 1 || count > 3)) ||
@@ -2302,7 +2198,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     const updatedAt = new Date().toISOString();
     const sale = {
       ...input,
-      finalClientName: bonus ? finalClientName : undefined,
       amountSoles: amount,
       date: date.toISOString(),
       updatedAt,
@@ -2359,19 +2254,17 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
   const saleDate = isRecord(input)
     ? new Date(value(input, "date"))
     : new Date(Number.NaN);
-  const bonus = isRecord(input) ? value(input, "bonus") : "";
   if (
     !id ||
     !isRecord(input) ||
     !value(input, "clientId") ||
-    (bonus && !value(input, "finalClientName")) ||
     !Number.isFinite(amountSoles) ||
     amountSoles <= 0 ||
     Number.isNaN(saleDate.getTime())
   ) {
     res.status(400).json({
       message:
-        "La venta requiere cliente final cuando tiene canje, fecha válida e importe mayor a cero.",
+        "La venta requiere cliente, fecha válida e importe mayor a cero.",
     });
     return;
   }
@@ -2474,9 +2367,6 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       ...currentSale.data,
       id,
       clientId: value(input, "clientId"),
-      finalClientName: bonus
-        ? value(input, "finalClientName").trim()
-        : undefined,
       amountSoles,
       date: saleDate.toISOString(),
       comment: value(input, "comment") || undefined,
@@ -2486,8 +2376,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         : 0,
       redemptionItems: value(input, "bonus") ? requested : undefined,
       receiptPhoto: value(input, "receiptPhoto"),
-      exchangePhoto:
-        value(input, "bonus") || value(currentSale.data, "mode") === "PLANCHAS"
+      exchangePhoto: value(input, "bonus")
         ? value(input, "exchangePhoto") || undefined
         : undefined,
       status: "SINCRONIZADA",

@@ -8615,9 +8615,19 @@ function PromoterApp({
   const unitProducts = availableProducts.filter((product) =>
     product.saleModes?.includes("UNIDADES"),
   );
-  const planchaCatalogProducts = availableProducts.filter((product) =>
-    product.saleModes?.includes("PLANCHAS"),
-  );
+  const planchaCatalogProducts = availableProducts
+    .filter((product) => product.saleModes?.includes("PLANCHAS"))
+    .sort((first, second) => {
+      const order = (brand: string) => {
+        const normalized = brand.toUpperCase();
+        if (normalized.includes("TODIN")) return 0;
+        if (normalized.includes("COSTA")) return 1;
+        if (normalized.includes("PASCUAL")) return 2;
+        return 99;
+      };
+      return order(first.brand) - order(second.brand) ||
+        first.brand.localeCompare(second.brand, "es");
+    });
   useEffect(() => {
     const price = priceBySku[sku]?.unitPrice;
     setUnitPriceSoles(price ? String(price) : "");
