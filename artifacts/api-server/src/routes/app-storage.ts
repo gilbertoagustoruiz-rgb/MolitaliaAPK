@@ -1065,7 +1065,7 @@ async function authorizedTradeActor(req: Request) {
   if (
     !actor ||
     actor.status !== "ACTIVO" ||
-    !["ADMIN", "ANALISTA", "TRADE"].includes(String(actor.data?.role || "")) ||
+    !["ADMIN", "ANALISTA"].includes(String(actor.data?.role || "")) ||
     !actor.password_hash ||
     !(await verifyPassword(key, actor.password_hash))
   ) return null;
@@ -1128,7 +1128,7 @@ router.post("/app-storage/trade-approvals", async (req, res): Promise<void> => {
 router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promise<void> => {
   const actor = await authorizedTradeActor(req);
   if (!actor) {
-    res.status(403).json({ message: "Se requiere un usuario Admin, Analista o Trade autorizado." });
+    res.status(403).json({ message: "Se requiere un usuario Admin o Analista autorizado." });
     return;
   }
   const decision = String(req.body?.decision || "").toUpperCase();
@@ -1142,11 +1142,29 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
     const found = await db.query("SELECT * FROM trade_approvals WHERE id=$1 FOR UPDATE", [req.params.id]);
     if (!found.rows[0]) throw new Error("La solicitud no existe.");
     if (found.rows[0].status !== "PENDIENTE") throw new Error("La solicitud ya fue resuelta.");
+    await db.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+      [`trade-approval:${req.params.id}`],
+    );
+    await lockInventoryLedger(db as unknown as QueryClient);
     const approvalData = isRecord(found.rows[0].data) ? found.rows[0].data : {};
     const sale = isRecord(approvalData.sale) ? approvalData.sale : null;
     if (!sale) throw new Error("La solicitud no contiene la venta.");
     const resolvedAt = new Date().toISOString();
     if (decision === "APROBADA") {
+      const existingSale = await db.query("SELECT id FROM sales WHERE id=$1 LIMIT 1", [value(sale, "id")]);
+      if (existingSale.rows.length) throw new Error("La venta de esta solicitud ya fue registrada.");
+      const requirementsToConsume = isRecord(sale.redemptionItems) ? sale.redemptionItems : {};
+      const promoter = await db.query("SELECT data FROM users WHERE id=$1 FOR UPDATE", [value(sale, "promoterId")]);
+      if (!promoter.rows.length) throw new Error("El promotor ya no existe.");
+      const promoterData = isRecord(promoter.rows[0].data) ? promoter.rows[0].data : {};
+      const currentStock = isRecord(promoterData.redemptionStock) ? promoterData.redemptionStock : {};
+      for (const itemId of redemptionItemIds) {
+        const required = Math.max(0, Number(requirementsToConsume[itemId]) || 0);
+        if (required > Math.max(0, Number(currentStock[itemId]) || 0)) {
+          throw new Error(`Stock insuficiente de ${itemId} para aprobar esta venta.`);
+        }
+      }
       const approvedSale = {
         ...sale,
         status: "PENDIENTE",
@@ -1156,7 +1174,7 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
         updatedAt: resolvedAt,
       };
       await upsertRecord(db as unknown as QueryClient, "sales", approvedSale);
-      const requirements = isRecord(approvedSale.redemptionItems) ? approvedSale.redemptionItems : {};
+      const requirements = requirementsToConsume;
       for (const itemId of redemptionItemIds) {
         const quantity = Math.max(0, Number(requirements[itemId]) || 0);
         if (!quantity) continue;
@@ -1172,6 +1190,20 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
           date: resolvedAt,
           status: "PENDIENTE",
         });
+      }
+      if (Object.values(requirements).some((quantity) => Number(quantity) > 0)) {
+        const nextStock = { ...currentStock };
+        for (const itemId of redemptionItemIds) {
+          nextStock[itemId] = Math.max(
+            0,
+            Number(nextStock[itemId] || 0) - Math.max(0, Number(requirements[itemId]) || 0),
+          );
+        }
+        const nextPromoter = { ...promoterData, redemptionStock: nextStock, updatedAt: resolvedAt };
+        await db.query(
+          "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+          [value(sale, "promoterId"), nextPromoter, resolvedAt],
+        );
       }
     }
     const nextData = {
