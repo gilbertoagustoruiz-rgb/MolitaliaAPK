@@ -1542,7 +1542,16 @@ function calculatedPromoterStock(
   movements.forEach((movement) => {
     if (movement.promoterId !== promoterId) return;
     const quantity = Math.max(0, Number(movement.quantity) || 0);
+    if (movement.kind === "AJUSTE_DEGUSTACION") tastingStock += quantity;
     if (movement.kind === "DEGUSTACION") tastingStock -= quantity;
+    if (movement.kind === "AJUSTE_CANJES") {
+      redemptionItems.forEach((item) => {
+        redemptionStock[item.id] += Math.max(
+          0,
+          movementComponentQuantity(movement, item.id),
+        );
+      });
+    }
   });
   sales.forEach((sale) => {
     if (sale.promoterId !== promoterId || !sale.bonus) return;
@@ -1555,7 +1564,7 @@ function calculatedPromoterStock(
     });
   });
   return {
-    tastingStock: Math.max(0, tastingStock),
+    tastingStock: Math.max(0, Math.floor(tastingStock)),
     redemptionStock: redemptionItems.reduce(
       (result, item) => ({
         ...result,
