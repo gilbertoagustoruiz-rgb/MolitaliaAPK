@@ -245,19 +245,12 @@ type CloudSnapshot = {
   categories: Category[];
 };
 
-const MARKETS_SHEET_ID = "1GCbfnfCgZdXBaPzVsnrhjos_K0h5j0WXxKOanAIjUtM";
-const MARKETS_SHEET = `https://docs.google.com/spreadsheets/d/${MARKETS_SHEET_ID}/export?format=csv&gid=0`;
-const CLIENTS_SHEET_ID = "1K5KSSrBPiTtldeOjZ--w--3v9ID1oUq_z_PFkqMYtZA";
-const USERS_SHEET_ID = "1xKb-WZaJYFoBxeanLDVBxu6SJlv7Kz2sKIYwS8veEyo";
-const PRICES_SHEET_ID = "1Jbs7xShDVBH5_bA4yLNJEIZkaCvSl44WEOYRpNh53N8";
-const GOOGLE_SHEETS_PROXY = "/api/google-sheets";
-const GOOGLE_INTEGRATIONS_ENABLED = false;
 const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
-const GOOGLE_DRIVE_PHOTO_UPLOAD = "/api/evidence-photos";
+const EVIDENCE_PHOTO_UPLOAD = "/api/evidence-photos";
 const PRODUCT_PRICES_STORE_KEY = "bt-product-prices";
 const CATEGORIES_STORE_KEY = "bt-client-categories";
 const DEFAULT_CAMPAIGN_TASTING_STOCK = 50;
@@ -593,11 +586,10 @@ function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
   const next = new Map(incoming.map((item) => [item.id, item]));
   local.forEach((localItem) => {
     const cloudItem = next.get(localItem.id);
-    if (!cloudItem) {
-      if (localItem.status === "PENDIENTE") next.set(localItem.id, localItem);
-      return;
-    }
-    if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
+    if (
+      !cloudItem ||
+      attendanceFreshness(localItem) > attendanceFreshness(cloudItem)
+    )
       next.set(localItem.id, localItem);
   });
   return sortNewestByDate(Array.from(next.values()));
@@ -769,7 +761,7 @@ async function removePhotoUpload(id: string) {
   database.close();
 }
 async function uploadPhoto(upload: PendingPhotoUpload) {
-  const response = await fetch(GOOGLE_DRIVE_PHOTO_UPLOAD, {
+  const response = await fetch(EVIDENCE_PHOTO_UPLOAD, {
     method: "POST",
     headers: {
       "Content-Type": upload.mimeType,
@@ -951,23 +943,6 @@ function parseCsvRecords(text: string) {
         headers.map((header, index) => [header, (row[index] || "").trim()]),
       ),
     );
-}
-async function fetchGoogleSheetRecords(sheetId: string) {
-  const response = await fetch(
-    `${GOOGLE_SHEETS_PROXY}/${encodeURIComponent(sheetId)}?gid=0`,
-  );
-  if (!response.ok) {
-    let detail = "";
-    try {
-      detail = ((await response.json()) as { message?: string }).message || "";
-    } catch {
-      detail = "";
-    }
-    throw new Error(
-      detail || `Google Sheets no disponible (${response.status})`,
-    );
-  }
-  return parseCsvRecords(await response.text());
 }
 function normalizeCsvHeader(value: string) {
   return value
@@ -6259,127 +6234,6 @@ function AnalystApp({
       return;
     }
   };
-  const importMarkets = async () => {
-    setSyncing(true);
-    try {
-      const response = await fetch(MARKETS_SHEET);
-      if (!response.ok) throw new Error("No se pudo conectar");
-      const rows = parseCsvText(await response.text());
-      if (rows.length < 2)
-        throw new Error("La hoja no contiene encabezados y filas de mercados");
-      const headers = rows[0].map(normalizeCsvHeader);
-      const column = (aliases: string[], fallback: number) =>
-        aliases
-          .map(normalizeCsvHeader)
-          .map((alias) => headers.indexOf(alias))
-          .find((index) => index >= 0) ?? fallback;
-      const idIndex = column(["idmerc", "id", "codigo"], 0);
-      const departmentIndex = column(["departamento"], 1);
-      const provinceIndex = column(["provincia", "ciudad"], 2);
-      const districtIndex = column(["distrito"], 3);
-      const nameIndex = column(["nombredelmercado", "mercado", "nombre"], 4);
-      const statusIndex = column(["estado", "status"], 5);
-      const regionIndex = column(["region"], 6);
-      const lookupDepartmentIndex = headers.lastIndexOf("departamento");
-      const lookupRegionIndex = headers.lastIndexOf("region");
-      const hasRegionLookup =
-        lookupDepartmentIndex >= 0 &&
-        lookupRegionIndex >= 0 &&
-        (lookupDepartmentIndex !== departmentIndex ||
-          lookupRegionIndex !== regionIndex);
-      const regionLookup = new Map<string, string>();
-      if (hasRegionLookup)
-        rows.slice(1).forEach((cells) => {
-          const lookupDepartment = (cells[lookupDepartmentIndex] || "").trim();
-          const lookupRegion = (cells[lookupRegionIndex] || "").trim();
-          if (
-            lookupDepartment &&
-            lookupRegion &&
-            normalizeCsvHeader(lookupDepartment) !== "departamento"
-          )
-            regionLookup.set(
-              normalizeCsvHeader(lookupDepartment),
-              lookupRegion.toUpperCase(),
-            );
-        });
-      const aliases = new Map<string, string>();
-      const imported: Market[] = rows
-        .slice(1)
-        .map((cells, index) => {
-          const rawName = (cells[nameIndex] || "").trim();
-          if (!rawName) return null;
-          const sourceId = (cells[idIndex] || `SHEET-${index + 1}`).trim();
-          const department = (cells[departmentIndex] || "LIMA")
-            .trim()
-            .toUpperCase();
-          const province = (cells[provinceIndex] || "LIMA")
-            .trim()
-            .toUpperCase();
-          const district = (cells[districtIndex] || "LIMA")
-            .trim()
-            .toUpperCase();
-          const name = rawName.toUpperCase();
-          const rawRegion = (cells[regionIndex] || "").trim();
-          const normalizedRegion = normalizeCsvHeader(rawRegion);
-          const region =
-            rawRegion &&
-            !["activo", "inactivo", "region"].includes(normalizedRegion)
-              ? rawRegion.toUpperCase()
-              : regionLookup.get(normalizeCsvHeader(department)) || department;
-          const existing = markets.find(
-            (market) =>
-              market.id === sourceId ||
-              market.id === `SHEET-${index + 1}` ||
-              (market.name === name &&
-                market.district === district &&
-                market.province === province),
-          );
-          if (existing && existing.id !== sourceId)
-            aliases.set(existing.id, sourceId);
-          return {
-            id: sourceId,
-            department,
-            region,
-            province,
-            district,
-            name,
-            status: csvStatus(cells[statusIndex] || "ACTIVO"),
-          };
-        })
-        .filter(Boolean) as Market[];
-      if (!imported.length) throw new Error("La hoja no contiene mercados");
-      const nextMarkets = [...markets];
-      imported.forEach((importedMarket) => {
-        const aliasedId = Array.from(aliases.entries()).find(
-          ([, sourceId]) => sourceId === importedMarket.id,
-        )?.[0];
-        const index = nextMarkets.findIndex(
-          (market) =>
-            market.id === importedMarket.id || market.id === aliasedId,
-        );
-        if (index >= 0)
-          nextMarkets[index] = {
-            ...nextMarkets[index],
-            ...importedMarket,
-            id: nextMarkets[index].id,
-          };
-        else nextMarkets.push(importedMarket);
-      });
-      setMarkets(nextMarkets);
-      writeStore("bt-markets", nextMarkets);
-      await persistImportedSnapshot({ markets: nextMarkets });
-      notify(
-        `${imported.length} mercados actualizados y guardados sin borrar información operativa`,
-      );
-    } catch {
-      notify(
-        "No se pudo importar la hoja. Los mercados locales siguen disponibles.",
-        true,
-      );
-    } finally {
-      setSyncing(false);
-    }
-  };
   const mergeImportedUsers = async (
     records: Record<string, string>[],
     authoritative = false,
@@ -6457,95 +6311,6 @@ function AnalystApp({
       setSyncing(false);
     }
   };
-  async function importUsersFromSheet() {
-    if (!GOOGLE_INTEGRATIONS_ENABLED) return;
-    setSyncing(true);
-    try {
-      const records = await fetchGoogleSheetRecords(USERS_SHEET_ID);
-      const imported: AppUser[] = [];
-      let skipped = 0;
-      const importId = Date.now();
-      records.forEach((record, index) => {
-        const importedUser = importedUserFromRecord(record, index, markets);
-        if (!importedUser) {
-          skipped += 1;
-          return;
-        }
-        const current = users.find((item) => item.dni === importedUser.dni);
-        imported.push({
-          ...current,
-          ...importedUser,
-          id:
-            current?.id ||
-            csvField(record, ["id", "codigo", "idusuario", "idpromotor"]) ||
-            `USR-IMP-${importId}-${index + 1}`,
-          ...(importedUser.redemptionStock
-            ? {
-                redemptionStock: {
-                  ...userRedemptionStock(current || importedUser),
-                  ...importedUser.redemptionStock,
-                },
-              }
-            : {}),
-          sheetArchived: false,
-        });
-      });
-      if (!imported.length)
-        throw new Error(
-          "No se encontraron filas válidas. No se retiró ningún usuario.",
-        );
-      if (skipped)
-        throw new Error(
-          `La hoja tiene ${skipped} fila${skipped === 1 ? "" : "s"} inválida${skipped === 1 ? "" : "s"}. No se retiró ningún usuario.`,
-        );
-      if (new Set(imported.map((item) => item.dni)).size !== imported.length)
-        throw new Error(
-          "La hoja contiene DNI repetidos. No se retiró ningún usuario.",
-        );
-      const response = await fetch(`${APP_STORAGE_ADMIN}/users/sync`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(localStorage.getItem(CATALOG_REVISION_STORE_KEY)
-            ? {
-                "X-Catalog-Revision": localStorage.getItem(
-                  CATALOG_REVISION_STORE_KEY,
-                ) as string,
-              }
-            : {}),
-        },
-        body: JSON.stringify({ users: imported }),
-      });
-      const payload = (await response.json()) as {
-        message?: string;
-        snapshot?: Partial<CloudSnapshot>;
-      };
-      if (!response.ok)
-        throw new Error(
-          payload.message || "No se pudo guardar la actualización",
-        );
-      const cloudUsers = Array.isArray(payload.snapshot?.users)
-        ? payload.snapshot.users
-        : imported;
-      const nextUsers = cloudUsers.map((cloudUser) => ({
-        ...cloudUser,
-        password: users.find((item) => item.dni === cloudUser.dni)?.password,
-      }));
-      setUsers(nextUsers);
-      writeStore("bt-users", nextUsers);
-      const removed = nextUsers.filter((item) => item.sheetArchived).length;
-      notify(
-        `${imported.length} usuarios vigentes sincronizados${removed ? ` · ${removed} persona${removed === 1 ? "" : "s"} retirada${removed === 1 ? "" : "s"} de la hoja archivada${removed === 1 ? "" : "s"}` : ""}`,
-      );
-    } catch (error) {
-      notify(
-        `No se pudo actualizar usuarios desde Google Sheets: ${error instanceof Error ? error.message : "hoja no disponible"}`,
-        true,
-      );
-    } finally {
-      setSyncing(false);
-    }
-  }
   const mergeImportedClients = async (records: Record<string, string>[]) => {
     const imported: Client[] = [];
     let skipped = 0;
@@ -6626,23 +6391,6 @@ function AnalystApp({
     } catch (error) {
       notify(
         `No se pudo importar clientes: ${error instanceof Error ? error.message : "formato inválido"}`,
-        true,
-      );
-    } finally {
-      setSyncing(false);
-    }
-  };
-  const importClientsFromSheet = async () => {
-    setSyncing(true);
-    try {
-      notify(
-        await mergeImportedClients(
-          await fetchGoogleSheetRecords(CLIENTS_SHEET_ID),
-        ),
-      );
-    } catch (error) {
-      notify(
-        `No se pudo actualizar clientes desde Google Sheets: ${error instanceof Error ? error.message : "hoja no disponible"}`,
         true,
       );
     } finally {
@@ -7348,16 +7096,6 @@ function AnalystApp({
               <p>Catálogo almacenado en DigitalOcean PostgreSQL.</p>
             </div>
             <div className="panel-actions">
-              {GOOGLE_INTEGRATIONS_ENABLED && (
-                <Btn
-                  variant="outline"
-                  onClick={importMarkets}
-                  disabled={syncing}
-                  testId="button-refresh-markets"
-                >
-                  <RefreshCw /> Actualizar hoja
-                </Btn>
-              )}
               <Btn
                 onClick={() => setModal("market")}
                 testId="button-new-market"
@@ -7438,16 +7176,6 @@ function AnalystApp({
               <p>Administra usuarios en DigitalOcean o importa un CSV.</p>
             </div>
             <div className="panel-actions">
-              {GOOGLE_INTEGRATIONS_ENABLED && (
-                <Btn
-                  variant="outline"
-                  onClick={importUsersFromSheet}
-                  disabled={syncing}
-                  testId="button-refresh-users"
-                >
-                  <RefreshCw /> Actualizar hoja
-                </Btn>
-              )}
               <CsvImportButton
                 label="Importar usuarios"
                 onImport={importUsers}
@@ -7550,16 +7278,6 @@ function AnalystApp({
               <p>Administra los clientes en DigitalOcean o importa un CSV.</p>
             </div>
             <div className="panel-actions">
-              {GOOGLE_INTEGRATIONS_ENABLED && (
-                <Btn
-                  variant="outline"
-                  onClick={importClientsFromSheet}
-                  disabled={syncing}
-                  testId="button-refresh-clients"
-                >
-                  <RefreshCw /> Actualizar hoja
-                </Btn>
-              )}
               <CsvImportButton
                 label="Importar clientes"
                 onImport={importClients}
@@ -8901,7 +8619,9 @@ function PromoterApp({
       new Date(second.date).getTime() - new Date(first.date).getTime(),
   )[0];
   const hasRotativeActiveSession = Boolean(
-    isRotativePromoter && latestAttendanceToday?.type === "ENTRADA",
+    isRotativePromoter &&
+      latestAttendanceToday?.type === "ENTRADA" &&
+      latestAttendanceToday.marketId === selectedMarketId,
   );
   const exitedToday = (id: string) =>
     latestAttendanceFor(id)?.type === "SALIDA";
