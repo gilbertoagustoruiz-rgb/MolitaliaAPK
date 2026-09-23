@@ -8886,7 +8886,12 @@ function PromoterApp({
       return;
     }
     const latest = isRotativePromoter
-      ? latestAttendanceToday
+      ? [...todayAttendance]
+          .filter((item) => item.marketId === selectedMarketId)
+          .sort(
+            (first, second) =>
+              new Date(second.date).getTime() - new Date(first.date).getTime(),
+          )[0]
       : latestAttendanceFor(markClientId);
     if (attendanceLimitReached(markType)) {
       notify(
