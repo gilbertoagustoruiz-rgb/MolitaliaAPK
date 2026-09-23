@@ -110,6 +110,19 @@ type Client = {
   status: Status;
 };
 type SaleMode = "UNIDADES" | "PLANCHAS";
+type TradeApproval = {
+  id: string;
+  promoterId: string;
+  clientId: string;
+  marketId: string;
+  status: "PENDIENTE" | "APROBADA" | "RECHAZADA";
+  requestedAt: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  resolvedByName?: string;
+  resolutionComment?: string;
+  sale: Sale;
+};
 type ProductPrice = {
   sku: string;
   product: string;
@@ -5906,6 +5919,49 @@ function AnalystApp({
   const [marketSearch, setMarketSearch] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [attendanceSearch, setAttendanceSearch] = useState("");
+  const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
+  const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
+  const loadTradeApprovals = async () => {
+    setTradeApprovalsLoading(true);
+    try {
+      const response = await fetch("/api/app-storage/trade-approvals");
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "No se pudieron cargar las aprobaciones.");
+      setTradeApprovals(Array.isArray(payload.approvals) ? payload.approvals : []);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudieron cargar las aprobaciones Trade.", true);
+    } finally {
+      setTradeApprovalsLoading(false);
+    }
+  };
+  useEffect(() => {
+    void loadTradeApprovals();
+    const timer = window.setInterval(() => void loadTradeApprovals(), 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const resolveTradeApproval = async (approval: TradeApproval, decision: "APROBADA" | "RECHAZADA") => {
+    try {
+      const response = await fetch(`/api/app-storage/trade-approvals/${approval.id}/resolve`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-dni": user.dni,
+          "x-admin-key": user.password || "",
+        },
+        body: JSON.stringify({ decision }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "No se pudo resolver la solicitud.");
+      if (payload.snapshot) {
+        setSales(payload.snapshot.sales || sales);
+        setMovements(payload.snapshot.movements || movements);
+      }
+      await loadTradeApprovals();
+      notify(decision === "APROBADA" ? "Solicitud aprobada. La venta ya está visible en Ventas y reportes." : "Solicitud Trade rechazada.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo resolver la solicitud.", true);
+    }
+  };
   const adminPromoter = users.find((person) => person.id === adminPromoterId);
   const adminAssignment = adminPromoter
     ? assignments.find((item) => assignmentMatchesUser(item, adminPromoter))
@@ -7064,6 +7120,7 @@ function AnalystApp({
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
+    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["aprobaciones-trade", "Aprobaciones Trade"]] : []),
     ["marcaciones", "Marcaciones"],
   ];
   return (
@@ -7622,6 +7679,53 @@ function AnalystApp({
           setUsers={setUsers}
           notify={notify}
         />
+      )}
+      {tab === "aprobaciones-trade" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Aprobaciones Trade</h2>
+              <p>Solicitudes mayores a 80 planchas. Solo las aprobadas se convierten en ventas.</p>
+            </div>
+            <Btn variant="outline" onClick={() => void loadTradeApprovals()} disabled={tradeApprovalsLoading}>
+              <RefreshCw className={tradeApprovalsLoading ? "spin" : ""} /> Actualizar
+            </Btn>
+          </div>
+          <div className="panel-body">
+            {tradeApprovals.length ? (
+              <div className="record-list">
+                {tradeApprovals.map((approval) => {
+                  const sale = approval.sale;
+                  const promoter = users.find((item) => item.id === approval.promoterId);
+                  const client = clients.find((item) => item.id === approval.clientId);
+                  return (
+                    <article className="record" key={approval.id}>
+                      <span className="record-icon"><ShieldCheck /></span>
+                      <div className="record-main">
+                        <strong>{promoter?.name || "Promotor"} · {sale.planchas || 0} planchas</strong>
+                        <small>{client?.name || approval.clientId} · {marketMap[approval.marketId]?.name || approval.marketId}</small>
+                        <em>{formatSoles(sale.amountSoles)} · {formatDate(approval.requestedAt)} · {sale.bonus || "Sin canje"}</em>
+                        <div className="record-photos">
+                          <PhotoThumbnail label="Boleta" src={sale.receiptPhoto} />
+                          {sale.exchangePhoto && <PhotoThumbnail label="Cliente/Canje" src={sale.exchangePhoto} />}
+                        </div>
+                      </div>
+                      <StatusPill status={approval.status} />
+                      {approval.status === "PENDIENTE" && (
+                        <span className="module-table-actions">
+                          <Btn onClick={() => void resolveTradeApproval(approval, "APROBADA")}><Check /> Aprobar</Btn>
+                          <Btn variant="danger" onClick={() => void resolveTradeApproval(approval, "RECHAZADA")}><X /> Rechazar</Btn>
+                        </span>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty title="Sin solicitudes Trade" detail="Las ventas mayores a 80 planchas aparecerán aquí antes de convertirse en ventas." />
+            )}
+          </div>
+        </section>
       )}
       {tab === "ventas" && (
         <section className="panel sales-console">
@@ -8490,7 +8594,7 @@ function PromoterApp({
     validMix &&
     (!exchangeEvidenceRequired ||
       (exchange && !missingRedemption && !exceptionNeedsComment)) &&
-    !(mode === "PLANCHAS" && planchas > 80),
+    true,
   );
   useEffect(() => {
     if (!receipt || !selectedMarket) {
@@ -8650,6 +8754,7 @@ function PromoterApp({
         : latestAttendanceFor(clientId)?.type === "ENTRADA" &&
           !exitedToday(clientId))),
   );
+  const requiresTradeApproval = mode === "PLANCHAS" && planchas > 80;
   const canConfirm = Boolean(
     !savingAdminSale &&
     (!administrative ||
@@ -8700,9 +8805,7 @@ function PromoterApp({
     }
     if (!canConfirm) {
       notify(
-        mode === "PLANCHAS" && planchas > 80
-          ? "Requiere autorización previa de Trade"
-          : exceptionNeedsComment
+        exceptionNeedsComment
             ? "Para registrar 3 canjes, agrega el comentario de la excepción."
             : bonus && missingRedemption
               ? `Stock insuficiente de ${redemptionLabel(missingRedemption[0])} para este canje`
@@ -8751,6 +8854,40 @@ function PromoterApp({
       updatedAt: now,
       status: "PENDIENTE",
     };
+    if (requiresTradeApproval && !administrative) {
+      try {
+        const response = await fetch("/api/app-storage/trade-approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sale,
+            promoterName: user.name,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || "No se pudo solicitar la aprobación.");
+        setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
+        setBrandPrices(
+          Object.fromEntries(
+            planchaCatalogProducts.map((product) => [
+              product.brand,
+              String(product.unitPrice || ""),
+            ]),
+          ),
+        );
+        setRedemptionCount(1);
+        setComment("");
+        setReceipt(null);
+        setExchange(null);
+        setReceiptUrl("");
+        setExchangeUrl("");
+        setView("LISTA");
+        notify("Solicitud enviada a Aprobaciones Trade. La venta se registrará únicamente cuando sea aprobada.");
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "No se pudo enviar la solicitud Trade.", true);
+      }
+      return;
+    }
     if (administrative) {
       if (savingAdminSale) return;
       setSavingAdminSale(true);
@@ -9205,9 +9342,9 @@ function PromoterApp({
             data-testid="input-sale-comment"
           />
         </Field>
-        {mode === "PLANCHAS" && planchas > 80 && (
+        {requiresTradeApproval && (
           <div className="trade-warning">
-            <ShieldCheck /> Requiere autorización previa de Trade.
+            <ShieldCheck /> Esta venta requiere aprobación Trade. Al enviarla no aparecerá en Ventas ni reportes hasta ser aprobada.
           </div>
         )}
         <div className="evidence-grid">
@@ -9262,7 +9399,7 @@ function PromoterApp({
             onClick={saveSale}
             testId="button-save-sale"
           >
-            <CheckCircle2 /> Guardar venta
+            <CheckCircle2 /> {requiresTradeApproval && !administrative ? "Solicitar aprobación Trade" : "Guardar venta"}
           </Btn>
         </div>
       </section>
