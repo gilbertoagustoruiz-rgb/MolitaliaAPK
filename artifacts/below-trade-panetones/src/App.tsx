@@ -8854,7 +8854,7 @@ function PromoterApp({
       updatedAt: now,
       status: "PENDIENTE",
     };
-    if (requiresTradeApproval && !administrative) {
+    if (requiresTradeApproval) {
       try {
         const response = await fetch("/api/app-storage/trade-approvals", {
           method: "POST",
@@ -9399,7 +9399,7 @@ function PromoterApp({
             onClick={saveSale}
             testId="button-save-sale"
           >
-            <CheckCircle2 /> {requiresTradeApproval && !administrative ? "Solicitar aprobación Trade" : "Guardar venta"}
+            <CheckCircle2 /> {requiresTradeApproval ? "Solicitar aprobación Trade" : "Guardar venta"}
           </Btn>
         </div>
       </section>
