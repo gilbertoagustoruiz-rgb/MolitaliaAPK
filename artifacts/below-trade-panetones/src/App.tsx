@@ -4056,14 +4056,33 @@ function AdminDegustacionesModule({
   consumos,
   users,
   marketMap,
+  closures,
   onDeleteConsumo,
 }: {
   onEdit: (record: InventoryMovement) => void;
   consumos: InventoryMovement[];
   users: AppUser[];
   marketMap: Record<string, Market>;
+  closures: SessionClosure[];
   onDeleteConsumo: (consumo: InventoryMovement) => void;
 }) {
+  const closureForConsumo = (consumo: InventoryMovement) => {
+    const promoterId = consumo.promoterId || consumo.actorId;
+    const consumoTime = new Date(consumo.date).getTime();
+    return closures
+      .filter(
+        (closure) =>
+          closure.promoterId === promoterId &&
+          closure.marketId === consumo.marketId &&
+          Number(closure.tastingUsed) === Number(consumo.quantity),
+      )
+      .map((closure) => ({
+        closure,
+        distance: Math.abs(new Date(closure.date).getTime() - consumoTime),
+      }))
+      .filter((item) => Number.isFinite(item.distance) && item.distance <= 12 * 60 * 60 * 1000)
+      .sort((a, b) => a.distance - b.distance)[0]?.closure;
+  };
   const [search, setSearch] = useState("");
   const visibleConsumos = consumos.filter((consumo) => {
     const promoter = users.find(
@@ -4081,7 +4100,9 @@ function AdminDegustacionesModule({
       market?.department,
       consumo.marketId,
       consumo.quantity,
+      closureForConsumo(consumo)?.leads ?? 0,
       "unidades utilizadas",
+      "leads",
       formatDate(consumo.date),
       consumo.date,
       consumo.status,
@@ -4110,19 +4131,20 @@ function AdminDegustacionesModule({
           <TableSearch
             value={search}
             onChange={setSearch}
-            fields="Código, promotor, DNI, rol, mercado, ubicación, cantidad, fecha y estado."
+            fields="Código, promotor, DNI, rol, mercado, ubicación, cantidad, leads, fecha y estado."
             count={visibleConsumos.length}
             total={consumos.length}
           />
           {visibleConsumos.length ? (
             <div className="module-table-wrap">
               <div className="module-table">
-                <div className="module-table-row module-table-header cols-7">
+                <div className="module-table-row module-table-header cols-8">
                   <span>Código</span>
                   <span>Promotor</span>
                   <span>Mercado</span>
                   <span>Ubicación</span>
-                  <span>Cantidad</span>
+                  <span>Panetones usados</span>
+                  <span>Leads</span>
                   <span>Fecha y estado</span>
                   <span>Acciones</span>
                 </div>
@@ -4134,7 +4156,7 @@ function AdminDegustacionesModule({
                   const market = marketMap[consumo.marketId];
                   return (
                     <article
-                      className="module-table-row cols-7"
+                      className="module-table-row cols-8"
                       key={consumo.id}
                     >
                       <span>
@@ -4167,6 +4189,10 @@ function AdminDegustacionesModule({
                       <span>
                         <strong>{consumo.quantity}</strong>
                         <small>unidades utilizadas</small>
+                      </span>
+                      <span>
+                        <strong>{closureForConsumo(consumo)?.leads ?? 0}</strong>
+                        <small>leads registrados</small>
                       </span>
                       <span>
                         <strong>{formatDate(consumo.date)}</strong>
@@ -7666,6 +7692,7 @@ function AnalystApp({
           consumos={tastingConsumptions}
           users={users}
           marketMap={marketMap}
+          closures={closures}
           onDeleteConsumo={(record) => deleteRecord("movements", record)}
         />
       )}
