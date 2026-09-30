@@ -57,6 +57,9 @@ function isZoneManagerRole(role?: Role) {
 }
 type Status = "ACTIVO" | "INACTIVO";
 type SyncStatus = "SINCRONIZADA" | "PENDIENTE";
+type WarehouseStock = Record<"PANETON" | RedemptionItemId, number>;
+type Warehouse = { id: string; name: string; location?: string; status: Status; marketIds: string[]; stock: Partial<WarehouseStock>; updatedAt?: string; };
+type WarehouseMovement = { id: string; warehouseId: string; kind: "RECARGA"; itemId: keyof WarehouseStock; quantity: number; actorId: string; date: string; };
 type Market = {
   id: string;
   department: string;
@@ -2871,6 +2874,21 @@ function NewUserModal({
     </Modal>
   );
 }
+function WarehouseModal({ warehouse, markets, warehouses, onSave, close }: { warehouse?: Warehouse; markets: Market[]; warehouses: Warehouse[]; onSave:(warehouse:Warehouse)=>Promise<boolean>; close:()=>void; }) {
+  const [name,setName]=useState(warehouse?.name || ""); const [location,setLocation]=useState(warehouse?.location || ""); const [status,setStatus]=useState<Status>(warehouse?.status || "ACTIVO"); const [marketIds,setMarketIds]=useState<string[]>(warehouse?.marketIds || []);
+  const toggle=(id:string)=>setMarketIds((current)=>current.includes(id)?current.filter((x)=>x!==id):[...current,id]);
+  const available=markets.filter((market)=>!warehouses.some((w)=>w.id!==warehouse?.id && w.marketIds.includes(market.id)));
+  return <Modal title={warehouse?"Editar almacén":"Nuevo almacén"} detail="Asigna los mercados que serán administrados por este almacén." close={close}>
+    <div className="form-grid"><Field label="Nombre *"><Input value={name} onChange={setName}/></Field><Field label="Ubicación"><Input value={location} onChange={setLocation}/></Field>
+    <SelectField label="Estado" value={status} onChange={(v)=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"ACTIVO"},{value:"INACTIVO",label:"INACTIVO"}]}/></div>
+    <Field label="Mercados asignados"><div className="record-list">{available.map((market)=><label className="record" key={market.id}><input type="checkbox" checked={marketIds.includes(market.id)} onChange={()=>toggle(market.id)}/><div className="record-main"><strong>{market.name}</strong><small>{market.district} · {market.province}</small></div></label>)}</div></Field>
+    <div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!name.trim()} onClick={async()=>{const ok=await onSave({id:warehouse?.id||`ALM-${Date.now()}`,name:name.trim().toUpperCase(),location:location.trim().toUpperCase(),status,marketIds,stock:warehouse?.stock||{},updatedAt:new Date().toISOString()});if(ok)close();}}>Guardar almacén</Btn></div>
+  </Modal>;
+}
+function WarehouseRechargeModal({ warehouse,onSave,close }:{warehouse:Warehouse;onSave:(quantities:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void;}) {
+ const items:[keyof WarehouseStock,string][]=[["PANETON","Panetón degustación"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]]; const [q,setQ]=useState<Record<string,string>>({});
+ return <Modal title="Recargar stock" detail={`${warehouse.name} · las cantidades se sumarán al saldo actual.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={(v)=>setQ((x)=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(quantities))close();}}><Plus/>Sumar stock</Btn></div></Modal>;
+}
 function NewMarketModal({
   onSave,
   close,
@@ -5522,6 +5540,7 @@ function CoordinatorApp({
   const allowedTabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
+    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["almacen", "Almacén"]] : []),
     ["clientes", "Clientes"],
     ["usuarios", "Usuarios"],
     ["ventas", "Ventas"],
@@ -5945,6 +5964,20 @@ function AnalystApp({
   const [marketSearch, setMarketSearch] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [attendanceSearch, setAttendanceSearch] = useState("");
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [warehouseMovements, setWarehouseMovements] = useState<WarehouseMovement[]>([]);
+  const [warehouseModal, setWarehouseModal] = useState<Warehouse | "NEW" | null>(null);
+  const [warehouseRecharge, setWarehouseRecharge] = useState<Warehouse | null>(null);
+  const loadWarehouses = async () => {
+    try {
+      const response = await fetch("/api/app-storage/warehouses");
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "No se pudieron cargar los almacenes.");
+      setWarehouses(Array.isArray(payload.warehouses) ? payload.warehouses : []);
+      setWarehouseMovements(Array.isArray(payload.movements) ? payload.movements : []);
+    } catch (error) { notify(error instanceof Error ? error.message : "No se pudieron cargar los almacenes.", true); }
+  };
+  useEffect(() => { void loadWarehouses(); }, []);
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
   const loadTradeApprovals = async () => {
@@ -7754,6 +7787,38 @@ function AnalystApp({
           </div>
         </section>
       )}
+      {tab === "almacen" && (
+        <section className="panel">
+          <div className="panel-header"><div><h2>Almacén</h2><p>Administra el stock central y los mercados atendidos por cada almacén.</p></div>
+            <Btn onClick={() => setWarehouseModal("NEW")}><Plus /> Nuevo almacén</Btn>
+          </div>
+          <div className="panel-body">
+            <div className="record-list">
+              {warehouses.length ? warehouses.map((warehouse) => (
+                <article className="record" key={warehouse.id}>
+                  <span className="record-icon"><Package /></span>
+                  <div className="record-main">
+                    <strong>{warehouse.name}</strong>
+                    <small>{warehouse.location || "Sin ubicación"} · {warehouse.marketIds.length} mercado(s)</small>
+                    <em>Panetón {warehouse.stock?.PANETON || 0} · Avena {warehouse.stock?.AVENA || 0} · Batea {warehouse.stock?.BATEA || 0} · Mandil {warehouse.stock?.MANDIL || 0} · Spaghetti {warehouse.stock?.SPAGHETTI || 0}</em>
+                    <small>Mercados: {warehouse.marketIds.map((id) => marketMap[id]?.name || id).join(", ") || "Sin mercados asignados"}</small>
+                  </div>
+                  <StatusPill status={warehouse.status} />
+                  <span className="module-table-actions">
+                    <Btn onClick={() => setWarehouseRecharge(warehouse)}><Plus /> Recargar stock</Btn>
+                    <Btn variant="outline" onClick={() => setWarehouseModal(warehouse)}><Pencil /> Editar</Btn>
+                    <Btn variant="danger" onClick={async () => {
+                      if (!window.confirm(`¿Eliminar el almacén ${warehouse.name}? El stock y su historial de recargas dejarán de estar disponibles.`)) return;
+                      try { await adminRequest(`/warehouses/${encodeURIComponent(warehouse.id)}`, { method: "DELETE" }); await loadWarehouses(); notify("Almacén eliminado"); }
+                      catch (error) { notify(error instanceof Error ? error.message : "No se pudo eliminar el almacén", true); }
+                    }}><Trash2 /> Eliminar</Btn>
+                  </span>
+                </article>
+              )) : <Empty title="Sin almacenes" detail="Crea el primer almacén y asígnale los mercados que administrará." />}
+            </div>
+          </div>
+        </section>
+      )}
       {tab === "ventas" && (
         <section className="panel sales-console">
           <div className="panel-header">
@@ -8240,6 +8305,19 @@ function AnalystApp({
           onSave={saveClient}
           close={() => setModal(null)}
         />
+      )}
+      {warehouseModal && (
+        <WarehouseModal warehouse={warehouseModal === "NEW" ? undefined : warehouseModal} markets={markets} warehouses={warehouses}
+          onSave={async (warehouse) => {
+            try { await adminRequest("/warehouses", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({warehouse}) }); await loadWarehouses(); notify("Almacén guardado en DigitalOcean"); return true; }
+            catch(error){ notify(error instanceof Error ? error.message : "No se pudo guardar el almacén", true); return false; }
+          }} close={() => setWarehouseModal(null)} />
+      )}
+      {warehouseRecharge && (
+        <WarehouseRechargeModal warehouse={warehouseRecharge} onSave={async (quantities) => {
+          try { await adminRequest(`/warehouses/${encodeURIComponent(warehouseRecharge.id)}/recharge`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({quantities}) }); await loadWarehouses(); notify("Stock sumado al almacén"); return true; }
+          catch(error){ notify(error instanceof Error ? error.message : "No se pudo recargar el almacén", true); return false; }
+        }} close={() => setWarehouseRecharge(null)} />
       )}
       {recordEdit && (
         <RecordEditModal
