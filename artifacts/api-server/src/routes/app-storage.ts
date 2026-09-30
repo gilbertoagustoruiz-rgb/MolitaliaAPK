@@ -1072,6 +1072,107 @@ async function authorizedTradeActor(req: Request) {
   return { id: String(actor.id), data: actor.data as StoredRecord };
 }
 
+async function authorizedWarehouseActor(req: Request) {
+  const actor = await authorizedTradeActor(req);
+  return actor;
+}
+
+router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
+  try {
+    const warehouses = await pool.query("SELECT data,stock,market_ids FROM warehouses ORDER BY name");
+    const movements = await pool.query("SELECT data FROM warehouse_movements ORDER BY movement_date DESC,created_at DESC");
+    res.json({
+      warehouses: warehouses.rows.map((row) => ({
+        ...(isRecord(row.data) ? row.data : {}),
+        stock: isRecord(row.stock) ? row.stock : {},
+        marketIds: Array.isArray(row.market_ids) ? row.market_ids : [],
+      })),
+      movements: movements.rows.map((row) => row.data),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to read warehouses");
+    res.status(500).json({ message: "No se pudieron leer los almacenes." });
+  }
+});
+
+router.post("/app-storage/warehouses", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede administrar almacenes." });
+  const input = isRecord(req.body?.warehouse) ? req.body.warehouse : {};
+  const id = value(input, "id") || `ALM-${randomUUID()}`;
+  const name = value(input, "name").toUpperCase();
+  const marketIds = Array.isArray(input.marketIds) ? input.marketIds.map(String).filter(Boolean) : [];
+  if (!name) return void res.status(400).json({ message: "El nombre del almacén es obligatorio." });
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    if (marketIds.length) {
+      const valid = await db.query("SELECT id FROM markets WHERE id = ANY($1::text[])", [marketIds]);
+      if (valid.rows.length !== new Set(marketIds).size) throw new Error("Uno o más mercados no existen.");
+      const conflict = await db.query("SELECT name FROM warehouses WHERE id<>$1 AND market_ids && $2::text[] LIMIT 1", [id, marketIds]);
+      if (conflict.rows[0]) throw new Error(`Uno de los mercados ya pertenece a ${conflict.rows[0].name}.`);
+    }
+    const existing = await db.query("SELECT stock FROM warehouses WHERE id=$1 FOR UPDATE", [id]);
+    const stock = isRecord(existing.rows[0]?.stock) ? existing.rows[0].stock : {};
+    const warehouse = { ...input, id, name, marketIds, stock, status: value(input, "status") === "INACTIVO" ? "INACTIVO" : "ACTIVO", updatedAt: new Date().toISOString() };
+    await db.query(
+      `INSERT INTO warehouses(id,name,location,status,market_ids,stock,data)
+       VALUES($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,location=EXCLUDED.location,status=EXCLUDED.status,market_ids=EXCLUDED.market_ids,data=EXCLUDED.data,updated_at=now()`,
+      [id,name,value(input,"location")||null,warehouse.status,marketIds,stock,warehouse],
+    );
+    await db.query("COMMIT");
+    res.json({ warehouse });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo guardar el almacén." });
+  } finally { db.release(); }
+});
+
+router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede recargar almacenes." });
+  const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
+  const allowed = ["PANETON","AVENA","BATEA","MANDIL","SPAGHETTI"];
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const found = await db.query("SELECT stock,data FROM warehouses WHERE id=$1 FOR UPDATE", [req.params.id]);
+    if (!found.rows[0]) throw new Error("El almacén no existe.");
+    const stock = isRecord(found.rows[0].stock) ? { ...found.rows[0].stock } : {};
+    const now = new Date().toISOString();
+    let added = 0;
+    for (const itemId of allowed) {
+      const quantity = Math.floor(Math.max(0, Number(quantities[itemId]) || 0));
+      if (!quantity) continue;
+      stock[itemId] = Math.max(0, Number(stock[itemId]) || 0) + quantity;
+      const movement = { id: `ALM-REC-${randomUUID()}`, warehouseId: req.params.id, kind: "RECARGA", itemId, quantity, actorId: actor.id, date: now };
+      await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [movement.id,req.params.id,"RECARGA",itemId,quantity,actor.id,now,movement]);
+      added += quantity;
+    }
+    if (!added) throw new Error("Ingresa al menos una cantidad mayor a cero.");
+    const data = isRecord(found.rows[0].data) ? { ...found.rows[0].data, stock, updatedAt: now } : { id:req.params.id,stock,updatedAt:now };
+    await db.query("UPDATE warehouses SET stock=$2,data=$3,updated_at=now() WHERE id=$1", [req.params.id,stock,data]);
+    await db.query("COMMIT");
+    res.json({ stock });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo recargar el almacén." });
+  } finally { db.release(); }
+});
+
+router.delete("/app-storage/warehouses/:id", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede eliminar almacenes." });
+  try {
+    const result = await pool.query("DELETE FROM warehouses WHERE id=$1 RETURNING id", [req.params.id]);
+    if (!result.rows.length) return void res.status(404).json({ message: "El almacén no existe." });
+    res.json({ deleted: true });
+  } catch {
+    res.status(500).json({ message: "No se pudo eliminar el almacén." });
+  }
+});
+
 router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
   try {
     const result = await pool.query(
