@@ -1119,7 +1119,7 @@ router.post("/app-storage/warehouses", async (req, res): Promise<void> => {
       `INSERT INTO warehouses(id,name,location,status,market_ids,stock,data)
        VALUES($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,location=EXCLUDED.location,status=EXCLUDED.status,market_ids=EXCLUDED.market_ids,data=EXCLUDED.data,updated_at=now()`,
-      [id,name,value(input,"location")||null,warehouse.status,marketIds,stock,warehouse],
+      [id,name,[value(input,"region"),value(input,"department"),value(input,"province"),value(input,"district")].filter(Boolean).join(" / ")||null,warehouse.status,marketIds,stock,warehouse],
     );
     await db.query("COMMIT");
     res.json({ warehouse });
