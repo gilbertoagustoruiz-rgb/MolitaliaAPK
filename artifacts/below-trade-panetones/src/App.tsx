@@ -1111,6 +1111,22 @@ function importedUserFromRecord(
     status: csvStatus(csvField(record, ["estado", "status"])),
   };
 }
+function importedWarehouseFromRecord(record: Record<string, string>, index: number): Warehouse | null {
+  const name=csvField(record,["nombrealmacen","almacen","nombre"]);
+  const region=csvField(record,["region"]);
+  const department=csvField(record,["departamento"]);
+  const province=csvField(record,["provincia"]);
+  const district=csvField(record,["distrito"]);
+  if(!name||!region||!department||!province||!district) return null;
+  const number=(aliases:string[])=>Math.max(0,Math.floor(csvNumber(csvField(record,aliases))));
+  return {
+    id:csvField(record,["id","codigo","idalmacen"])||`ALM-IMP-${Date.now()}-${index+1}`,
+    name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),
+    status:csvStatus(csvField(record,["estado","status"])), marketIds:[],
+    stock:{PANETON:number(["panetondegustacion","paneton","degustacion"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])},
+    updatedAt:new Date().toISOString(),
+  };
+}
 function importedMarketsFromRecords(records: Record<string, string>[]) {
   return records.flatMap<Market>((record) => {
     const id = csvField(record, ["idmerc", "idmercado", "id", "codigo"]);
@@ -7167,6 +7183,26 @@ function AnalystApp({
       "AUTOMÁTICO",
     ]),
   );
+  const importWarehouses = async (file: File) => {
+    try {
+      const records=parseCsvRecords(await file.text());
+      const imported=records.map(importedWarehouseFromRecord).filter((item):item is Warehouse=>Boolean(item));
+      if(!imported.length) throw new Error("No se encontraron almacenes válidos. Revisa Nombre de Almacén, Región, Departamento, Provincia y Distrito.");
+      const duplicates=imported.filter((item,index)=>imported.findIndex((x)=>normalizeCsvHeader(x.name)===normalizeCsvHeader(item.name))!==index);
+      if(duplicates.length) throw new Error("El archivo contiene nombres de almacén duplicados.");
+      const current=LOCAL_WAREHOUSE_DEMO?readStore<Warehouse[]>("bt-demo-warehouses",[]):warehouses;
+      const next=[...current];
+      for(const warehouse of imported){
+        const existing=next.findIndex((item)=>normalizeCsvHeader(item.name)===normalizeCsvHeader(warehouse.name));
+        if(existing>=0) next[existing]={...warehouse,id:next[existing].id,marketIds:next[existing].marketIds};
+        else next.push(warehouse);
+      }
+      if(LOCAL_WAREHOUSE_DEMO){writeStore("bt-demo-warehouses",next);setWarehouses(next);}
+      else {for(const warehouse of imported) await adminRequest("/warehouses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({warehouse})});await loadWarehouses();}
+      notify(`${imported.length} almacén(es) importado(s). Los mercados se asignan desde el módulo Mercados.`);
+    } catch(error){notify(error instanceof Error?error.message:"No se pudo importar almacenes.",true);}
+  };
+  const downloadWarehousesExample=()=>downloadCsv("ejemplo-importacion-almacenes.csv",["Nombre de Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón Degustación","Avena","Batea","Mandil","Spaghetti"],[["ALMACEN PIURA","NORTE","PIURA","PIURA","PIURA","ACTIVO",20,120,50,50,100]]);
   const filteredAdminSales = sales.filter((sale) => {
     const promoter = users.find((item) => item.id === sale.promoterId);
     const client = clients.find((item) => item.id === sale.clientId);
@@ -7851,8 +7887,12 @@ function AnalystApp({
       )}
       {tab === "almacen" && (
         <section className="panel">
-          <div className="panel-header"><div><h2>Almacén</h2><p>Administra el stock central y los mercados atendidos por cada almacén.</p></div>
-            <Btn onClick={() => setWarehouseModal("NEW")}><Plus /> Nuevo almacén</Btn>
+          <div className="panel-header"><div><h2>Almacén</h2><p>Administra el stock central. La asignación de mercados se realiza desde el módulo Mercados.</p></div>
+            <div className="page-actions">
+              <CsvImportButton label="Importar almacenes" onImport={importWarehouses} testId="button-import-warehouses" />
+              <CsvExampleButton onDownload={downloadWarehousesExample} testId="button-example-warehouses" />
+              <Btn onClick={() => setWarehouseModal("NEW")}><Plus /> Nuevo almacén</Btn>
+            </div>
           </div>
           <div className="panel-body">
             <div className="record-list">
