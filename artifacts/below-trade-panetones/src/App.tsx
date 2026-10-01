@@ -830,6 +830,9 @@ async function uploadEvidenceFile(
   field: PendingPhotoUpload["field"],
   context: PhotoUploadContext,
 ) {
+  if (LOCAL_WAREHOUSE_DEMO) {
+    return { id: `LOCAL-${crypto.randomUUID()}`, url: URL.createObjectURL(file) };
+  }
   const optimized = await compressEvidencePhoto(file);
   return uploadPhoto({
     id: `${entityType}:${crypto.randomUUID()}:${field}`,
