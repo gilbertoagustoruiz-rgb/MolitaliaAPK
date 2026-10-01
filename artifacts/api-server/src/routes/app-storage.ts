@@ -1133,6 +1133,7 @@ router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<vo
   const actor = await authorizedWarehouseActor(req);
   if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede recargar almacenes." });
   const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
+  const initial = req.body?.initial === true;
   const allowed = ["PANETON","AVENA","BATEA","MANDIL","SPAGHETTI"];
   const db = await pool.connect();
   try {
@@ -1140,14 +1141,16 @@ router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<vo
     const found = await db.query("SELECT stock,data FROM warehouses WHERE id=$1 FOR UPDATE", [req.params.id]);
     if (!found.rows[0]) throw new Error("El almacén no existe.");
     const stock = isRecord(found.rows[0].stock) ? { ...found.rows[0].stock } : {};
+    if (initial && Object.values(stock).some((quantity) => Number(quantity) > 0)) throw new Error("El almacén ya tiene stock inicial. Usa Recargar stock.");
     const now = new Date().toISOString();
     let added = 0;
     for (const itemId of allowed) {
       const quantity = Math.floor(Math.max(0, Number(quantities[itemId]) || 0));
       if (!quantity) continue;
       stock[itemId] = Math.max(0, Number(stock[itemId]) || 0) + quantity;
-      const movement = { id: `ALM-REC-${randomUUID()}`, warehouseId: req.params.id, kind: "RECARGA", itemId, quantity, actorId: actor.id, date: now };
-      await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [movement.id,req.params.id,"RECARGA",itemId,quantity,actor.id,now,movement]);
+      const kind = initial ? "CARGA_INICIAL" : "RECARGA";
+      const movement = { id: `ALM-${initial ? "INI" : "REC"}-${randomUUID()}`, warehouseId: req.params.id, kind, itemId, quantity, actorId: actor.id, date: now };
+      await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [movement.id,req.params.id,kind,itemId,quantity,actor.id,now,movement]);
       added += quantity;
     }
     if (!added) throw new Error("Ingresa al menos una cantidad mayor a cero.");
