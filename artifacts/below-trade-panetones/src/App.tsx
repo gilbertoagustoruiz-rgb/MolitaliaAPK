@@ -9790,14 +9790,6 @@ function PromoterApp({
                 {selectedMarket.department}
               </p>
             </div>
-            <div className="market-stock-mini">
-              <span>
-                Mis premios <strong>{redemptionTotal}</strong>
-              </span>
-              <span>
-                Mi degustación <strong>{userTastingStock(user)}</strong>
-              </span>
-            </div>
             <StatusPill status="ACTIVO" />
           </div>
           {module === "VENTAS" && view === "LISTA" && (
