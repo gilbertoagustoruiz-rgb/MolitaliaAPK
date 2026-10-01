@@ -7796,7 +7796,7 @@ function AnalystApp({
             <div className="record-list">
               {warehouses.length ? warehouses.map((warehouse) => (
                 <article className="record" key={warehouse.id}>
-                  <span className="record-icon"><Package /></span>
+                  <span className="record-icon"><Boxes /></span>
                   <div className="record-main">
                     <strong>{warehouse.name}</strong>
                     <small>{warehouse.location || "Sin ubicación"} · {warehouse.marketIds.length} mercado(s)</small>
