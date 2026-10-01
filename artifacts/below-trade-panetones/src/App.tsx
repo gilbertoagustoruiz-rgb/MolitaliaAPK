@@ -57,7 +57,7 @@ function isZoneManagerRole(role?: Role) {
 }
 type Status = "ACTIVO" | "INACTIVO";
 type SyncStatus = "SINCRONIZADA" | "PENDIENTE";
-type WarehouseStock = Record<"PANETON" | RedemptionItemId, number>;
+type WarehouseStock = Record<"PANETON_900G" | "PANETON_85G" | RedemptionItemId, number>;
 type Warehouse = { id: string; name: string; region: string; department: string; province: string; district: string; status: Status; marketIds: string[]; stock: Partial<WarehouseStock>; updatedAt?: string; };
 type WarehouseMovement = { id: string; warehouseId: string; kind: "CARGA_INICIAL" | "RECARGA" | "CONSUMO_HISTORICO" | "CONSUMO" | "REVERSO"; itemId: keyof WarehouseStock; quantity: number; actorId: string; date: string; };
 type Market = {
@@ -1123,7 +1123,7 @@ function importedWarehouseFromRecord(record: Record<string, string>, index: numb
     id:csvField(record,["id","codigo","idalmacen"])||`ALM-IMP-${Date.now()}-${index+1}`,
     name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),
     status:csvStatus(csvField(record,["estado","status"])), marketIds:[],
-    stock:{PANETON:number(["panetondegustacion","paneton","degustacion"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])},
+    stock:{PANETON_900G:number(["paneton900g","paneton900","panetondegustacion","paneton","degustacion"]),PANETON_85G:number(["paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])},
     updatedAt:new Date().toISOString(),
   };
 }
@@ -2947,7 +2947,7 @@ function WarehouseModal({ warehouse, markets, warehouses, onSave, close }: { war
   </Modal>;
 }
 function WarehouseRechargeModal({ warehouse,onSave,close }:{warehouse:Warehouse;onSave:(quantities:Partial<WarehouseStock>,initial:boolean)=>Promise<boolean>;close:()=>void;}) {
- const items:[keyof WarehouseStock,string][]=[["PANETON","Panetón degustación"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];
+ const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g · Degustación"],["PANETON_85G","Panetón 85 g · Degustación"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];
  const [q,setQ]=useState<Record<string,string>>({});
  const hasStock=items.some(([id])=>(warehouse.stock?.[id]||0)>0);
  return <Modal title={hasStock?"Recargar stock":"Cargar stock inicial"} detail={hasStock?`${warehouse.name} · las cantidades se sumarán al saldo actual.`:`${warehouse.name} · registra el stock inicial de canjes y degustación.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={hasStock?`${label} · actual: ${warehouse.stock?.[id]||0}`:label}><Input type="number" min={0} step={1} value={q[id]||""} onChange={(v)=>setQ((x)=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(quantities,!hasStock))close();}}><Plus/>{hasStock?"Sumar stock":"Guardar stock inicial"}</Btn></div></Modal>;
@@ -5975,7 +5975,7 @@ function AnalystApp({
       const stock: Partial<WarehouseStock> = { ...warehouse.stock };
       for (const movement of eligible.filter((item) => warehouse.marketIds.includes(item.marketId))) {
         if (movement.kind === "DEGUSTACION") {
-          stock.PANETON = Math.max(0, Number(stock.PANETON || 0) - Math.max(0, Number(movement.quantity) || 0));
+          stock.PANETON_900G = Math.max(0, Number(stock.PANETON_900G ?? (stock as any).PANETON ?? 0) - Math.max(0, Number(movement.quantity) || 0));
         } else {
           for (const item of redemptionItems) {
             const used = movementComponentQuantity(movement, item.id);
@@ -5990,7 +5990,7 @@ function AnalystApp({
       const warehouse = warehouses.find((item) => item.marketIds.includes(movement.marketId));
       if (!warehouse) return [];
       if (movement.kind === "DEGUSTACION") return [{
-        id: `LEGACY-${movement.id}-PANETON`, warehouseId: warehouse.id, kind: "CONSUMO_HISTORICO" as WarehouseMovement["kind"], itemId: "PANETON" as keyof WarehouseStock, quantity: -Math.max(0, Number(movement.quantity) || 0), actorId: movement.actorId, date: movement.date || now,
+        id: `LEGACY-${movement.id}-PANETON-900G`, warehouseId: warehouse.id, kind: "CONSUMO_HISTORICO" as WarehouseMovement["kind"], itemId: "PANETON_900G" as keyof WarehouseStock, quantity: -Math.max(0, Number(movement.quantity) || 0), actorId: movement.actorId, date: movement.date || now,
       }];
       return redemptionItems.flatMap((item) => {
         const used = movementComponentQuantity(movement, item.id);
@@ -7202,7 +7202,7 @@ function AnalystApp({
       notify(`${imported.length} almacén(es) importado(s). Los mercados se asignan desde el módulo Mercados.`);
     } catch(error){notify(error instanceof Error?error.message:"No se pudo importar almacenes.",true);}
   };
-  const downloadWarehousesExample=()=>downloadCsv("ejemplo-importacion-almacenes.csv",["Nombre de Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón Degustación","Avena","Batea","Mandil","Spaghetti"],[["ALMACEN PIURA","NORTE","PIURA","PIURA","PIURA","ACTIVO",20,120,50,50,100]]);
+  const downloadWarehousesExample=()=>downloadCsv("ejemplo-importacion-almacenes.csv",["Nombre de Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón 900 g","Panetón 85 g","Avena","Batea","Mandil","Spaghetti"],[["ALMACEN PIURA","NORTE","PIURA","PIURA","PIURA","ACTIVO",20,0,120,50,50,100]]);
   const filteredAdminSales = sales.filter((sale) => {
     const promoter = users.find((item) => item.id === sale.promoterId);
     const client = clients.find((item) => item.id === sale.clientId);
@@ -7301,13 +7301,14 @@ function AnalystApp({
               {warehouses.length ? (
                 <div className="stock-reconciliation-table">
                   <div className="stock-reconciliation-row header">
-                    <span>Almacén</span><span>Panetón degustación</span><span>Avena</span><span>Batea</span><span>Mandil</span><span>Spaghetti</span>
+                    <span>Almacén</span><span>Panetón 900 g</span><span>Panetón 85 g</span><span>Avena</span><span>Batea</span><span>Mandil</span><span>Spaghetti</span>
                   </div>
                   {warehouses.map((warehouse) => (
                     <div className="stock-reconciliation-row" key={warehouse.id}>
                       <div><strong>{warehouse.name}</strong><small>{warehouse.region} · {warehouse.marketIds.map((id)=>marketMap[id]?.name||id).join(", ") || "Sin mercados"}</small></div>
-                      <b>{warehouse.stock?.PANETON || 0}<small>unidades</small></b>
-                      <span>{warehouse.stock?.AVENA || 0}<small>unidades</small></span>
+                      <b>{warehouse.stock?.PANETON_900G ?? (warehouse.stock as any)?.PANETON ?? 0}<small>unidades</small></b>
+                      <b>{warehouse.stock?.PANETON_85G || 0}<small>unidades</small></b>
+                      <span>{warehouse.stock?.AVENA || 0><small>unidades</small></span>
                       <span>{warehouse.stock?.BATEA || 0}<small>unidades</small></span>
                       <span>{warehouse.stock?.MANDIL || 0}<small>unidades</small></span>
                       <span>{warehouse.stock?.SPAGHETTI || 0}<small>unidades</small></span>
@@ -7902,7 +7903,7 @@ function AnalystApp({
                   <div className="record-main">
                     <strong>{warehouse.name}</strong>
                     <small>{[warehouse.region, warehouse.department, warehouse.province, warehouse.district].filter(Boolean).join(" · ") || "Sin ubicación"} · {warehouse.marketIds.length} mercado(s)</small>
-                    <em>Panetón {warehouse.stock?.PANETON || 0} · Avena {warehouse.stock?.AVENA || 0} · Batea {warehouse.stock?.BATEA || 0} · Mandil {warehouse.stock?.MANDIL || 0} · Spaghetti {warehouse.stock?.SPAGHETTI || 0}</em>
+                    <em>Panetón 900 g {warehouse.stock?.PANETON_900G ?? (warehouse.stock as any)?.PANETON ?? 0} · Panetón 85 g {warehouse.stock?.PANETON_85G || 0} · Avena {warehouse.stock?.AVENA || 0} · Batea {warehouse.stock?.BATEA || 0} · Mandil {warehouse.stock?.MANDIL || 0} · Spaghetti {warehouse.stock?.SPAGHETTI || 0}</em>
                     <small>Mercados: {warehouse.marketIds.map((id) => marketMap[id]?.name || id).join(", ") || "Sin mercados asignados"}</small>
                   </div>
                   <StatusPill status={warehouse.status} />
