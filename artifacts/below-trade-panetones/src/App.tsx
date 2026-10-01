@@ -7185,6 +7185,7 @@ function AnalystApp({
   const tabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
+    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["almacen", "Almacén"]] : []),
     ["usuarios", "Usuarios"],
     ["clientes", "Clientes"],
     ...(canManageCatalogs
