@@ -261,6 +261,16 @@ type CloudSnapshot = {
   categories: Category[];
 };
 
+const LOCAL_WAREHOUSE_DEMO = import.meta.env.DEV && window.location.hostname === "localhost";
+const LOCAL_DEMO_ADMIN: AppUser = {
+  id: "LOCAL-DEMO-ADMIN",
+  dni: "99999999",
+  name: "ADMIN LOCAL",
+  role: "ADMIN",
+  roleLabel: "Administrador local",
+  password: "demo",
+  status: "ACTIVO",
+};
 const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
@@ -2279,6 +2289,12 @@ function Login({
   const submit = async () => {
     setLoading(true);
     try {
+      if (LOCAL_WAREHOUSE_DEMO && dni === LOCAL_DEMO_ADMIN.dni && password === LOCAL_DEMO_ADMIN.password) {
+        writeStore("bt-session", LOCAL_DEMO_ADMIN);
+        onLogin(LOCAL_DEMO_ADMIN);
+        notify("Modo local de demostración: ningún dato se enviará a producción.");
+        return;
+      }
       if (navigator.onLine) {
         const response = await fetch(APP_STORAGE_LOGIN, {
           method: "POST",
@@ -2353,6 +2369,7 @@ function Login({
             <div>
               <h2>Bienvenido</h2>
               <p>Ingresa con tu DNI y clave.</p>
+              {LOCAL_WAREHOUSE_DEMO && <small>Demo local: DNI 99999999 · clave demo</small>}
             </div>
           </div>
           <Field label="DNI">
