@@ -1072,10 +1072,77 @@ async function authorizedTradeActor(req: Request) {
   return { id: String(actor.id), data: actor.data as StoredRecord };
 }
 
+async function warehouseForMarket(db: QueryClient, marketId: string) {
+  const result = await db.query(
+    "SELECT id,name,stock,data FROM warehouses WHERE status='ACTIVO' AND $1 = ANY(market_ids) LIMIT 2",
+    [marketId],
+  );
+  if (!result.rows.length) throw new Error("El mercado no tiene almacén asignado.");
+  if (result.rows.length > 1) throw new Error("El mercado está asignado a más de un almacén.");
+  return result.rows[0];
+}
+
+async function applyWarehouseStockMovement(
+  db: QueryClient,
+  marketId: string,
+  requirements: Record<string, number>,
+  kind: string,
+  actorId: string,
+  referenceId: string,
+) {
+  const warehouse = await warehouseForMarket(db, marketId);
+  const locked = await db.query("SELECT id,name,stock FROM warehouses WHERE id=$1 FOR UPDATE", [warehouse.id]);
+  const row = locked.rows[0];
+  const stock = isRecord(row.stock) ? { ...row.stock } : {};
+  for (const [itemId, raw] of Object.entries(requirements)) {
+    const quantity = Math.max(0, Number(raw) || 0);
+    if (!quantity) continue;
+    const available = Math.max(0, Number(stock[itemId]) || 0);
+    if (available < quantity) throw new Error(`Stock insuficiente de ${itemId} en ${row.name}. Disponible: ${available}.`);
+  }
+  const now = new Date().toISOString();
+  for (const [itemId, raw] of Object.entries(requirements)) {
+    const quantity = Math.max(0, Number(raw) || 0);
+    if (!quantity) continue;
+    stock[itemId] = Math.max(0, Number(stock[itemId]) || 0) - quantity;
+    const movement = { id:`ALM-CONS-${randomUUID()}`, warehouseId:row.id, marketId, kind, itemId, quantity:-quantity, actorId, referenceId, date:now };
+    await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [movement.id,row.id,kind,itemId,-quantity,actorId,now,movement]);
+  }
+  await db.query("UPDATE warehouses SET stock=$2,updated_at=now() WHERE id=$1", [row.id,stock]);
+  return { warehouseId: String(row.id), stock };
+}
+
 async function authorizedWarehouseActor(req: Request) {
   const actor = await authorizedTradeActor(req);
   return actor;
 }
+
+router.get("/app-storage/warehouses/migration-preview", async (req,res): Promise<void> => {
+  const actor=await authorizedWarehouseActor(req);
+  if(!actor) return void res.status(403).json({message:"Solo Admin o Analista puede revisar la migración."});
+  try {
+    const warehouses=await pool.query("SELECT id,name,market_ids,stock FROM warehouses");
+    const marketToWarehouse=new Map<string,{id:string;name:string}>();
+    const conflicts:string[]=[];
+    for(const row of warehouses.rows) for(const marketId of (Array.isArray(row.market_ids)?row.market_ids:[])) {
+      if(marketToWarehouse.has(String(marketId))) conflicts.push(String(marketId));
+      else marketToWarehouse.set(String(marketId),{id:String(row.id),name:String(row.name)});
+    }
+    const consumption=new Map<string,Record<string,number>>();
+    const exceptions:Array<Record<string,unknown>>=[];
+    const add=(marketId:string,itemId:string,quantity:number,sourceId:string)=>{
+      const wh=marketToWarehouse.get(marketId); if(!wh){exceptions.push({sourceId,marketId,reason:"MERCADO_SIN_ALMACEN"});return;}
+      const key=wh.id; const row=consumption.get(key)||{PANETON:0,AVENA:0,BATEA:0,MANDIL:0,SPAGHETTI:0}; row[itemId]=(row[itemId]||0)+Math.max(0,quantity); consumption.set(key,row);
+    };
+    const moves=await pool.query("SELECT id,market_id,kind,item_id,quantity,data FROM inventory_movements WHERE kind IN ('DEGUSTACION','CANJE')");
+    const saleIds=new Set<string>();
+    for(const row of moves.rows){const data=isRecord(row.data)?row.data:{};const marketId=String(row.market_id||value(data,"marketId"));if(String(row.kind)==="DEGUSTACION") add(marketId,"PANETON",Number(row.quantity)||0,String(row.id)); else {const m=String(row.id).match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);if(m)saleIds.add(m[1]);const components=isRecord(data.canjeComponents)?data.canjeComponents:null;if(components) for(const item of redemptionItemIds)add(marketId,item,(Number(components[item])||0)*(Number(row.quantity)||0),String(row.id));else add(marketId,String(row.item_id||value(data,"itemId")),Number(row.quantity)||0,String(row.id));}}
+    const sales=await pool.query("SELECT id,market_id,data FROM sales WHERE data ? 'bonus'");
+    for(const row of sales.rows){if(saleIds.has(String(row.id)))continue;const data=isRecord(row.data)?row.data:{};const reqs=isRecord(data.redemptionItems)?data.redemptionItems:{};for(const item of redemptionItemIds)add(String(row.market_id||value(data,"marketId")),item,Number(reqs[item])||0,String(row.id));}
+    const preview=warehouses.rows.map(row=>({warehouseId:String(row.id),warehouseName:String(row.name),markets:row.market_ids,currentStock:isRecord(row.stock)?row.stock:{},historicalConsumption:consumption.get(String(row.id))||{PANETON:0,AVENA:0,BATEA:0,MANDIL:0,SPAGHETTI:0}}));
+    res.json({mode:"PREVIEW_ONLY",preview,exceptions,conflictingMarkets:Array.from(new Set(conflicts))});
+  } catch(error){res.status(500).json({message:error instanceof Error?error.message:"No se pudo simular la migración."});}
+});
 
 router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
   try {
