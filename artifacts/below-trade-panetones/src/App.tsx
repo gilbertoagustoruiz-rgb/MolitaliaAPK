@@ -271,6 +271,15 @@ const LOCAL_DEMO_ADMIN: AppUser = {
   password: "demo",
   status: "ACTIVO",
 };
+const LOCAL_DEMO_PROMOTER: AppUser = {
+  id: "LOCAL-DEMO-PROMOTER",
+  dni: "88888888",
+  name: "PROMOTOR PRUEBA",
+  role: "PROMOTOR PERMANENTE",
+  roleLabel: "Promotor Permanente",
+  password: "demo",
+  status: "ACTIVO",
+};
 const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
@@ -2289,11 +2298,14 @@ function Login({
   const submit = async () => {
     setLoading(true);
     try {
-      if (LOCAL_WAREHOUSE_DEMO && dni === LOCAL_DEMO_ADMIN.dni && password === LOCAL_DEMO_ADMIN.password) {
-        writeStore("bt-session", LOCAL_DEMO_ADMIN);
-        onLogin(LOCAL_DEMO_ADMIN);
-        notify("Modo local de demostración: ningún dato se enviará a producción.");
-        return;
+      if (LOCAL_WAREHOUSE_DEMO && password === "demo") {
+        const demoUser = dni === LOCAL_DEMO_ADMIN.dni ? LOCAL_DEMO_ADMIN : dni === LOCAL_DEMO_PROMOTER.dni ? LOCAL_DEMO_PROMOTER : null;
+        if (demoUser) {
+          writeStore("bt-session", demoUser);
+          onLogin(demoUser);
+          notify("Modo local de demostración: ningún dato se enviará a producción.");
+          return;
+        }
       }
       if (navigator.onLine) {
         const response = await fetch(APP_STORAGE_LOGIN, {
@@ -2369,7 +2381,7 @@ function Login({
             <div>
               <h2>Bienvenido</h2>
               <p>Ingresa con tu DNI y clave.</p>
-              {LOCAL_WAREHOUSE_DEMO && <small>Demo local: DNI 99999999 · clave demo</small>}
+              {LOCAL_WAREHOUSE_DEMO && <small>Demo local: Admin 99999999 / demo · Promotor 88888888 / demo</small>}
             </div>
           </div>
           <Field label="DNI">
@@ -10337,6 +10349,7 @@ export default function App() {
     if (!referencesReady) return;
     let cancelled = false;
     const hydrateCloudStorage = async () => {
+      if (LOCAL_WAREHOUSE_DEMO) { setCloudReady(true); return; }
       try {
         const response = await fetch(APP_STORAGE_READ);
         if (!response.ok)
@@ -10445,7 +10458,7 @@ export default function App() {
     if (!referencesReady) return;
     let cancelled = false;
     const refreshAssignments = async () => {
-      if (!navigator.onLine) return;
+      if (LOCAL_WAREHOUSE_DEMO || !navigator.onLine) return;
       try {
         const response = await fetch(APP_STORAGE_ASSIGNMENTS);
         if (!response.ok) throw new Error("Asignaciones no disponibles");
