@@ -59,7 +59,7 @@ type Status = "ACTIVO" | "INACTIVO";
 type SyncStatus = "SINCRONIZADA" | "PENDIENTE";
 type WarehouseStock = Record<"PANETON" | RedemptionItemId, number>;
 type Warehouse = { id: string; name: string; region: string; department: string; province: string; district: string; status: Status; marketIds: string[]; stock: Partial<WarehouseStock>; updatedAt?: string; };
-type WarehouseMovement = { id: string; warehouseId: string; kind: "CARGA_INICIAL" | "RECARGA"; itemId: keyof WarehouseStock; quantity: number; actorId: string; date: string; };
+type WarehouseMovement = { id: string; warehouseId: string; kind: "CARGA_INICIAL" | "RECARGA" | "CONSUMO_HISTORICO" | "CONSUMO" | "REVERSO"; itemId: keyof WarehouseStock; quantity: number; actorId: string; date: string; };
 type Market = {
   id: string;
   department: string;
@@ -5952,6 +5952,50 @@ function AnalystApp({
     } catch (error) { notify(error instanceof Error ? error.message : "No se pudieron cargar los almacenes.", true); }
   };
   useEffect(() => { void loadWarehouses(); }, []);
+  useEffect(() => {
+    if (!LOCAL_WAREHOUSE_DEMO || !warehouses.length || !movements.length) return;
+    const applied = new Set(readStore<string[]>("bt-demo-warehouse-legacy-applied", []));
+    const eligible = movements.filter((movement) =>
+      movement.promoterId &&
+      (movement.kind === "CANJE" || movement.kind === "DEGUSTACION") &&
+      !applied.has(movement.id) &&
+      warehouses.some((warehouse) => warehouse.marketIds.includes(movement.marketId))
+    );
+    if (!eligible.length) return;
+    const next = warehouses.map((warehouse) => {
+      const stock: Partial<WarehouseStock> = { ...warehouse.stock };
+      for (const movement of eligible.filter((item) => warehouse.marketIds.includes(item.marketId))) {
+        if (movement.kind === "DEGUSTACION") {
+          stock.PANETON = Math.max(0, Number(stock.PANETON || 0) - Math.max(0, Number(movement.quantity) || 0));
+        } else {
+          for (const item of redemptionItems) {
+            const used = movementComponentQuantity(movement, item.id);
+            if (used > 0) stock[item.id] = Math.max(0, Number(stock[item.id] || 0) - used);
+          }
+        }
+      }
+      return { ...warehouse, stock, updatedAt: new Date().toISOString() };
+    });
+    const now = new Date().toISOString();
+    const legacyMovements: WarehouseMovement[] = eligible.flatMap((movement) => {
+      const warehouse = warehouses.find((item) => item.marketIds.includes(movement.marketId));
+      if (!warehouse) return [];
+      if (movement.kind === "DEGUSTACION") return [{
+        id: `LEGACY-${movement.id}-PANETON`, warehouseId: warehouse.id, kind: "CONSUMO_HISTORICO" as WarehouseMovement["kind"], itemId: "PANETON" as keyof WarehouseStock, quantity: -Math.max(0, Number(movement.quantity) || 0), actorId: movement.actorId, date: movement.date || now,
+      }];
+      return redemptionItems.flatMap((item) => {
+        const used = movementComponentQuantity(movement, item.id);
+        return used > 0 ? [{ id: `LEGACY-${movement.id}-${item.id}`, warehouseId: warehouse.id, kind: "CONSUMO_HISTORICO" as WarehouseMovement["kind"], itemId: item.id as keyof WarehouseStock, quantity: -used, actorId: movement.actorId, date: movement.date || now }] : [];
+      });
+    });
+    const nextWarehouseMovements = [...legacyMovements, ...warehouseMovements];
+    writeStore("bt-demo-warehouses", next);
+    writeStore("bt-demo-warehouse-movements", nextWarehouseMovements);
+    writeStore("bt-demo-warehouse-legacy-applied", [...applied, ...eligible.map((movement) => movement.id)]);
+    setWarehouses(next);
+    setWarehouseMovements(nextWarehouseMovements);
+    notify(`Regularización local aplicada: ${eligible.length} consumo(s) histórico(s) descontado(s) del almacén.`);
+  }, [movements, warehouses.length]);
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
   const loadTradeApprovals = async () => {
