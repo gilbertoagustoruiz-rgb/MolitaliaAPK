@@ -6335,12 +6335,28 @@ function AnalystApp({
   };
   const importMarkets = async (file: File) => {
     try {
-      const imported=importedMarketsFromRecords(parseCsvRecords(await file.text()));
+      const records=parseCsvRecords(await file.text());
+      const imported=importedMarketsFromRecords(records);
       if(!imported.length) throw new Error("No se encontraron mercados válidos. Revisa Código/ID Mercado y Nombre del Mercado.");
       const next=mergeReferenceRows(markets,imported,(market)=>market.id);
-      if(LOCAL_WAREHOUSE_DEMO){setMarkets(next);writeStore("bt-markets",next);}
-      else {await persistImportedSnapshot({markets:next});setMarkets(next);writeStore("bt-markets",next);}
-      notify(`${imported.length} mercado(s) importado(s) correctamente`);
+      const warehouseAssignments=new Map<string,string[]>();
+      records.forEach((record,index)=>{
+        const market=imported[index]; if(!market) return;
+        const warehouseName=csvField(record,["almacen","nombrealmacen","nombredealmacen"]);
+        if(!warehouseName) return;
+        const warehouse=warehouses.find((item)=>normalizeCsvHeader(item.name)===normalizeCsvHeader(warehouseName));
+        if(!warehouse) throw new Error(`El almacén "${warehouseName}" no existe. Créalo/importalo primero en el módulo Almacén.`);
+        const list=warehouseAssignments.get(warehouse.id)||[]; list.push(market.id); warehouseAssignments.set(warehouse.id,list);
+      });
+      let nextWarehouses=warehouses.map((warehouse)=>{
+        const assigned=warehouseAssignments.get(warehouse.id)||[];
+        const allImportedIds=new Set(imported.map((market)=>market.id));
+        const keep=warehouse.marketIds.filter((id)=>!allImportedIds.has(id));
+        return {...warehouse,marketIds:[...new Set([...keep,...assigned])],updatedAt:new Date().toISOString()};
+      });
+      if(LOCAL_WAREHOUSE_DEMO){setMarkets(next);writeStore("bt-markets",next);setWarehouses(nextWarehouses);writeStore("bt-demo-warehouses",nextWarehouses);}
+      else {await persistImportedSnapshot({markets:next});setMarkets(next);writeStore("bt-markets",next);for(const warehouse of nextWarehouses) await adminRequest("/warehouses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({warehouse})});setWarehouses(nextWarehouses);}
+      notify(`${imported.length} mercado(s) importado(s) correctamente con asignación de almacén`);
     } catch(error){notify(error instanceof Error?error.message:"No se pudo importar mercados.",true);}
   };
   const exportMarkets = () => {
