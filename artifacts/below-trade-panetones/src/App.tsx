@@ -6272,6 +6272,22 @@ function AnalystApp({
     );
     notify("Marcaciones con links de fotos descargadas");
   };
+  const exportMarkets = () => {
+    downloadCsv(
+      `mercados-${today}.csv`,
+      ["Código","Mercado","Región","Departamento","Provincia","Distrito","Estado"],
+      markets.map((market) => [
+        market.id,
+        market.name,
+        market.region,
+        market.department,
+        market.province,
+        market.district,
+        market.status,
+      ]),
+    );
+    notify("Información de mercados descargada");
+  };
   const exportSummary = () => {
     const summaryRows = aggregateSalesByRegionCity(sales, markets);
     downloadCsv(
@@ -7188,6 +7204,9 @@ function AnalystApp({
               <p>Catálogo almacenado en DigitalOcean PostgreSQL.</p>
             </div>
             <div className="panel-actions">
+              <Btn variant="outline" onClick={exportMarkets} testId="button-export-markets">
+                <Download /> Descargar
+              </Btn>
               <Btn
                 onClick={() => setModal("market")}
                 testId="button-new-market"
