@@ -7308,7 +7308,7 @@ function AnalystApp({
                       <div><strong>{warehouse.name}</strong><small>{warehouse.region} · {warehouse.marketIds.map((id)=>marketMap[id]?.name||id).join(", ") || "Sin mercados"}</small></div>
                       <b>{warehouse.stock?.PANETON_900G ?? (warehouse.stock as any)?.PANETON ?? 0}<small>unidades</small></b>
                       <b>{warehouse.stock?.PANETON_85G || 0}<small>unidades</small></b>
-                      <span>{warehouse.stock?.AVENA || 0><small>unidades</small></span>
+                      <span>{warehouse.stock?.AVENA || 0}<small>unidades</small></span>
                       <span>{warehouse.stock?.BATEA || 0}<small>unidades</small></span>
                       <span>{warehouse.stock?.MANDIL || 0}<small>unidades</small></span>
                       <span>{warehouse.stock?.SPAGHETTI || 0}<small>unidades</small></span>
