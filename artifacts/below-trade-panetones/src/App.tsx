@@ -4550,6 +4550,7 @@ function AssignmentModule({
           : user,
       ),
     );
+    if (LOCAL_WAREHOUSE_DEMO) { notify(`Asignación local guardada para ${selectedPromoter?.name || "el usuario"}`); return; }
     try {
       const response = await fetch(APP_STORAGE_ASSIGNMENTS, {
         method: "POST",
@@ -4608,6 +4609,7 @@ function AssignmentModule({
     );
     setSelectedMarketIds([]);
     setSelectedClientIds([]);
+    if (LOCAL_WAREHOUSE_DEMO) { notify(`Asignación local retirada para ${selectedPromoter?.name || "el promotor"}`); return; }
     try {
       const response = await fetch(APP_STORAGE_ASSIGNMENTS, {
         method: "POST",
@@ -6039,6 +6041,7 @@ function AnalystApp({
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
   const loadTradeApprovals = async () => {
+    if (LOCAL_WAREHOUSE_DEMO) { setTradeApprovals(readStore<TradeApproval[]>("bt-demo-trade-approvals", [])); return; }
     setTradeApprovalsLoading(true);
     try {
       const response = await fetch("/api/app-storage/trade-approvals");
@@ -6679,6 +6682,32 @@ function AnalystApp({
     }
   };
   const adminRequest = async (path: string, init?: RequestInit) => {
+    if (LOCAL_WAREHOUSE_DEMO) {
+      const method=(init?.method || "GET").toUpperCase();
+      const body=typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      if (path === "/users" && method === "POST" && body.user) {
+        const next=[...users.filter((item)=>item.id!==body.user.id),body.user]; setUsers(next); writeStore("bt-users",next); return {};
+      }
+      if (path === "/clients" && method === "POST" && body.client) {
+        const next=[...clients.filter((item)=>item.id!==body.client.id),body.client]; setClients(next); writeStore("bt-clients",next); return {};
+      }
+      if (path === "/catalog/categories" && method === "POST" && body.record) {
+        const next=[...categories.filter((item)=>item.id!==body.record.id),body.record]; setCategories(next); writeStore(CATEGORIES_STORE_KEY,next); return {};
+      }
+      if (path === "/canjes" && method === "POST" && Array.isArray(body.canjes)) {
+        const next=[...body.canjes,...movements]; setMovements(next); writeStore("bt-inventory-movements",next); return {};
+      }
+      if (path === "/sales" && method === "POST" && body.sale) {
+        const next=[body.sale,...sales.filter((item)=>item.id!==body.sale.id)]; setSales(next); writeStore("bt-sales",next); return {};
+      }
+      if (path.startsWith("/sales/") && method === "PUT" && body.sale) {
+        const next=sales.map((item)=>item.id===body.sale.id?body.sale:item); setSales(next); writeStore("bt-sales",next); return {};
+      }
+      if (path.startsWith("/sales/") && method === "DELETE") {
+        const id=decodeURIComponent(path.slice("/sales/".length)); const next=sales.filter((item)=>item.id!==id); setSales(next); writeStore("bt-sales",next); return {};
+      }
+      return {};
+    }
     const headers = new Headers(init?.headers);
     if (
       path.startsWith("/records/") ||
@@ -10213,9 +10242,11 @@ export default function App() {
   const [markets, setMarkets] = useState<Market[]>(() =>
     readStore("bt-markets", []),
   );
-  const [users, setUsers] = useState<AppUser[]>(() =>
-    readStore("bt-users", []),
-  );
+  const [users, setUsers] = useState<AppUser[]>(() => {
+    const stored=readStore<AppUser[]>("bt-users", []);
+    if (!LOCAL_WAREHOUSE_DEMO || stored.some((item)=>item.id===LOCAL_DEMO_PROMOTER.id)) return stored;
+    const next=[LOCAL_DEMO_PROMOTER,...stored]; writeStore("bt-users",next); return next;
+  });
   const [clients, setClients] = useState<Client[]>(() =>
     readStore("bt-clients", []),
   );
