@@ -6333,6 +6333,16 @@ function AnalystApp({
     );
     notify("Marcaciones con links de fotos descargadas");
   };
+  const importMarkets = async (file: File) => {
+    try {
+      const imported=importedMarketsFromRecords(parseCsvRecords(await file.text()));
+      if(!imported.length) throw new Error("No se encontraron mercados válidos. Revisa Código/ID Mercado y Nombre del Mercado.");
+      const next=mergeReferenceRows(markets,imported,(market)=>market.id);
+      if(LOCAL_WAREHOUSE_DEMO){setMarkets(next);writeStore("bt-markets",next);}
+      else {await persistImportedSnapshot({markets:next});setMarkets(next);writeStore("bt-markets",next);}
+      notify(`${imported.length} mercado(s) importado(s) correctamente`);
+    } catch(error){notify(error instanceof Error?error.message:"No se pudo importar mercados.",true);}
+  };
   const exportMarkets = () => {
     downloadCsv(
       `mercados-${today}.csv`,
@@ -7339,6 +7349,7 @@ function AnalystApp({
               <p>Catálogo almacenado en DigitalOcean PostgreSQL.</p>
             </div>
             <div className="panel-actions">
+              <CsvImportButton label="Importar" onImport={importMarkets} testId="button-import-markets" />
               <Btn variant="outline" onClick={exportMarkets} testId="button-export-markets">
                 <Download /> Descargar
               </Btn>
