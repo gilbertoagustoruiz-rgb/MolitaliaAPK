@@ -7210,14 +7210,44 @@ function AnalystApp({
         ))}
       </nav>
       {tab === "inicio" && (
-        <SalesDashboard
-          sales={sales}
-          markets={markets}
-          users={users}
-          movements={movements}
-          onViewSales={() => setTab("ventas")}
-          onExport={exportSummary}
-        />
+        <>
+          <SalesDashboard
+            sales={sales}
+            markets={markets}
+            users={users}
+            movements={movements}
+            onViewSales={() => setTab("ventas")}
+            onExport={exportSummary}
+          />
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h2>Stock por Almacén</h2>
+                <p>Saldo oficial disponible por almacén. El stock pertenece al almacén, no al promotor.</p>
+              </div>
+              <Btn variant="outline" onClick={() => setTab("almacen")}><Store /> Ver Almacenes</Btn>
+            </div>
+            <div className="panel-body summary-table-wrap">
+              {warehouses.length ? (
+                <div className="stock-reconciliation-table">
+                  <div className="stock-reconciliation-row header">
+                    <span>Almacén</span><span>Panetón degustación</span><span>Avena</span><span>Batea</span><span>Mandil</span><span>Spaghetti</span>
+                  </div>
+                  {warehouses.map((warehouse) => (
+                    <div className="stock-reconciliation-row" key={warehouse.id}>
+                      <div><strong>{warehouse.name}</strong><small>{warehouse.region} · {warehouse.marketIds.map((id)=>marketMap[id]?.name||id).join(", ") || "Sin mercados"}</small></div>
+                      <b>{warehouse.stock?.PANETON || 0}<small>unidades</small></b>
+                      <span>{warehouse.stock?.AVENA || 0}<small>unidades</small></span>
+                      <span>{warehouse.stock?.BATEA || 0}<small>unidades</small></span>
+                      <span>{warehouse.stock?.MANDIL || 0}<small>unidades</small></span>
+                      <span>{warehouse.stock?.SPAGHETTI || 0}<small>unidades</small></span>
+                    </div>
+                  ))}
+                </div>
+              ) : <Empty title="Sin almacenes" detail="Crea un almacén y carga su stock para visualizar el saldo aquí." />}
+            </div>
+          </section>
+        </>
       )}
       {tab === "mercados" && (
         <section className="panel">
