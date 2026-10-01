@@ -6796,6 +6796,10 @@ function AnalystApp({
   };
   const saveMarket = async (market: Market) => {
     try {
+      if (LOCAL_WAREHOUSE_DEMO) {
+        const next=[...markets.filter((item)=>item.id!==market.id),market];
+        setMarkets(next); writeStore("bt-markets",next); setModal(null); notify("Mercado guardado en modo local"); return true;
+      }
       await adminRequest("/markets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
