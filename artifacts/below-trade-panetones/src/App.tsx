@@ -6010,6 +6010,11 @@ function AnalystApp({
   const [warehouseRecharge, setWarehouseRecharge] = useState<Warehouse | null>(null);
   const [warehouseMarketAssign, setWarehouseMarketAssign] = useState<Market | null>(null);
   const loadWarehouses = async () => {
+    if (LOCAL_WAREHOUSE_DEMO) {
+      setWarehouses(readStore<Warehouse[]>("bt-demo-warehouses", []));
+      setWarehouseMovements(readStore<WarehouseMovement[]>("bt-demo-warehouse-movements", []));
+      return;
+    }
     try {
       const response = await fetch("/api/app-storage/warehouses");
       const payload = await response.json();
@@ -8356,13 +8361,28 @@ function AnalystApp({
       {warehouseModal && (
         <WarehouseModal warehouse={warehouseModal === "NEW" ? undefined : warehouseModal} markets={markets} warehouses={warehouses}
           onSave={async (warehouse) => {
-            try { await adminRequest("/warehouses", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({warehouse}) }); await loadWarehouses(); notify("Almacén guardado en DigitalOcean"); return true; }
+            try {
+              if (LOCAL_WAREHOUSE_DEMO) {
+                const current=readStore<Warehouse[]>("bt-demo-warehouses", []);
+                const next=[...current.filter((item)=>item.id!==warehouse.id), warehouse];
+                writeStore("bt-demo-warehouses", next); setWarehouses(next); notify("Almacén guardado en modo local"); return true;
+              }
+              await adminRequest("/warehouses", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({warehouse}) }); await loadWarehouses(); notify("Almacén guardado en DigitalOcean"); return true;
+            }
             catch(error){ notify(error instanceof Error ? error.message : "No se pudo guardar el almacén", true); return false; }
           }} close={() => setWarehouseModal(null)} />
       )}
       {warehouseRecharge && (
         <WarehouseRechargeModal warehouse={warehouseRecharge} onSave={async (quantities, initial) => {
-          try { await adminRequest(`/warehouses/${encodeURIComponent(warehouseRecharge.id)}/recharge`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({quantities, initial}) }); await loadWarehouses(); notify(initial ? "Stock inicial guardado" : "Stock sumado al almacén"); return true; }
+          try {
+            if (LOCAL_WAREHOUSE_DEMO) {
+              const current=readStore<Warehouse[]>("bt-demo-warehouses", []);
+              const now=new Date().toISOString(); const kind:WarehouseMovement["kind"]=initial?"CARGA_INICIAL":"RECARGA";
+              const next=current.map((item)=>item.id===warehouseRecharge.id?{...item,stock:Object.fromEntries(Object.keys(quantities).map((key)=>[key,Number(item.stock?.[key as keyof WarehouseStock]||0)+Number(quantities[key as keyof WarehouseStock]||0)])) as Partial<WarehouseStock>,updatedAt:now}:item);
+              const added=Object.entries(quantities).filter(([,quantity])=>Number(quantity)>0).map(([itemId,quantity])=>({id:`DEMO-${Date.now()}-${itemId}`,warehouseId:warehouseRecharge.id,kind,itemId:itemId as keyof WarehouseStock,quantity:Number(quantity),actorId:user.id,date:now}));
+              const moves=[...added,...readStore<WarehouseMovement[]>("bt-demo-warehouse-movements",[])]; writeStore("bt-demo-warehouses",next); writeStore("bt-demo-warehouse-movements",moves); setWarehouses(next); setWarehouseMovements(moves); notify(initial?"Stock inicial guardado en modo local":"Stock sumado en modo local"); return true;
+            }
+            await adminRequest(`/warehouses/${encodeURIComponent(warehouseRecharge.id)}/recharge`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({quantities, initial}) }); await loadWarehouses(); notify(initial ? "Stock inicial guardado" : "Stock sumado al almacén"); return true; }
           catch(error){ notify(error instanceof Error ? error.message : "No se pudo recargar el almacén", true); return false; }
         }} close={() => setWarehouseRecharge(null)} />
       )}
