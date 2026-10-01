@@ -5690,13 +5690,6 @@ function CoordinatorApp({
                       <small>
                         DNI {current.dni} · {current.roleLabel || current.role}
                       </small>
-                      {isPromoterRole(current.role) && (
-                        <small>
-                          Stock personal: {userTastingStock(current)}{" "}
-                          degustación ·{" "}
-                          {redemptionStockText(userRedemptionStock(current))}
-                        </small>
-                      )}
                       <em>
                         <MapPin />{" "}
                         {marketMap[current.marketId || ""]?.name ||
@@ -7139,9 +7132,6 @@ function AnalystApp({
         : current.clientId
           ? "Cliente vinculado"
           : "Sin asignación",
-      isPromoterRole(current.role)
-        ? `${userTastingStock(current)} degustación ${redemptionStockText(userRedemptionStock(current))}`
-        : "No aplica",
     ]),
   );
   const searchedAttendance = orderedAttendance.filter((item) => {
@@ -7404,27 +7394,26 @@ function AnalystApp({
             <TableSearch
               value={userSearch}
               onChange={setUserSearch}
-              fields="Código, nombre, DNI, rol, asignación, stock personal y estado."
+              fields="Código, nombre, DNI, rol, asignación y estado."
               count={searchedUsers.length}
               total={visibleUsers.length}
             />
             <div className="import-hint">
               DigitalOcean PostgreSQL conserva identidad, acceso, rol y estado.
-              El stock se carga exclusivamente desde Canjes.
+              El inventario se administra exclusivamente por Almacén.
             </div>
             <div className="module-table-wrap">
               <div className="module-table">
-                <div className="module-table-row module-table-header cols-7">
+                <div className="module-table-row module-table-header cols-6">
                   <span>Usuario</span>
                   <span>DNI</span>
                   <span>Rol</span>
                   <span>Asignación</span>
-                  <span>Stock personal</span>
                   <span>Estado</span>
                   <span>Acciones</span>
                 </div>
                 {searchedUsers.map((user) => (
-                  <article className="module-table-row cols-7" key={user.id}>
+                  <article className="module-table-row cols-6" key={user.id}>
                     <span>
                       <strong>{user.name}</strong>
                       <small>{user.id}</small>
@@ -7443,18 +7432,6 @@ function AnalystApp({
                             ? "Cliente vinculado"
                             : "Sin asignación"}
                       </strong>
-                    </span>
-                    <span>
-                      <strong>
-                        {isPromoterRole(user.role)
-                          ? `${userTastingStock(user)} degustación`
-                          : "No aplica"}
-                      </strong>
-                      <small>
-                        {isPromoterRole(user.role)
-                          ? redemptionStockText(userRedemptionStock(user))
-                          : "—"}
-                      </small>
                     </span>
                     <span>
                       <StatusPill status={user.status} />
