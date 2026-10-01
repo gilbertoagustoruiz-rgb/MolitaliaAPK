@@ -59,7 +59,7 @@ type Status = "ACTIVO" | "INACTIVO";
 type SyncStatus = "SINCRONIZADA" | "PENDIENTE";
 type WarehouseStock = Record<"PANETON" | RedemptionItemId, number>;
 type Warehouse = { id: string; name: string; region: string; department: string; province: string; district: string; status: Status; marketIds: string[]; stock: Partial<WarehouseStock>; updatedAt?: string; };
-type WarehouseMovement = { id: string; warehouseId: string; kind: "RECARGA"; itemId: keyof WarehouseStock; quantity: number; actorId: string; date: string; };
+type WarehouseMovement = { id: string; warehouseId: string; kind: "CARGA_INICIAL" | "RECARGA"; itemId: keyof WarehouseStock; quantity: number; actorId: string; date: string; };
 type Market = {
   id: string;
   department: string;
@@ -2915,9 +2915,19 @@ function WarehouseModal({ warehouse, markets, warehouses, onSave, close }: { war
     <div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!canSave} onClick={async()=>{const ok=await onSave({id:warehouse?.id||`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,marketIds,stock:warehouse?.stock||{},updatedAt:new Date().toISOString()});if(ok)close();}}>Guardar almacén</Btn></div>
   </Modal>;
 }
-function WarehouseRechargeModal({ warehouse,onSave,close }:{warehouse:Warehouse;onSave:(quantities:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void;}) {
- const items:[keyof WarehouseStock,string][]=[["PANETON","Panetón degustación"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]]; const [q,setQ]=useState<Record<string,string>>({});
- return <Modal title="Recargar stock" detail={`${warehouse.name} · las cantidades se sumarán al saldo actual.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={(v)=>setQ((x)=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(quantities))close();}}><Plus/>Sumar stock</Btn></div></Modal>;
+function WarehouseRechargeModal({ warehouse,onSave,close }:{warehouse:Warehouse;onSave:(quantities:Partial<WarehouseStock>,initial:boolean)=>Promise<boolean>;close:()=>void;}) {
+ const items:[keyof WarehouseStock,string][]=[["PANETON","Panetón degustación"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];
+ const [q,setQ]=useState<Record<string,string>>({});
+ const hasStock=items.some(([id])=>(warehouse.stock?.[id]||0)>0);
+ return <Modal title={hasStock?"Recargar stock":"Cargar stock inicial"} detail={hasStock?`${warehouse.name} · las cantidades se sumarán al saldo actual.`:`${warehouse.name} · registra el stock inicial de canjes y degustación.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={hasStock?`${label} · actual: ${warehouse.stock?.[id]||0}`:label}><Input type="number" min={0} step={1} value={q[id]||""} onChange={(v)=>setQ((x)=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(quantities,!hasStock))close();}}><Plus/>{hasStock?"Sumar stock":"Guardar stock inicial"}</Btn></div></Modal>;
+}
+function WarehouseMarketAssignmentModal({ market, warehouses, onSave, close }:{market:Market;warehouses:Warehouse[];onSave:(warehouseId:string)=>Promise<boolean>;close:()=>void;}) {
+ const current=warehouses.find((warehouse)=>warehouse.marketIds.includes(market.id));
+ const [warehouseId,setWarehouseId]=useState(current?.id || "");
+ return <Modal title="Asignar almacén" detail={`${market.name} · selecciona el único almacén que abastecerá este mercado.`} close={close}>
+   <SelectField label="Almacén" value={warehouseId} onChange={setWarehouseId} placeholder="Seleccionar almacén" items={warehouses.filter((warehouse)=>warehouse.status==="ACTIVO").map((warehouse)=>({value:warehouse.id,label:`${warehouse.name} · ${warehouse.district}`}))}/>
+   <div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!warehouseId} onClick={async()=>{if(await onSave(warehouseId))close();}}>Guardar asignación</Btn></div>
+ </Modal>;
 }
 function NewMarketModal({
   onSave,
@@ -4186,7 +4196,7 @@ function AdminDegustacionesModule({
           {visibleConsumos.length ? (
             <div className="module-table-wrap">
               <div className="module-table">
-                <div className="module-table-row module-table-header cols-8">
+                <div className="module-table-row module-table-header cols-9">
                   <span>Código</span>
                   <span>Promotor</span>
                   <span>Mercado</span>
@@ -5998,6 +6008,7 @@ function AnalystApp({
   const [warehouseMovements, setWarehouseMovements] = useState<WarehouseMovement[]>([]);
   const [warehouseModal, setWarehouseModal] = useState<Warehouse | "NEW" | null>(null);
   const [warehouseRecharge, setWarehouseRecharge] = useState<Warehouse | null>(null);
+  const [warehouseMarketAssign, setWarehouseMarketAssign] = useState<Market | null>(null);
   const loadWarehouses = async () => {
     try {
       const response = await fetch("/api/app-storage/warehouses");
@@ -7278,10 +7289,11 @@ function AnalystApp({
                   <span>Distrito</span>
                   <span>Clientes</span>
                   <span>Promotores</span>
+                  <span>Almacén</span>
                   <span>Acciones</span>
                 </div>
                 {searchedMarkets.map((market) => (
-                  <div className="module-table-row cols-8" key={market.id}>
+                  <div className="module-table-row cols-9" key={market.id}>
                     <span>
                       <strong>{market.name}</strong>
                       <small>{market.id}</small>
@@ -7301,6 +7313,10 @@ function AnalystApp({
                       <strong>
                         {marketAssignmentSummary[market.id]?.promoters || 0}
                       </strong>
+                    </span>
+                    <span>
+                      <strong>{warehouses.find((warehouse) => warehouse.marketIds.includes(market.id))?.name || "SIN ALMACÉN"}</strong>
+                      <small><button className="link-button" onClick={() => setWarehouseMarketAssign(market)}>Asignar / cambiar</button></small>
                     </span>
                     <span className="module-table-actions">
                       <Btn
@@ -7836,7 +7852,7 @@ function AnalystApp({
                   </div>
                   <StatusPill status={warehouse.status} />
                   <span className="module-table-actions">
-                    <Btn onClick={() => setWarehouseRecharge(warehouse)}><Plus /> Recargar stock</Btn>
+                    <Btn onClick={() => setWarehouseRecharge(warehouse)}><Plus /> {Object.values(warehouse.stock || {}).some((value) => Number(value) > 0) ? "Recargar stock" : "Cargar stock inicial"}</Btn>
                     <Btn variant="outline" onClick={() => setWarehouseModal(warehouse)}><Pencil /> Editar</Btn>
                     <Btn variant="danger" onClick={async () => {
                       if (!window.confirm(`¿Eliminar el almacén ${warehouse.name}? El stock y su historial de recargas dejarán de estar disponibles.`)) return;
@@ -8345,10 +8361,24 @@ function AnalystApp({
           }} close={() => setWarehouseModal(null)} />
       )}
       {warehouseRecharge && (
-        <WarehouseRechargeModal warehouse={warehouseRecharge} onSave={async (quantities) => {
-          try { await adminRequest(`/warehouses/${encodeURIComponent(warehouseRecharge.id)}/recharge`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({quantities}) }); await loadWarehouses(); notify("Stock sumado al almacén"); return true; }
+        <WarehouseRechargeModal warehouse={warehouseRecharge} onSave={async (quantities, initial) => {
+          try { await adminRequest(`/warehouses/${encodeURIComponent(warehouseRecharge.id)}/recharge`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({quantities, initial}) }); await loadWarehouses(); notify(initial ? "Stock inicial guardado" : "Stock sumado al almacén"); return true; }
           catch(error){ notify(error instanceof Error ? error.message : "No se pudo recargar el almacén", true); return false; }
         }} close={() => setWarehouseRecharge(null)} />
+      )}
+      {warehouseMarketAssign && (
+        <WarehouseMarketAssignmentModal market={warehouseMarketAssign} warehouses={warehouses} onSave={async (warehouseId) => {
+          const selected=warehouses.find((warehouse)=>warehouse.id===warehouseId);
+          if(!selected) return false;
+          try {
+            const affected=warehouses.filter((warehouse)=>warehouse.marketIds.includes(warehouseMarketAssign.id) || warehouse.id===warehouseId);
+            for(const warehouse of affected) {
+              const marketIds=warehouse.id===warehouseId ? Array.from(new Set([...warehouse.marketIds,warehouseMarketAssign.id])) : warehouse.marketIds.filter((id)=>id!==warehouseMarketAssign.id);
+              await adminRequest("/warehouses", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({warehouse:{...warehouse,marketIds}})});
+            }
+            await loadWarehouses(); notify(`Mercado asignado a ${selected.name}`); return true;
+          } catch(error){notify(error instanceof Error?error.message:"No se pudo asignar el almacén",true);return false;}
+        }} close={()=>setWarehouseMarketAssign(null)} />
       )}
       {recordEdit && (
         <RecordEditModal
