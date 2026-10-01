@@ -1090,7 +1090,7 @@ router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
       movements: movements.rows.map((row) => row.data),
     });
   } catch (error) {
-    req.log.error({ err: error }, "Unable to read warehouses");
+    console.error("Unable to read warehouses", error);
     res.status(500).json({ message: "No se pudieron leer los almacenes." });
   }
 });
