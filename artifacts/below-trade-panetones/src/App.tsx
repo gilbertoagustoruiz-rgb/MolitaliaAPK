@@ -1112,7 +1112,7 @@ function importedUserFromRecord(
   };
 }
 function importedWarehouseFromRecord(record: Record<string, string>, index: number): Warehouse | null {
-  const name=csvField(record,["nombrealmacen","almacen","nombre"]);
+  const name=csvField(record,["nombredealmacen","nombrealmacen","almacen","nombre"]);
   const region=csvField(record,["region"]);
   const department=csvField(record,["departamento"]);
   const province=csvField(record,["provincia"]);
