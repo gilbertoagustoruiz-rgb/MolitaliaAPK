@@ -58,7 +58,7 @@ function isZoneManagerRole(role?: Role) {
 type Status = "ACTIVO" | "INACTIVO";
 type SyncStatus = "SINCRONIZADA" | "PENDIENTE";
 type WarehouseStock = Record<"PANETON" | RedemptionItemId, number>;
-type Warehouse = { id: string; name: string; location?: string; status: Status; marketIds: string[]; stock: Partial<WarehouseStock>; updatedAt?: string; };
+type Warehouse = { id: string; name: string; region: string; department: string; province: string; district: string; status: Status; marketIds: string[]; stock: Partial<WarehouseStock>; updatedAt?: string; };
 type WarehouseMovement = { id: string; warehouseId: string; kind: "RECARGA"; itemId: keyof WarehouseStock; quantity: number; actorId: string; date: string; };
 type Market = {
   id: string;
@@ -2892,14 +2892,27 @@ function NewUserModal({
   );
 }
 function WarehouseModal({ warehouse, markets, warehouses, onSave, close }: { warehouse?: Warehouse; markets: Market[]; warehouses: Warehouse[]; onSave:(warehouse:Warehouse)=>Promise<boolean>; close:()=>void; }) {
-  const [name,setName]=useState(warehouse?.name || ""); const [location,setLocation]=useState(warehouse?.location || ""); const [status,setStatus]=useState<Status>(warehouse?.status || "ACTIVO"); const [marketIds,setMarketIds]=useState<string[]>(warehouse?.marketIds || []);
+  const [name,setName]=useState(warehouse?.name || "");
+  const [region,setRegion]=useState(warehouse?.region || "");
+  const [department,setDepartment]=useState(warehouse?.department || "");
+  const [province,setProvince]=useState(warehouse?.province || "");
+  const [district,setDistrict]=useState(warehouse?.district || "");
+  const [status,setStatus]=useState<Status>(warehouse?.status || "ACTIVO");
+  const [marketIds,setMarketIds]=useState<string[]>(warehouse?.marketIds || []);
   const toggle=(id:string)=>setMarketIds((current)=>current.includes(id)?current.filter((x)=>x!==id):[...current,id]);
   const available=markets.filter((market)=>!warehouses.some((w)=>w.id!==warehouse?.id && w.marketIds.includes(market.id)));
-  return <Modal title={warehouse?"Editar almacén":"Nuevo almacén"} detail="Asigna los mercados que serán administrados por este almacén." close={close}>
-    <div className="form-grid"><Field label="Nombre *"><Input value={name} onChange={setName}/></Field><Field label="Ubicación"><Input value={location} onChange={setLocation}/></Field>
-    <SelectField label="Estado" value={status} onChange={(v)=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"ACTIVO"},{value:"INACTIVO",label:"INACTIVO"}]}/></div>
+  const canSave=Boolean(name.trim() && region.trim() && department.trim() && province.trim() && district.trim());
+  return <Modal title={warehouse?"Editar almacén":"Nuevo almacén"} detail="Registra la ubicación territorial del almacén y los mercados que administrará." close={close}>
+    <div className="form-grid">
+      <Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field>
+      <Field label="Región *"><Input value={region} onChange={setRegion}/></Field>
+      <Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field>
+      <Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field>
+      <Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field>
+      <SelectField label="Estado" value={status} onChange={(v)=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"ACTIVO"},{value:"INACTIVO",label:"INACTIVO"}]}/>
+    </div>
     <Field label="Mercados asignados"><div className="record-list">{available.map((market)=><label className="record" key={market.id}><input type="checkbox" checked={marketIds.includes(market.id)} onChange={()=>toggle(market.id)}/><div className="record-main"><strong>{market.name}</strong><small>{market.district} · {market.province}</small></div></label>)}</div></Field>
-    <div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!name.trim()} onClick={async()=>{const ok=await onSave({id:warehouse?.id||`ALM-${Date.now()}`,name:name.trim().toUpperCase(),location:location.trim().toUpperCase(),status,marketIds,stock:warehouse?.stock||{},updatedAt:new Date().toISOString()});if(ok)close();}}>Guardar almacén</Btn></div>
+    <div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={!canSave} onClick={async()=>{const ok=await onSave({id:warehouse?.id||`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,marketIds,stock:warehouse?.stock||{},updatedAt:new Date().toISOString()});if(ok)close();}}>Guardar almacén</Btn></div>
   </Modal>;
 }
 function WarehouseRechargeModal({ warehouse,onSave,close }:{warehouse:Warehouse;onSave:(quantities:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void;}) {
@@ -7817,7 +7830,7 @@ function AnalystApp({
                   <span className="record-icon"><Store /></span>
                   <div className="record-main">
                     <strong>{warehouse.name}</strong>
-                    <small>{warehouse.location || "Sin ubicación"} · {warehouse.marketIds.length} mercado(s)</small>
+                    <small>{[warehouse.region, warehouse.department, warehouse.province, warehouse.district].filter(Boolean).join(" · ") || "Sin ubicación"} · {warehouse.marketIds.length} mercado(s)</small>
                     <em>Panetón {warehouse.stock?.PANETON || 0} · Avena {warehouse.stock?.AVENA || 0} · Batea {warehouse.stock?.BATEA || 0} · Mandil {warehouse.stock?.MANDIL || 0} · Spaghetti {warehouse.stock?.SPAGHETTI || 0}</em>
                     <small>Mercados: {warehouse.marketIds.map((id) => marketMap[id]?.name || id).join(", ") || "Sin mercados asignados"}</small>
                   </div>
