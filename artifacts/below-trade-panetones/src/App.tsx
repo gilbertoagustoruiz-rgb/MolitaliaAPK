@@ -7216,6 +7216,7 @@ function AnalystApp({
           onExport={exportSummary}
         />
       )}
+      {tab === "almacen" && <WarehouseCatalog notify={notify} />}
       {tab === "mercados" && (
         <section className="panel">
           <div className="panel-header">
