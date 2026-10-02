@@ -2863,19 +2863,13 @@ function NewUserModal({
       clientId: role === "CLIENTE" ? clientId : undefined,
       password,
       status: "ACTIVO",
-      ...(isPromoterRole(role)
-        ? {
-            tastingStock: DEFAULT_CAMPAIGN_TASTING_STOCK,
-            redemptionStock: emptyRedemptionStock(),
-          }
-        : {}),
     });
     if (saved) close();
   };
   return (
     <Modal
       title="Crear usuario"
-      detail="Define su acceso y rol. Los promotores inician con stock base y las recargas se suman desde Canjes."
+      detail="Define su acceso y rol. El stock se administra exclusivamente desde Almacén."
       close={close}
     >
       <div className="form-grid">
@@ -4046,16 +4040,12 @@ function AdminCanjesModule({
           <span className="eyebrow">GESTIÓN MANUAL</span>
           <h2>Canjes</h2>
           <p>
-            Actualiza el stock personal de los promotores y consulta los canjes
-            asociados a ventas.
+            Consulta los canjes asociados a ventas. El stock se administra exclusivamente desde Almacén.
           </p>
         </div>
         <div className="page-actions">
           <Btn variant="outline" onClick={exportCanjes}>
             <Download /> Descargar
-          </Btn>
-          <Btn onClick={onCreate}>
-            <Plus /> Actualizar stock promotor
           </Btn>
         </div>
       </div>
@@ -5388,10 +5378,9 @@ function SalesDashboard({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h2>Stock por promotor</h2>
+            <h2>Stock administrado por Almacén</h2>
             <p>
-              Existencias personales independientes de cada promotor. El mercado
-              solo conserva la ubicación histórica de los movimientos.
+              El stock personal de promotores fue desactivado. Las existencias vigentes se administran exclusivamente desde el módulo Almacén.
             </p>
           </div>
         </div>
@@ -5468,8 +5457,8 @@ function SalesDashboard({
             </div>
           ) : (
             <Empty
-              title="Sin promotores activos"
-              detail="Los saldos personales aparecerán al crear promotores."
+              title="Stock personal desactivado"
+              detail="Consulta y administra las existencias desde el módulo Almacén."
             />
           )}
         </div>
@@ -5822,13 +5811,6 @@ function CoordinatorApp({
                       <small>
                         DNI {current.dni} · {current.roleLabel || current.role}
                       </small>
-                      {isPromoterRole(current.role) && (
-                        <small>
-                          Stock personal: {userTastingStock(current)}{" "}
-                          degustación ·{" "}
-                          {redemptionStockText(userRedemptionStock(current))}
-                        </small>
-                      )}
                       <em>
                         <MapPin />{" "}
                         {marketMap[current.marketId || ""]?.name ||
