@@ -1360,6 +1360,9 @@ select:focus-visible,
 .module-table-row:last-child {
   border-bottom: 0;
 }
+.module-table-row.cols-9 {
+  grid-template-columns: minmax(130px,1.2fr) minmax(70px,.65fr) minmax(90px,.85fr) minmax(90px,.85fr) minmax(100px,.9fr) minmax(120px,1fr) minmax(65px,.5fr) minmax(70px,.55fr) 92px;
+}
 .module-table-row.cols-8 {
   grid-template-columns: 1.25fr 0.8fr 0.9fr 0.9fr 0.9fr 0.55fr 0.65fr 82px;
 }
@@ -3879,6 +3882,7 @@ select:focus-visible,
   .module-table-header {
     display: none;
   }
+  .module-table-row.cols-9,
   .module-table-row.cols-8,
   .module-table-row.cols-7,
   .module-table-row.cols-6,
