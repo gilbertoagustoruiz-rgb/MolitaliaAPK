@@ -1249,6 +1249,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       TRUJILLO:{AVENA:120,SPAGHETTI:100},
       "LA PARADA":{PANETON_900G:21,PANETON_85G:21},
       "UNICACHI NORTE":{AVENA:1200},
+      PRODUCTORES:{AVENA:1200},
     };
     let explicitAdjustmentsApplied=0;
     for(const warehouse of warehouses.rows){
