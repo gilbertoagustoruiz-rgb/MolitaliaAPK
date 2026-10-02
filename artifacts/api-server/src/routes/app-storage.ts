@@ -1072,6 +1072,82 @@ async function authorizedTradeActor(req: Request) {
   return { id: String(actor.id), data: actor.data as StoredRecord };
 }
 
+async function authorizedWarehouseActor(req: Request) {
+  return authorizedTradeActor(req);
+}
+
+router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
+  try {
+    const warehouses = await pool.query("SELECT data,stock,market_ids FROM warehouses ORDER BY name");
+    const movements = await pool.query("SELECT data FROM warehouse_movements ORDER BY movement_date DESC,created_at DESC");
+    res.json({
+      warehouses: warehouses.rows.map((row) => ({ ...(isRecord(row.data) ? row.data : {}), stock: isRecord(row.stock) ? row.stock : {}, marketIds: Array.isArray(row.market_ids) ? row.market_ids : [] })),
+      movements: movements.rows.map((row) => row.data),
+    });
+  } catch (error) {
+    console.error("Unable to read warehouses", error);
+    res.status(500).json({ message: "No se pudieron leer los almacenes." });
+  }
+});
+
+router.post("/app-storage/warehouses", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede administrar almacenes." });
+  const input = isRecord(req.body?.warehouse) ? req.body.warehouse : {};
+  const id = value(input, "id") || `ALM-${randomUUID()}`;
+  const name = value(input, "name").toUpperCase();
+  if (!name) return void res.status(400).json({ message: "El nombre del almacén es obligatorio." });
+  const existing = await pool.query("SELECT stock FROM warehouses WHERE id=$1", [id]);
+  const stock = isRecord(existing.rows[0]?.stock) ? existing.rows[0].stock : {};
+  const warehouse = { ...input, id, name, marketIds: [], stock, status: value(input, "status") === "INACTIVO" ? "INACTIVO" : "ACTIVO", updatedAt: new Date().toISOString() };
+  try {
+    await pool.query(
+      `INSERT INTO warehouses(id,name,location,status,market_ids,stock,data)
+       VALUES($1,$2,$3,$4,'{}'::text[],$5,$6)
+       ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,location=EXCLUDED.location,status=EXCLUDED.status,data=EXCLUDED.data,updated_at=now()`,
+      [id,name,[value(input,"region"),value(input,"department"),value(input,"province"),value(input,"district")].filter(Boolean).join(" / ")||null,warehouse.status,stock,warehouse],
+    );
+    res.json({ warehouse });
+  } catch (error) {
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo guardar el almacén." });
+  }
+});
+
+router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede cargar stock." });
+  const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
+  const initial = req.body?.initial === true;
+  const allowed = ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"];
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const found = await db.query("SELECT stock,data FROM warehouses WHERE id=$1 FOR UPDATE", [req.params.id]);
+    if (!found.rows[0]) throw new Error("El almacén no existe.");
+    const stock = isRecord(found.rows[0].stock) ? { ...found.rows[0].stock } : {};
+    if (initial && Object.values(stock).some((quantity) => Number(quantity) > 0)) throw new Error("El almacén ya tiene stock inicial.");
+    const now = new Date().toISOString();
+    let added = 0;
+    for (const itemId of allowed) {
+      const quantity = Math.floor(Math.max(0, Number(quantities[itemId]) || 0));
+      if (!quantity) continue;
+      stock[itemId] = Math.max(0, Number(stock[itemId]) || 0) + quantity;
+      const kind = initial ? "CARGA_INICIAL" : "RECARGA";
+      const movement = { id: `ALM-${initial ? "INI" : "REC"}-${randomUUID()}`, warehouseId:req.params.id, kind, itemId, quantity, actorId:actor.id, date:now };
+      await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [movement.id,req.params.id,kind,itemId,quantity,actor.id,now,movement]);
+      added += quantity;
+    }
+    if (!added) throw new Error("Ingresa al menos una cantidad mayor a cero.");
+    const data = isRecord(found.rows[0].data) ? { ...found.rows[0].data, stock, updatedAt:now } : { id:req.params.id,stock,updatedAt:now };
+    await db.query("UPDATE warehouses SET stock=$2,data=$3,updated_at=now() WHERE id=$1", [req.params.id,stock,data]);
+    await db.query("COMMIT");
+    res.json({ stock });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo cargar el stock." });
+  } finally { db.release(); }
+});
+
 router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
   try {
     const result = await pool.query(
