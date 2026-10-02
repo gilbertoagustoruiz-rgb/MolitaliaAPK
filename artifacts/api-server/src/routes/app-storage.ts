@@ -1178,6 +1178,43 @@ async function restoreWarehouseStockMovements(db: QueryClient, referenceId: stri
   return restored;
 }
 
+router.post("/app-storage/warehouses/regularize-history", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar almacenes." });
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const sales = await db.query("SELECT id,market_id,promoter_id,data FROM sales WHERE COALESCE((data->>'bonus')::boolean,false)=true ORDER BY sale_date,id");
+    const tastings = await db.query("SELECT id,market_id,actor_id,quantity,data FROM inventory_movements WHERE kind='DEGUSTACION' ORDER BY movement_date,id");
+    let salesProcessed=0,tastingsProcessed=0,skipped=0;
+    for (const row of sales.rows) {
+      const ref=`SALE:${row.id}`;
+      const done=await db.query("SELECT 1 FROM warehouse_movements WHERE data->>'referenceId'=$1 AND quantity<0 LIMIT 1",[ref]);
+      if(done.rows.length){skipped++;continue;}
+      const source=isRecord(row.data?.redemptionItems)?row.data.redemptionItems:{};
+      const requirements=Object.fromEntries(redemptionItemIds.map(itemId=>[itemId,Math.max(0,Math.floor(Number(source[itemId])||0))]));
+      if(!Object.values(requirements).some(Number)){skipped++;continue;}
+      await applyWarehouseStockMovement(db as unknown as QueryClient,String(row.market_id),requirements,"REGULARIZACION_CANJE",String(row.promoter_id||actor.id),ref);
+      salesProcessed++;
+    }
+    for (const row of tastings.rows) {
+      const ref=`DEG:${row.id}`;
+      const done=await db.query("SELECT 1 FROM warehouse_movements WHERE data->>'referenceId'=$1 AND quantity<0 LIMIT 1",[ref]);
+      if(done.rows.length){skipped++;continue;}
+      const quantity=Math.max(0,Math.floor(Number(row.quantity)||0));
+      if(!quantity){skipped++;continue;}
+      await applyWarehouseStockMovement(db as unknown as QueryClient,String(row.market_id),{PANETON_900G:quantity},"REGULARIZACION_DEGUSTACION",String(row.actor_id||actor.id),ref);
+      tastingsProcessed++;
+    }
+    await db.query("COMMIT");
+    res.json({ salesProcessed,tastingsProcessed,skipped,totalProcessed:salesProcessed+tastingsProcessed });
+  } catch(error) {
+    await db.query("ROLLBACK").catch(()=>undefined);
+    req.log.error({err:error},"Unable to regularize warehouse history");
+    res.status(409).json({message:error instanceof Error?error.message:"No se pudo regularizar el stock histórico."});
+  } finally { db.release(); }
+});
+
 router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
   try {
     const warehouses = await pool.query("SELECT data,stock,market_ids FROM warehouses ORDER BY name");
