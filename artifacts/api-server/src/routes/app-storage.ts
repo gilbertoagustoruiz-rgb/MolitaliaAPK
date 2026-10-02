@@ -1178,6 +1178,34 @@ async function restoreWarehouseStockMovements(db: QueryClient, referenceId: stri
   return restored;
 }
 
+router.get("/app-storage/warehouses/:id/audit", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede auditar almacenes." });
+  const warehouseId=String(req.params.id||"");
+  const warehouseResult=await pool.query("SELECT id,name,stock,data FROM warehouses WHERE id=$1 LIMIT 1",[warehouseId]);
+  if(!warehouseResult.rows.length) return void res.status(404).json({message:"El almacén no existe."});
+  const movements=await pool.query(
+    `SELECT wm.id,wm.kind,wm.item_id,wm.quantity,wm.actor_id,wm.movement_date,wm.data,
+            COALESCE(m.name,wm.data->>'marketId','') AS market_name,
+            COALESCE(u.data->>'name',u.dni,wm.actor_id,'') AS actor_name
+       FROM warehouse_movements wm
+       LEFT JOIN markets m ON m.id=wm.data->>'marketId'
+       LEFT JOIN users u ON u.id=wm.actor_id
+      WHERE wm.warehouse_id=$1
+      ORDER BY wm.movement_date,wm.id`,
+    [warehouseId],
+  );
+  const totals:Record<string,{entries:number;exits:number;net:number}>={};
+  for(const row of movements.rows){
+    const item=String(row.item_id||"SIN_ITEM");
+    const q=Number(row.quantity)||0;
+    const current=totals[item]||{entries:0,exits:0,net:0};
+    if(q>0)current.entries+=q; else current.exits+=Math.abs(q);
+    current.net+=q; totals[item]=current;
+  }
+  res.json({warehouse:{id:warehouseResult.rows[0].id,name:warehouseResult.rows[0].name,stock:warehouseResult.rows[0].stock},totals,movements:movements.rows});
+});
+
 router.post("/app-storage/warehouses/regularize-history", async (req, res): Promise<void> => {
   const actor = await authorizedWarehouseActor(req);
   if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar almacenes." });
