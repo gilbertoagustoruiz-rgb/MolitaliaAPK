@@ -1223,27 +1223,34 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
     );
     const saleIdsWithCanjeMovement=new Set<string>();
     let falseSuppliesReverted=0,canjesProcessed=0,tastingsProcessed=0,skipped=0;
-    const falseSupplies=await db.query(
-      "SELECT id,warehouse_id,item_id,quantity,actor_id,data FROM warehouse_movements WHERE kind='REGULARIZACION_ABASTECIMIENTO' AND quantity>0 ORDER BY movement_date,id FOR UPDATE"
-    );
-    for(const row of falseSupplies.rows){
-      const sourceId=String(row.id||"");
-      const already=await db.query("SELECT 1 FROM warehouse_movements WHERE kind='REVERSA_REGULARIZACION_ABASTECIMIENTO' AND data->>'reversesMovementId'=$1 LIMIT 1",[sourceId]);
-      if(already.rows.length){skipped++;continue;}
-      const warehouseId=String(row.warehouse_id||"");
-      const itemId=String(row.item_id||"");
-      const quantity=Math.max(0,Math.floor(Number(row.quantity)||0));
-      if(!warehouseId||!itemId||!quantity){skipped++;continue;}
+    const affected=await db.query("SELECT DISTINCT warehouse_id FROM warehouse_movements WHERE kind='REGULARIZACION_ABASTECIMIENTO'");
+    for(const affectedRow of affected.rows){
+      const warehouseId=String(affectedRow.warehouse_id||"");
       const locked=await db.query("SELECT stock FROM warehouses WHERE id=$1 FOR UPDATE",[warehouseId]);
-      if(!locked.rows.length) throw new Error(`No existe el almacén de la entrada histórica ${sourceId}.`);
-      const stock=isRecord(locked.rows[0].stock)?{...locked.rows[0].stock}:{};
-      const available=Math.max(0,Number(stock[itemId])||0);
-      if(available<quantity) throw new Error(`No se puede revertir ${quantity} de ${itemId}: el saldo actual es ${available}. Se requiere reconstrucción desde stock base para evitar saldo negativo.`);
-      stock[itemId]=available-quantity;
-      const now=new Date().toISOString();
-      const movement={id:`ALM-REV-SUP-${randomUUID()}`,warehouseId,itemId,quantity:-quantity,kind:"REVERSA_REGULARIZACION_ABASTECIMIENTO",actorId:actor.id,date:now,reversesMovementId:sourceId,sourceReferenceId:value(isRecord(row.data)?row.data:{},"referenceId")};
-      await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,warehouseId,movement.kind,itemId,-quantity,actor.id,now,movement]);
+      if(!locked.rows.length) continue;
+      const correction=await db.query("SELECT data,movement_date FROM warehouse_movements WHERE warehouse_id=$1 AND kind='CORRECCION_IMPORTACION' ORDER BY movement_date DESC,created_at DESC LIMIT 1",[warehouseId]);
+      let stock:Record<string,number>={};
+      let baseDate:string|null=null;
+      if(correction.rows.length){
+        const data=isRecord(correction.rows[0].data)?correction.rows[0].data:{};
+        const quantities=isRecord(data.quantities)?data.quantities:{};
+        for(const itemId of warehouseItemIds) stock[itemId]=Math.max(0,Math.floor(Number(quantities[itemId])||0));
+        baseDate=correction.rows[0].movement_date ? new Date(correction.rows[0].movement_date).toISOString() : null;
+      } else {
+        const initial=await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity,MIN(movement_date) AS base_date FROM warehouse_movements WHERE warehouse_id=$1 AND kind='CARGA_INICIAL' GROUP BY item_id",[warehouseId]);
+        if(!initial.rows.length) throw new Error(`No existe stock base importado para reconstruir el almacén ${warehouseId}.`);
+        for(const row of initial.rows) stock[String(row.item_id)]=Math.max(0,Number(row.quantity)||0);
+        const dates=initial.rows.map((row:any)=>row.base_date).filter(Boolean).map((v:any)=>new Date(v).getTime());
+        baseDate=dates.length?new Date(Math.max(...dates)).toISOString():null;
+      }
+      const recharges=baseDate
+        ? await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='RECARGA' AND movement_date>$2 GROUP BY item_id",[warehouseId,baseDate])
+        : {rows:[]};
+      for(const row of recharges.rows) stock[String(row.item_id)]=Math.max(0,Number(stock[String(row.item_id)])||0)+Math.max(0,Number(row.quantity)||0);
       await db.query("UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",[warehouseId,stock]);
+      const now=new Date().toISOString();
+      const movement={id:`ALM-REBUILD-${randomUUID()}`,warehouseId,kind:"RECONSTRUCCION_STOCK_BASE",itemId:"MULTI",quantity:0,actorId:actor.id,date:now,baseDate,stock};
+      await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,warehouseId,movement.kind,"MULTI",0,actor.id,now,movement]);
       falseSuppliesReverted++;
     }
     for(const row of canjeMovements.rows){
