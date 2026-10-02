@@ -1856,6 +1856,68 @@ function saleRedemptionRequirements(sale: Sale) {
     Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)),
   );
 }
+function planchaCanjeRequirements(
+  planchas: number,
+  date: Date,
+  accessory: "MANDIL" | "BATEA" | "NINGUNO",
+  multiplier = 1,
+): Partial<RedemptionStock> {
+  const month = date.getMonth() + 1;
+  const m10Avena = month === 12 ? 30 : 24;
+  let avena = 0;
+  let spaghetti = 0;
+  let accessoryQty = 0;
+  if (planchas >= 80) {
+    avena = 144;
+    spaghetti = 100;
+    accessoryQty = 4;
+  } else if (planchas >= 20) {
+    avena = m10Avena * 2;
+    spaghetti = 20;
+    accessoryQty = 2;
+  } else if (planchas >= 14) {
+    avena = m10Avena + 12;
+    spaghetti = 13;
+    accessoryQty = 1;
+  } else if (planchas >= 11) {
+    avena = m10Avena + 3;
+    spaghetti = 11;
+    accessoryQty = 1;
+  } else if (planchas >= 10) {
+    avena = m10Avena;
+    spaghetti = 10;
+    accessoryQty = 1;
+  } else if (planchas >= 8) {
+    avena = 24;
+    spaghetti = 6;
+  } else if (planchas >= 5) {
+    avena = 15;
+    spaghetti = 4;
+  } else if (planchas >= 4) {
+    avena = 12;
+    spaghetti = 3;
+  } else if (planchas >= 2) {
+    avena = 6;
+    spaghetti = 2;
+  } else if (planchas >= 1) {
+    avena = 3;
+    spaghetti = 1;
+  }
+  const factor = planchas > 80 ? Math.max(1, Math.min(4, multiplier)) : 1;
+  const requirements: Partial<RedemptionStock> = {
+    AVENA: avena * factor,
+    SPAGHETTI: spaghetti * factor,
+  };
+  if (planchas >= 10 && accessory !== "NINGUNO" && accessoryQty > 0)
+    requirements[accessory] = accessoryQty * factor;
+  return requirements;
+}
+function canjeRequirementsLabel(requirements: Partial<RedemptionStock>) {
+  return requiredRedemptionEntries(requirements)
+    .map(([itemId, quantity]) => `${quantity} ${redemptionLabel(itemId)}`)
+    .join(" + ");
+}
+
 function bonusProductsFor(
   mode: "UNIDADES" | "PLANCHAS",
   total: number,
@@ -8681,6 +8743,23 @@ function PromoterApp({
   const adminSaleId = useRef(
     `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`,
   );
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/app-storage/warehouses")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("No se pudo consultar almacenes");
+        return response.json();
+      })
+      .then((payload) => {
+        if (!cancelled) setWarehouses(Array.isArray(payload) ? payload : []);
+      })
+      .catch(() => {
+        if (!cancelled) setWarehouses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const promoterAssignment = assignments.find((assignment) =>
     assignmentMatchesUser(assignment, user),
   );
@@ -8725,6 +8804,9 @@ function PromoterApp({
     CanjeProductId | ""
   >("");
   const [redemptionCount, setRedemptionCount] = useState(1);
+  const [planchaAccessory, setPlanchaAccessory] = useState<"MANDIL" | "BATEA" | "NINGUNO">("NINGUNO");
+  const [planchaMultiplier, setPlanchaMultiplier] = useState(1);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [comment, setComment] = useState("");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
@@ -8825,7 +8907,19 @@ function PromoterApp({
   const promoterStock = administrative
     ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
     : userRedemptionStock(user);
-  const redemptionTotal = sumRedemptionStock(promoterStock);
+  const selectedWarehouse = warehouses.find((warehouse) =>
+    warehouse.marketIds?.includes(selectedMarketId),
+  );
+  const warehouseRedemptionStock = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: Math.max(0, Number(selectedWarehouse?.stock?.[item.id]) || 0),
+    }),
+    {} as RedemptionStock,
+  );
+  const redemptionTotal = sumRedemptionStock(
+    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock,
+  );
   const totalMix = Object.values(mix).reduce(
     (sum, quantity) => sum + quantity,
     0,
@@ -8866,24 +8960,49 @@ function PromoterApp({
   const selectedBonusProduct =
     bonusProducts.find((product) => product.id === selectedBonusProductId) ||
     bonusProducts[0];
-  const bonus = selectedBonusProduct?.label;
+  const saleDate = administrative
+    ? new Date(administrative.date + "-05:00")
+    : new Date();
+  const availablePlanchaAccessories = planchas >= 10
+    ? ([
+        ...(warehouseRedemptionStock.MANDIL > 0 ? ["MANDIL" as const] : []),
+        ...(warehouseRedemptionStock.BATEA > 0 ? ["BATEA" as const] : []),
+        "NINGUNO" as const,
+      ])
+    : (["NINGUNO" as const]);
+  const effectivePlanchaAccessory = availablePlanchaAccessories.includes(planchaAccessory)
+    ? planchaAccessory
+    : availablePlanchaAccessories[0];
   const automaticUnitCanjeCount =
     mode === "UNIDADES" ? Math.floor(unitQty / 2) : 0;
-  const canjeCount = bonus
-    ? mode === "UNIDADES"
-      ? automaticUnitCanjeCount
-      : redemptionCount
-    : 0;
-  const requiredRedemptions = multiplyRedemptionRequirements(
-    selectedBonusProduct?.components || {},
-    canjeCount,
+  const canjeCount = mode === "UNIDADES"
+    ? (selectedBonusProduct ? automaticUnitCanjeCount : 0)
+    : planchas >= 1
+      ? 1
+      : 0;
+  const planchaRequirements = planchaCanjeRequirements(
+    planchas,
+    saleDate,
+    effectivePlanchaAccessory,
+    planchaMultiplier,
   );
+  const requiredRedemptions =
+    mode === "PLANCHAS"
+      ? planchaRequirements
+      : multiplyRedemptionRequirements(
+          selectedBonusProduct?.components || {},
+          canjeCount,
+        );
+  const bonus =
+    mode === "PLANCHAS" && planchas >= 1
+      ? canjeRequirementsLabel(requiredRedemptions)
+      : selectedBonusProduct?.label;
+  const stockForCanje =
+    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock;
   const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
-    ([itemId, quantity]) => promoterStock[itemId] < quantity,
+    ([itemId, quantity]) => stockForCanje[itemId] < quantity,
   );
-  const exceptionNeedsComment = Boolean(
-    mode === "PLANCHAS" && bonus && canjeCount === 3 && !comment.trim(),
-  );
+  const exceptionNeedsComment = false;
   const exchangeEvidenceRequired = Boolean(
     bonus || mode === "PLANCHAS",
   );
@@ -9062,7 +9181,8 @@ function PromoterApp({
         : latestAttendanceFor(clientId)?.type === "ENTRADA" &&
           !exitedToday(clientId))),
   );
-  const requiresTradeApproval = mode === "PLANCHAS" && planchas > 80;
+  const requiresTradeApproval =
+    mode === "PLANCHAS" && (planchas > 80 || planchaMultiplier > 1);
   const canConfirm = Boolean(
     !savingAdminSale &&
     (!administrative ||
@@ -9089,6 +9209,10 @@ function PromoterApp({
   const saveSale = async () => {
     if (!selectedMarket) {
       notify("Selecciona un mercado válido antes de registrar la venta.", true);
+      return;
+    }
+    if (mode === "PLANCHAS" && !selectedWarehouse) {
+      notify("El mercado seleccionado no tiene un almacén asignado para descontar el canje.", true);
       return;
     }
     if (!canSellForSelectedClient) {
@@ -9152,7 +9276,7 @@ function PromoterApp({
       planchas: mode === "PLANCHAS" ? planchas : undefined,
       mix: mode === "PLANCHAS" ? mix : { [selectedProduct.brand]: unitQty },
       bonus,
-      redemptionCount: canjeCount,
+      redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
       redemptionItems: bonus ? requiredRedemptions : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
@@ -9185,6 +9309,7 @@ function PromoterApp({
           ),
         );
         setRedemptionCount(1);
+        setPlanchaMultiplier(1);
         setComment("");
         setReceipt(null);
         setExchange(null);
@@ -9217,7 +9342,7 @@ function PromoterApp({
     const next = [sale, ...sales];
     setSales(next);
     writeStore("bt-sales", next);
-    if (bonus) {
+    if (bonus && mode === "UNIDADES") {
       const nextPromoterStock = requiredRedemptionEntries(
         requiredRedemptions,
       ).reduce(
@@ -9262,6 +9387,7 @@ function PromoterApp({
       ),
     );
     setRedemptionCount(1);
+    setPlanchaMultiplier(1);
     setComment("");
     setReceipt(null);
     setExchange(null);
@@ -9591,50 +9717,55 @@ function PromoterApp({
             )}
           </div>
         </div>
-        {bonus && mode === "PLANCHAS" && (planchas === 10 || planchas > 80) && (
+        {bonus && mode === "PLANCHAS" && planchas >= 10 && (
           <Field label="Dinámica de canje *">
             <select
               className="select"
-              value={selectedBonusProduct?.id || ""}
+              value={effectivePlanchaAccessory}
               onChange={(event) =>
-                setSelectedBonusProductId(event.target.value as CanjeProductId)
+                setPlanchaAccessory(
+                  event.target.value as "MANDIL" | "BATEA" | "NINGUNO",
+                )
               }
               data-testid="select-canje-dinamica"
             >
-              {bonusProducts.map((product) => (
-                <option value={product.id} key={product.id}>
-                  {product.label}
+              {availablePlanchaAccessories.map((accessory) => (
+                <option value={accessory} key={accessory}>
+                  {accessory === "MANDIL"
+                    ? "Con Mandil"
+                    : accessory === "BATEA"
+                      ? "Con Batea"
+                      : "Sin Mandil / Batea"}
                 </option>
               ))}
             </select>
           </Field>
         )}
-        {bonus && mode === "UNIDADES" && (
-          <p className="sale-form-note">
-            Canje automático: {canjeCount} canje{canjeCount === 1 ? "" : "s"} de
-            Avena por {unitQty} unidades.
-          </p>
-        )}
-        {bonus && mode === "PLANCHAS" && (
-          <Field label="Número de canjes utilizados *">
+        {bonus && mode === "PLANCHAS" && planchas > 80 && (
+          <Field label="Multiplicador solicitado *">
             <select
               className="select"
-              value={redemptionCount}
-              onChange={(event) =>
-                setRedemptionCount(Number(event.target.value))
-              }
-              data-testid="select-redemption-count"
+              value={planchaMultiplier}
+              onChange={(event) => setPlanchaMultiplier(Number(event.target.value))}
+              data-testid="select-canje-multiplicador"
             >
-              <option value={1}>1 canje</option>
-              <option value={2}>2 canjes</option>
-              <option value={3}>3 canjes (excepción)</option>
+              <option value={1}>Sin multiplicador (x1)</option>
+              <option value={2}>x2 · requiere aprobación Trade</option>
+              <option value={3}>x3 · requiere aprobación Trade</option>
+              <option value={4}>x4 · requiere aprobación Trade</option>
             </select>
           </Field>
+        )}
+        {bonus && mode === "PLANCHAS" && (
+          <p className="sale-form-note">
+            Canje calculado automáticamente: {bonus}
+            {selectedWarehouse ? ` · Almacén: ${selectedWarehouse.name}` : " · Mercado sin almacén asignado"}
+          </p>
         )}
         {bonus && missingRedemption && (
           <div className="stock-warning">
             <PackageCheck /> No hay stock suficiente de{" "}
-            {redemptionLabel(missingRedemption[0])} para este canje.
+            {redemptionLabel(missingRedemption[0])} en el almacén del mercado para este canje.
           </div>
         )}
         {bonus && canjeCount === 3 && (
