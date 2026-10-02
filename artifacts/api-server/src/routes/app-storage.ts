@@ -1328,14 +1328,6 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
       const requirementsToConsume = isRecord(sale.redemptionItems) ? sale.redemptionItems : {};
       const promoter = await db.query("SELECT data FROM users WHERE id=$1 FOR UPDATE", [value(sale, "promoterId")]);
       if (!promoter.rows.length) throw new Error("El promotor ya no existe.");
-      const promoterData = isRecord(promoter.rows[0].data) ? promoter.rows[0].data : {};
-      const currentStock = isRecord(promoterData.redemptionStock) ? promoterData.redemptionStock : {};
-      for (const itemId of redemptionItemIds) {
-        const required = Math.max(0, Number(requirementsToConsume[itemId]) || 0);
-        if (required > Math.max(0, Number(currentStock[itemId]) || 0)) {
-          throw new Error(`Stock insuficiente de ${itemId} para aprobar esta venta.`);
-        }
-      }
       const approvedSale = {
         ...sale,
         status: "PENDIENTE",
@@ -1344,38 +1336,15 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
         tradeApprovedBy: actor.id,
         updatedAt: resolvedAt,
       };
+      await applyWarehouseStockMovement(
+        db as unknown as QueryClient,
+        value(approvedSale, "marketId"),
+        requirementsToConsume,
+        "CANJE",
+        String(actor.id),
+        `SALE:${value(approvedSale, "id")}`,
+      );
       await upsertRecord(db as unknown as QueryClient, "sales", approvedSale);
-      const requirements = requirementsToConsume;
-      for (const itemId of redemptionItemIds) {
-        const quantity = Math.max(0, Number(requirements[itemId]) || 0);
-        if (!quantity) continue;
-        await upsertRecord(db as unknown as QueryClient, "movements", {
-          id: `CAN-${value(approvedSale, "id")}-${itemId}`,
-          marketId: value(approvedSale, "marketId"),
-          kind: "CANJE",
-          itemId,
-          quantity,
-          actorId: value(approvedSale, "promoterId"),
-          actorName: value(approvalData, "promoterName"),
-          promoterId: value(approvedSale, "promoterId"),
-          date: resolvedAt,
-          status: "PENDIENTE",
-        });
-      }
-      if (Object.values(requirements).some((quantity) => Number(quantity) > 0)) {
-        const nextStock = { ...currentStock };
-        for (const itemId of redemptionItemIds) {
-          nextStock[itemId] = Math.max(
-            0,
-            Number(nextStock[itemId] || 0) - Math.max(0, Number(requirements[itemId]) || 0),
-          );
-        }
-        const nextPromoter = { ...promoterData, redemptionStock: nextStock, updatedAt: resolvedAt };
-        await db.query(
-          "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-          [value(sale, "promoterId"), nextPromoter, resolvedAt],
-        );
-      }
     }
     const nextData = {
       ...approvalData,
