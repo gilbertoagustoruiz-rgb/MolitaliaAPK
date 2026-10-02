@@ -1031,8 +1031,34 @@ async function syncSnapshot(
           const saleId = saleIdFromCanjeMovement(record);
           if (saleId && deletedSaleIds.has(saleId)) continue;
         }
-        if (record && typeof record === "object")
+        if (record && typeof record === "object") {
+          const isNewRecord = !existing.rows.length;
+          if (isNewRecord && name === "sales" && value(record, "bonus")) {
+            const requirementsSource = isRecord(record.redemptionItems) ? record.redemptionItems : {};
+            const requirements = Object.fromEntries(
+              redemptionItemIds.map((itemId) => [itemId, Math.max(0, Math.floor(Number(requirementsSource[itemId]) || 0))]),
+            );
+            await applyWarehouseStockMovement(
+              client as unknown as QueryClient,
+              value(record, "marketId"),
+              requirements,
+              "CANJE",
+              value(record, "promoterId") || value(record, "createdById") || "SYNC",
+              `SALE:${value(record, "id")}`,
+            );
+          }
+          if (isNewRecord && name === "movements" && value(record, "kind") === "DEGUSTACION") {
+            await applyWarehouseStockMovement(
+              client as unknown as QueryClient,
+              value(record, "marketId"),
+              { PANETON_900G: Math.max(0, Math.floor(numeric(record, "quantity"))) },
+              "DEGUSTACION",
+              value(record, "promoterId") || value(record, "actorId") || "SYNC",
+              `DEG:${value(record, "id")}`,
+            );
+          }
           await upsertRecord(client as unknown as QueryClient, name, record);
+        }
       }
     }
     await client.query("COMMIT");
@@ -2503,26 +2529,14 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
           );
       }
     }
-    const previous = await db.query(
-      "SELECT data FROM sales WHERE promoter_id=$1",
-      [value(input, "promoterId")],
+    await applyWarehouseStockMovement(
+      db as unknown as QueryClient,
+      value(input, "marketId"),
+      requested,
+      "CANJE",
+      String(actor.id),
+      `SALE:${id}`,
     );
-    const stock: Record<string, number> = {
-      ...promoterStockBaseline.redemptionStock,
-    };
-    for (const row of previous.rows) {
-      const requirements = isRecord(row.data.redemptionItems)
-        ? row.data.redemptionItems
-        : {};
-      if (row.data.bonus)
-        for (const item of redemptionItemIds)
-          stock[item] -= Math.max(0, Number(requirements[item]) || 0);
-    }
-    for (const item of redemptionItemIds) {
-      if (requested[item] > Math.max(0, stock[item]))
-        throw new Error(`Stock insuficiente de ${item}.`);
-      stock[item] = Math.max(0, stock[item]) - requested[item];
-    }
     const updatedAt = new Date().toISOString();
     const sale = {
       ...input,
@@ -2553,14 +2567,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         status: "SINCRONIZADA",
       });
     }
-    await db.query(
-      "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-      [
-        input.promoterId,
-        { ...promoter.data, redemptionStock: stock },
-        updatedAt,
-      ],
-    );
     await db.query("COMMIT");
     res.status(201).json({ sale, snapshot: await readSnapshot() });
   } catch (error) {
@@ -2630,65 +2636,25 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       return;
     }
     const currentSale = existing.rows[0];
-    const promoterResult = (await client.query(
-      "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-      [currentSale.promoter_id],
-    )) as unknown as { rows: Array<{ data: StoredRecord }> };
-    if (!promoterResult.rows[0]) {
-      await client.query("ROLLBACK");
-      res.status(409).json({
-        message: "No se encontró al promotor propietario del inventario.",
-      });
-      return;
-    }
-    const movementPrefix = `CAN-${id}-`;
-    const oldMovements = (await client.query(
-      `SELECT item_id,quantity,data FROM inventory_movements
-       WHERE kind='CANJE' AND left(id,length($1))=$1 FOR UPDATE`,
-      [movementPrefix],
-    )) as unknown as {
-      rows: Array<{
-        item_id: string | null;
-        quantity: number;
-        data: StoredRecord;
-      }>;
-    };
-    const itemIds = ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"];
-    const promoterData = promoterResult.rows[0].data || {};
-    const stockSource = isRecord(promoterData.redemptionStock)
-      ? promoterData.redemptionStock
-      : {};
-    const availableStock = Object.fromEntries(
-      itemIds.map((itemId) => [
-        itemId,
-        Math.max(0, Number(stockSource[itemId]) || 0),
-      ]),
-    );
-    for (const movement of oldMovements.rows) {
-      const movementData = isRecord(movement.data) ? movement.data : {};
-      if (value(movementData, "promoterId") !== currentSale.promoter_id)
-        continue;
-      const itemId = movement.item_id || value(movementData, "itemId");
-      if (itemIds.includes(itemId))
-        availableStock[itemId] += Math.max(0, Number(movement.quantity) || 0);
-    }
     const requestedSource = isRecord(input.redemptionItems)
       ? input.redemptionItems
       : {};
     const requested = Object.fromEntries(
-      itemIds.map((itemId) => [
+      ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"].map((itemId) => [
         itemId,
         Math.max(0, Math.floor(Number(requestedSource[itemId]) || 0)),
       ]),
     );
-    for (const itemId of itemIds) {
-      if (requested[itemId] > availableStock[itemId]) {
-        await client.query("ROLLBACK");
-        res.status(409).json({
-          message: `Stock insuficiente de ${itemId} para actualizar el canje.`,
-        });
-        return;
-      }
+    await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, currentSale.promoter_id);
+    if (value(input, "bonus")) {
+      await applyWarehouseStockMovement(
+        client as unknown as QueryClient,
+        currentSale.market_id,
+        requested,
+        "CANJE",
+        currentSale.promoter_id,
+        `SALE:${id}`,
+      );
     }
     const updatedAt = new Date().toISOString();
     const sale = {
@@ -2738,7 +2704,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         itemId,
         quantity: requested[itemId],
         actorId: currentSale.promoter_id,
-        actorName: value(promoterData, "name") || "Promotor",
+        actorName: "Promotor",
         promoterId: currentSale.promoter_id,
         date: updatedAt,
         status: "SINCRONIZADA",
@@ -2757,16 +2723,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
           updatedAt,
         ],
       );
-      availableStock[itemId] -= requested[itemId];
     }
-    const nextPromoterData = {
-      ...promoterData,
-      redemptionStock: availableStock,
-    };
-    await client.query(
-      "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-      [currentSale.promoter_id, nextPromoterData, updatedAt],
-    );
     await client.query("COMMIT");
     res.json({ sale, snapshot: await readSnapshot() });
   } catch (error) {
@@ -2884,6 +2841,7 @@ router.delete(
           [marketId, redemptionStock, inventoryData, updatedAt],
         );
       }
+      await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
       await client.query(
         "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
         [movementPrefix],
@@ -3384,38 +3342,8 @@ router.delete(
       }
       if (movement && movementKind === "DEGUSTACION") {
         const promoterId =
-          value(movement.data, "promoterId") || value(movement.data, "actorId");
-        if (!promoterId) {
-          await client.query("ROLLBACK");
-          res.status(409).json({
-            message: "No se encontró al promotor que registró la degustación.",
-          });
-          return;
-        }
-        const userResult = (await client.query(
-          "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-          [promoterId],
-        )) as unknown as { rows: Array<{ data: StoredRecord }> };
-        const currentUser = userResult.rows[0];
-        if (!currentUser) {
-          await client.query("ROLLBACK");
-          res.status(409).json({
-            message: "No se encontró al promotor propietario del stock.",
-          });
-          return;
-        }
-        const updatedAt = new Date().toISOString();
-        const tastingStock =
-          Math.max(0, Number(currentUser.data?.tastingStock) || 0) +
-          Math.max(0, Number(movement.quantity) || 0);
-        await client.query(
-          "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-          [
-            promoterId,
-            { ...(currentUser.data || {}), tastingStock, updatedAt },
-            updatedAt,
-          ],
-        );
+          value(movement.data, "promoterId") || value(movement.data, "actorId") || "ADMIN";
+        await restoreWarehouseStockMovements(client as unknown as QueryClient, `DEG:${id}`, promoterId);
         const movementDate = value(movement.data, "date");
         if (movementDate) {
           const closureResult = (await client.query(
