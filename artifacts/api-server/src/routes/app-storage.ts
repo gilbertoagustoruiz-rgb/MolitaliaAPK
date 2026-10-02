@@ -1833,6 +1833,7 @@ router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
     department: value(input, "department").toUpperCase(),
     province: value(input, "province").toUpperCase(),
     district: value(input, "district").toUpperCase(),
+    warehouseId: value(input, "warehouseId") || undefined,
     status: "ACTIVO",
     updatedAt: new Date().toISOString(),
   };
