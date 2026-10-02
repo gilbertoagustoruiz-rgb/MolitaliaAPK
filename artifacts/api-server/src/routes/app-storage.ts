@@ -2636,6 +2636,8 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       return;
     }
     const currentSale = existing.rows[0];
+    const movementPrefix = `CAN-${id}-`;
+    const itemIds = ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"];
     const requestedSource = isRecord(input.redemptionItems)
       ? input.redemptionItems
       : {};
@@ -2881,6 +2883,7 @@ router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
 
 router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
   if (Array.isArray(req.body?.canjes)) {
+    return void res.status(409).json({ message: "El stock ya no se asigna al promotor. Realiza la recarga desde el módulo Almacén del mercado correspondiente." });
     const inputs: StoredRecord[] = (req.body.canjes as unknown[]).filter(
       (input): input is StoredRecord => isRecord(input),
     );
@@ -2989,6 +2992,9 @@ router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
   }
   const input = req.body?.canje;
   const personalStock = isRecord(input) && Boolean(value(input, "promoterId"));
+  if (personalStock) {
+    return void res.status(409).json({ message: "El stock ya no se asigna al promotor. Realiza la recarga desde el módulo Almacén del mercado correspondiente." });
+  }
   const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
   if (
     !isRecord(input) ||
@@ -3155,6 +3161,9 @@ router.delete(
         );
       }
       await lockInventoryLedger(client as unknown as QueryClient);
+      if (source === "sale") {
+        await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
+      }
       if (source === "movement") {
         const result = (await client.query(
           "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
