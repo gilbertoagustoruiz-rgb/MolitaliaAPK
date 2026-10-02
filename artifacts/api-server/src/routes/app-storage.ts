@@ -1244,6 +1244,32 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       }
       baseByWarehouse.set(warehouseId,stock);
     }
+    const legacySupplies=await db.query("SELECT id,market_id,kind,item_id,quantity,data FROM inventory_movements WHERE kind IN ('AJUSTE_CANJES','AJUSTE_DEGUSTACION') ORDER BY movement_date,id");
+    let legacySuppliesApplied=0;
+    for(const row of legacySupplies.rows){
+      const source=isRecord(row.data)?row.data:{};
+      if(value(source,"promoterId")) continue;
+      const warehouseId=warehouseByMarket.get(String(row.market_id));
+      const stock=warehouseId?baseByWarehouse.get(warehouseId):undefined;
+      if(!stock){skipped++;continue;}
+      const quantity=Math.max(0,Math.floor(Number(row.quantity)||0));
+      if(!quantity) continue;
+      if(String(row.kind)==="AJUSTE_DEGUSTACION"){
+        stock.PANETON_900G=(Number(stock.PANETON_900G)||0)+quantity;
+      }else{
+        const components=isRecord(source.canjeComponents)?source.canjeComponents:null;
+        if(components){
+          for(const itemId of redemptionItemIds){
+            const amount=Math.max(0,Math.floor((Number(components[itemId])||0)*quantity));
+            stock[itemId]=(Number(stock[itemId])||0)+amount;
+          }
+        }else{
+          const itemId=String(row.item_id||value(source,"itemId"));
+          if(redemptionItemIds.includes(itemId)) stock[itemId]=(Number(stock[itemId])||0)+quantity;
+        }
+      }
+      legacySuppliesApplied++;
+    }
     const canjes=await db.query("SELECT id,market_id,item_id,quantity,data FROM inventory_movements WHERE kind='CANJE' ORDER BY movement_date,id");
     const saleIdsWithCanje=new Set<string>();
     let canjesProcessed=0,tastingsProcessed=0,skipped=0;
@@ -1302,7 +1328,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,warehouseId,movement.kind,"MULTI",0,actor.id,now,movement]);
     }
     await db.query("COMMIT");
-    res.json({warehousesRebuilt:baseByWarehouse.size,canjesProcessed,tastingsProcessed,skipped});
+    res.json({warehousesRebuilt:baseByWarehouse.size,legacySuppliesApplied,canjesProcessed,tastingsProcessed,skipped});
   } catch(error) {
     await db.query("ROLLBACK").catch(()=>undefined);
     req.log.error({err:error},"Unable to rebuild warehouse consumption history");
