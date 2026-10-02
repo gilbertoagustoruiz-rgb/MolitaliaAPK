@@ -6385,21 +6385,77 @@ function AnalystApp({
     );
     notify("Marcaciones con links de fotos descargadas");
   };
-  const exportMarkets = () => {
-    downloadCsv(
-      `mercados-${today}.csv`,
-      ["Código","Mercado","Región","Departamento","Provincia","Distrito","Estado"],
-      markets.map((market) => [
-        market.id,
-        market.name,
-        market.region,
-        market.department,
-        market.province,
-        market.district,
-        market.status,
-      ]),
-    );
-    notify("Información de mercados descargada");
+  const exportMarkets = async () => {
+    try {
+      const response = await fetch("/api/app-storage/warehouses");
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "No se pudieron cargar los almacenes.");
+      const warehouses = Array.isArray(payload.warehouses) ? payload.warehouses as Warehouse[] : [];
+      const warehouseMap = Object.fromEntries(warehouses.map((warehouse) => [warehouse.id, warehouse.name]));
+      downloadCsv(
+        `mercados-${today}.csv`,
+        ["Código","Mercado","Región","Departamento","Provincia","Distrito","Almacén","Estado"],
+        markets.map((market) => [
+          market.id,
+          market.name,
+          market.region,
+          market.department,
+          market.province,
+          market.district,
+          market.warehouseId ? warehouseMap[market.warehouseId] || market.warehouseId : "",
+          market.status,
+        ]),
+      );
+      notify("Información de mercados descargada con almacén.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo descargar mercados.", true);
+    }
+  };
+  const importMarketsFile = async (file: File) => {
+    try {
+      const records = await parseImportRecords(file);
+      const warehouseResponse = await fetch("/api/app-storage/warehouses");
+      const warehousePayload = await warehouseResponse.json();
+      if (!warehouseResponse.ok) throw new Error(warehousePayload.message || "No se pudieron cargar los almacenes.");
+      const warehouses = Array.isArray(warehousePayload.warehouses) ? warehousePayload.warehouses as Warehouse[] : [];
+      let count = 0;
+      for (const record of records) {
+        const name = csvField(record, ["nombredelmercado","nombremercado","mercado","nombre"]);
+        if (!name) continue;
+        const warehouseValue = csvField(record, ["almacen","nombrealmacen","nombredealmacen","warehouse","warehouseid"]);
+        const normalizedWarehouse = normalizeCsvHeader(warehouseValue);
+        const warehouse = warehouses.find((item) =>
+          item.id === warehouseValue ||
+          normalizeCsvHeader(item.name) === normalizedWarehouse
+        );
+        if (!warehouse) throw new Error(`El almacén "${warehouseValue || "vacío"}" de ${name} no existe.`);
+        const department = csvField(record, ["departamento"]).toUpperCase();
+        const province = csvField(record, ["provincia","ciudad"]).toUpperCase();
+        const district = csvField(record, ["distrito"]).toUpperCase();
+        if (!department || !province || !district) throw new Error(`Completa Departamento, Provincia y Distrito para ${name}.`);
+        const market: Market = {
+          id: csvField(record, ["codigo","idmerc","idmercado","id"]) || `MKT-IMP-${Date.now()}-${count + 1}`,
+          name: name.toUpperCase(),
+          region: (csvField(record, ["region"]) || department).toUpperCase(),
+          department,
+          province,
+          district,
+          warehouseId: warehouse.id,
+          status: csvStatus(csvField(record, ["estado","status"])),
+        };
+        await adminRequest("/markets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ market }),
+        });
+        count += 1;
+      }
+      if (!count) throw new Error("No se encontraron mercados válidos en el archivo.");
+      notify(`${count} mercado(s) importado(s) y guardado(s) en DigitalOcean.`);
+      window.location.reload();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo importar mercados.", true);
+    }
   };
   const exportSummary = () => {
     const summaryRows = aggregateSalesByRegionCity(sales, markets);
@@ -7322,6 +7378,7 @@ function AnalystApp({
               <Btn variant="outline" onClick={exportMarkets} testId="button-export-markets">
                 <Download /> Descargar
               </Btn>
+              <CsvImportButton label="Importar mercados" onImport={importMarketsFile} testId="button-import-markets" />
               <Btn
                 onClick={() => setModal("market")}
                 testId="button-new-market"
