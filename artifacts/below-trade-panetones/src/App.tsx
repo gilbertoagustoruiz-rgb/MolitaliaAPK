@@ -960,6 +960,79 @@ function parseCsvRecords(text: string) {
       ),
     );
 }
+async function parseXlsxRecords(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i -= 1) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("El archivo Excel no tiene un formato .xlsx válido.");
+  const entries = view.getUint16(eocd + 10, true);
+  let offset = view.getUint32(eocd + 16, true);
+  const decoder = new TextDecoder("utf-8");
+  const files = new Map<string, Uint8Array>();
+  for (let n = 0; n < entries; n += 1) {
+    if (view.getUint32(offset, true) !== 0x02014b50) break;
+    const method = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const nameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localOffset = view.getUint32(offset + 42, true);
+    const name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+    if (name === "xl/sharedStrings.xml" || /^xl\/worksheets\/sheet\d+\.xml$/.test(name)) {
+      const localNameLength = view.getUint16(localOffset + 26, true);
+      const localExtraLength = view.getUint16(localOffset + 28, true);
+      const start = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = bytes.slice(start, start + compressedSize);
+      if (method === 0) files.set(name, compressed);
+      else if (method === 8) {
+        const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        files.set(name, new Uint8Array(await new Response(stream).arrayBuffer()));
+      } else throw new Error("El Excel usa una compresión no compatible.");
+    }
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  const sharedXml = files.get("xl/sharedStrings.xml");
+  const parser = new DOMParser();
+  const shared = sharedXml
+    ? Array.from(parser.parseFromString(decoder.decode(sharedXml), "application/xml").getElementsByTagName("si"))
+        .map((node) => Array.from(node.getElementsByTagName("t")).map((t) => t.textContent || "").join(""))
+    : [];
+  const sheetEntry = [...files.entries()]
+    .filter(([name]) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))[0];
+  if (!sheetEntry) throw new Error("El Excel no contiene una hoja de datos.");
+  const sheet = parser.parseFromString(decoder.decode(sheetEntry[1]), "application/xml");
+  const rows = Array.from(sheet.getElementsByTagName("row")).map((row) => {
+    const values: string[] = [];
+    Array.from(row.getElementsByTagName("c")).forEach((cell) => {
+      const ref = cell.getAttribute("r") || "";
+      const letters = ref.match(/[A-Z]+/i)?.[0]?.toUpperCase() || "A";
+      let column = 0;
+      for (const letter of letters) column = column * 26 + letter.charCodeAt(0) - 64;
+      const type = cell.getAttribute("t");
+      const raw = cell.getElementsByTagName("v")[0]?.textContent || "";
+      const inline = Array.from(cell.getElementsByTagName("t")).map((t) => t.textContent || "").join("");
+      values[column - 1] = type === "s" ? (shared[Number(raw)] || "") : type === "inlineStr" ? inline : raw;
+    });
+    return values;
+  }).filter((row) => row.some((value) => String(value || "").trim()));
+  if (rows.length < 2) throw new Error("El Excel debe tener encabezados y al menos una fila.");
+  const headers = rows[0].map((value) => normalizeCsvHeader(String(value || "")));
+  return rows.slice(1).map((row) =>
+    Object.fromEntries(headers.map((header, index) => [header, String(row[index] ?? "").trim()])),
+  );
+}
+async function parseImportRecords(file: File) {
+  const extension = file.name.toLowerCase().split(".").pop();
+  if (extension === "csv") return parseCsvRecords(await file.text());
+  if (extension === "xlsx") return parseXlsxRecords(file);
+  if (extension === "xls")
+    throw new Error("El formato .xls antiguo no es compatible. Ábrelo en Excel y guárdalo como .xlsx.");
+  throw new Error("Formato no compatible. Usa Excel .xlsx o CSV.");
+}
 function normalizeCsvHeader(value: string) {
   return value
     .normalize("NFD")
@@ -1917,7 +1990,7 @@ function CsvImportButton({
         ref={inputRef}
         className="csv-file-input"
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xls,application/vnd.ms-excel"
         onChange={chooseFile}
       />
       <Btn
@@ -1927,7 +2000,7 @@ function CsvImportButton({
         testId={testId}
       >
         {loading ? <RefreshCw className="spin" /> : <Upload />}
-        {loading ? "Leyendo CSV..." : label}
+        {loading ? "Leyendo archivo..." : label}
       </Btn>
     </>
   );
@@ -2968,7 +3041,7 @@ function WarehouseCatalog({ notify }: { notify:(message:string,error?:boolean)=>
   useEffect(()=>{void load();},[]);
   const save=async(warehouse:Warehouse,quiet=false)=>{try{const r=await fetch("/api/app-storage/warehouses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({warehouse})});const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudo guardar el almacén.");if(!quiet){await load();notify("Almacén guardado.");}return true;}catch(e){if(!quiet)notify(e instanceof Error?e.message:"No se pudo guardar el almacén.",true);return false;}};
   const loadStock=async(warehouse:Warehouse,quantities:Partial<WarehouseStock>,quiet=false)=>{try{const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/recharge`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({quantities,initial:true})});const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudo cargar el stock.");if(!quiet){await load();notify("Stock inicial cargado.");}return true;}catch(e){if(!quiet)notify(e instanceof Error?e.message:"No se pudo cargar el stock.",true);return false;}};
-  const importFile=async(file:File)=>{try{const records=parseCsvRecords(await file.text());let count=0;for(const record of records){const name=csvField(record,["nombredealmacen","nombrealmacen","almacen","nombre"]);if(!name)continue;const number=(keys:string[])=>Math.max(0,Math.floor(Number(csvField(record,keys).replace(",", "."))||0));const warehouse:Warehouse={id:csvField(record,["id","codigo","idalmacen"])||`ALM-${Date.now()}-${count+1}`,name:name.toUpperCase(),region:csvField(record,["region"]).toUpperCase(),department:csvField(record,["departamento"]).toUpperCase(),province:csvField(record,["provincia"]).toUpperCase(),district:csvField(record,["distrito"]).toUpperCase(),status:csvStatus(csvField(record,["estado","status"])),marketIds:[],stock:{},updatedAt:new Date().toISOString()};if(!warehouse.region||!warehouse.department||!warehouse.province||!warehouse.district)throw new Error(`Completa ubicación para ${name}.`);const ok=await save(warehouse,true);if(!ok)throw new Error(`No se pudo importar ${name}.`);const quantities={PANETON_900G:number(["paneton900g","paneton900"]),PANETON_85G:number(["paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])};if(Object.values(quantities).some(v=>v>0)){const stockOk=await loadStock(warehouse,quantities,true);if(!stockOk)throw new Error(`No se pudo cargar stock de ${name}.`);}count++;}if(!count)throw new Error("No se encontraron almacenes válidos.");await load();notify(`${count} almacén(es) importado(s).`);}catch(e){notify(e instanceof Error?e.message:"No se pudo importar el archivo.",true);}};
+  const importFile=async(file:File)=>{try{const records=await parseImportRecords(file);let count=0;for(const record of records){const name=csvField(record,["nombredealmacen","nombrealmacen","almacen","nombre"]);if(!name)continue;const number=(keys:string[])=>Math.max(0,Math.floor(Number(csvField(record,keys).replace(",", "."))||0));const warehouse:Warehouse={id:csvField(record,["id","codigo","idalmacen"])||`ALM-${Date.now()}-${count+1}`,name:name.toUpperCase(),region:csvField(record,["region"]).toUpperCase(),department:csvField(record,["departamento"]).toUpperCase(),province:csvField(record,["provincia"]).toUpperCase(),district:csvField(record,["distrito"]).toUpperCase(),status:csvStatus(csvField(record,["estado","status"])),marketIds:[],stock:{},updatedAt:new Date().toISOString()};if(!warehouse.region||!warehouse.department||!warehouse.province||!warehouse.district)throw new Error(`Completa ubicación para ${name}.`);const ok=await save(warehouse,true);if(!ok)throw new Error(`No se pudo importar ${name}.`);const quantities={PANETON_900G:number(["paneton900g","paneton900"]),PANETON_85G:number(["paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])};if(Object.values(quantities).some(v=>v>0)){const stockOk=await loadStock(warehouse,quantities,true);if(!stockOk)throw new Error(`No se pudo cargar stock de ${name}.`);}count++;}if(!count)throw new Error("No se encontraron almacenes válidos.");await load();notify(`${count} almacén(es) importado(s).`);}catch(e){notify(e instanceof Error?e.message:"No se pudo importar el archivo.",true);}};
   const example=()=>downloadCsv("ejemplo-importacion-almacenes.csv",["Nombre de Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón 900 g","Panetón 85 g","Avena","Batea","Mandil","Spaghetti"],[["HUARAZ","CENTRO","ANCASH","HUARAZ","HUARAZ","ACTIVO",18,200,240,0,0,200]]);
   return <section className="panel"><div className="panel-header"><div><h2>Almacén</h2><p>Carga el catálogo de almacenes y su stock inicial. Esta etapa no descuenta consumos históricos.</p></div><div className="panel-actions"><CsvImportButton label="Importar almacenes" onImport={importFile} testId="button-import-warehouses"/><CsvExampleButton onDownload={example} testId="button-example-warehouses"/><Btn onClick={()=>setModal(true)}><Plus/> Nuevo almacén</Btn></div></div><div className="panel-body"><div className="record-list">{warehouses.length?warehouses.map(w=><article className="record" key={w.id}><span className="record-icon"><Store/></span><div className="record-main"><strong>{w.name}</strong><small>{[w.region,w.department,w.province,w.district].filter(Boolean).join(" · ")}</small><em>Panetón 900 g {w.stock?.PANETON_900G||0} · Panetón 85 g {w.stock?.PANETON_85G||0} · Avena {w.stock?.AVENA||0} · Batea {w.stock?.BATEA||0} · Mandil {w.stock?.MANDIL||0} · Spaghetti {w.stock?.SPAGHETTI||0}</em></div><StatusPill status={w.status}/>{!Object.values(w.stock||{}).some(v=>Number(v)>0)&&<Btn onClick={()=>setRecharge(w)}><Plus/> Cargar stock inicial</Btn>}</article>):<Empty title="Sin almacenes" detail="Crea o importa los almacenes para comenzar." />}</div></div>{modal&&<WarehouseCreateModal onSave={save} close={()=>setModal(false)}/>} {recharge&&<WarehouseInitialStockModal warehouse={recharge} onSave={loadStock} close={()=>setRecharge(null)}/>}</section>;
 }
