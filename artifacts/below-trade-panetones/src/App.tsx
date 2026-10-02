@@ -65,6 +65,7 @@ type Market = {
   district: string;
   name: string;
   status: Status;
+  warehouseId?: string;
 };
 type AppUser = {
   id: string;
@@ -2954,6 +2955,17 @@ function NewMarketModal({
   onSave: (market: Market) => Promise<boolean>;
   close: () => void;
 }) {
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [warehouseId, setWarehouseId] = useState("");
+  useEffect(() => {
+    void fetch("/api/app-storage/warehouses")
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || "No se pudieron cargar los almacenes.");
+        setWarehouses((Array.isArray(payload.warehouses) ? payload.warehouses : []).filter((warehouse: Warehouse) => warehouse.status === "ACTIVO"));
+      })
+      .catch(() => setWarehouses([]));
+  }, []);
   const [name, setName] = useState("");
   const [region, setRegion] = useState("");
   const [department, setDepartment] = useState("");
@@ -2964,7 +2976,8 @@ function NewMarketModal({
       !name.trim() ||
       !department.trim() ||
       !province.trim() ||
-      !district.trim()
+      !district.trim() ||
+      !warehouseId
     )
       return;
     const saved = await onSave({
@@ -2975,6 +2988,7 @@ function NewMarketModal({
       province: province.trim().toUpperCase(),
       district: district.trim().toUpperCase(),
       status: "ACTIVO",
+      warehouseId: warehouseId || undefined,
     });
     if (saved) close();
   };
@@ -3019,6 +3033,14 @@ function NewMarketModal({
             value={district}
             onChange={setDistrict}
             testId="input-new-market-district"
+          />
+        </Field>
+        <Field label="Almacén *">
+          <Select
+            value={warehouseId}
+            onChange={setWarehouseId}
+            options={[{ value: "", label: "Seleccionar almacén" }, ...warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))]}
+            placeholder="Seleccionar almacén"
           />
         </Field>
       </div>
