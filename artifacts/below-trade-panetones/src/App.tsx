@@ -2844,7 +2844,7 @@ function NewUserModal({
           }
         : {}),
     });
-    if (saved) close();
+    if (saved) { await onAssignWarehouse(marketId, warehouseId); close(); }
   };
   return (
     <Modal
@@ -2961,10 +2961,14 @@ function WarehouseMarketAssignmentModal({ market, warehouses, onSave, close }:{m
  </Modal>;
 }
 function NewMarketModal({
+  warehouses,
   onSave,
+  onAssignWarehouse,
   close,
 }: {
+  warehouses: Warehouse[];
   onSave: (market: Market) => Promise<boolean>;
+  onAssignWarehouse: (marketId: string, warehouseId: string) => Promise<void>;
   close: () => void;
 }) {
   const [name, setName] = useState("");
@@ -2972,16 +2976,19 @@ function NewMarketModal({
   const [department, setDepartment] = useState("");
   const [province, setProvince] = useState("");
   const [district, setDistrict] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
   const save = async () => {
     if (
       !name.trim() ||
       !department.trim() ||
       !province.trim() ||
-      !district.trim()
+      !district.trim() ||
+      !warehouseId
     )
       return;
+    const marketId = `MKT-${Date.now()}`;
     const saved = await onSave({
-      id: `MKT-${Date.now()}`,
+      id: marketId,
       name: name.trim().toUpperCase(),
       region: region.trim().toUpperCase() || department.trim().toUpperCase(),
       department: department.trim().toUpperCase(),
@@ -3034,6 +3041,13 @@ function NewMarketModal({
             testId="input-new-market-district"
           />
         </Field>
+        <SelectField
+          label="Almacén *"
+          value={warehouseId}
+          onChange={setWarehouseId}
+          placeholder="Seleccionar almacén"
+          items={warehouses.filter((warehouse)=>warehouse.status==="ACTIVO").map((warehouse)=>({value:warehouse.id,label:warehouse.name}))}
+        />
       </div>
       <div className="modal-actions">
         <Btn variant="outline" onClick={close}>
@@ -8321,7 +8335,7 @@ function AnalystApp({
         />
       )}
       {modal === "market" && (
-        <NewMarketModal onSave={saveMarket} close={() => setModal(null)} />
+        <NewMarketModal warehouses={warehouses} onSave={saveMarket} onAssignWarehouse={async (marketId, warehouseId) => { const next=warehouses.map((warehouse)=>({...warehouse,marketIds:warehouse.id===warehouseId?[...new Set([...warehouse.marketIds,marketId])]:warehouse.marketIds.filter((id)=>id!==marketId),updatedAt:new Date().toISOString()})); setWarehouses(next); writeStore("bt-demo-warehouses",next); }} close={() => setModal(null)} />
       )}
       {newAdminSale && ["ADMIN", "ANALISTA"].includes(user.role) && (
         <Modal
