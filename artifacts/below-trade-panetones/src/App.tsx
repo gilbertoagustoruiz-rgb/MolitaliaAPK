@@ -208,6 +208,9 @@ type CanjeProductId =
   | "CANJE_AVENA_144_SPAGHETTI_100";
 type DegustacionProductId = "PANETON";
 type RedemptionStock = Record<RedemptionItemId, number>;
+type WarehouseStock = Record<"PANETON_900G" | "PANETON_85G" | RedemptionItemId, number>;
+type Warehouse = { id:string; name:string; region:string; department:string; province:string; district:string; status:Status; marketIds:string[]; stock:Partial<WarehouseStock>; updatedAt:string };
+
 type MarketInventory = {
   marketId: string;
   tastingStock: number;
@@ -2957,6 +2960,21 @@ function NewMarketModal({
     </Modal>
   );
 }
+function WarehouseCatalog({ notify }: { notify:(message:string,error?:boolean)=>void }) {
+  const [warehouses,setWarehouses]=useState<Warehouse[]>([]);
+  const [modal,setModal]=useState(false);
+  const [recharge,setRecharge]=useState<Warehouse|null>(null);
+  const load=async()=>{try{const r=await fetch("/api/app-storage/warehouses");const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudieron cargar los almacenes.");setWarehouses(Array.isArray(p.warehouses)?p.warehouses:[]);}catch(e){notify(e instanceof Error?e.message:"No se pudieron cargar los almacenes.",true);}};
+  useEffect(()=>{void load();},[]);
+  const save=async(warehouse:Warehouse)=>{try{const r=await fetch("/api/app-storage/warehouses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({warehouse})});const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudo guardar el almacén.");await load();notify("Almacén guardado.");return true;}catch(e){notify(e instanceof Error?e.message:"No se pudo guardar el almacén.",true);return false;}};
+  const loadStock=async(warehouse:Warehouse,quantities:Partial<WarehouseStock>)=>{try{const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/recharge`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({quantities,initial:true})});const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudo cargar el stock.");await load();notify("Stock inicial cargado.");return true;}catch(e){notify(e instanceof Error?e.message:"No se pudo cargar el stock.",true);return false;}};
+  const importFile=async(file:File)=>{try{const records=parseCsvRecords(await file.text());let count=0;for(const record of records){const name=csvField(record,["nombredealmacen","nombrealmacen","almacen","nombre"]);if(!name)continue;const number=(keys:string[])=>Math.max(0,Math.floor(Number(csvField(record,keys).replace(",", "."))||0));const warehouse:Warehouse={id:csvField(record,["id","codigo","idalmacen"])||`ALM-${Date.now()}-${count+1}`,name:name.toUpperCase(),region:csvField(record,["region"]).toUpperCase(),department:csvField(record,["departamento"]).toUpperCase(),province:csvField(record,["provincia"]).toUpperCase(),district:csvField(record,["distrito"]).toUpperCase(),status:csvStatus(csvField(record,["estado","status"])),marketIds:[],stock:{},updatedAt:new Date().toISOString()};if(!warehouse.region||!warehouse.department||!warehouse.province||!warehouse.district)throw new Error(`Completa ubicación para ${name}.`);const ok=await save(warehouse);if(!ok)throw new Error(`No se pudo importar ${name}.`);const quantities={PANETON_900G:number(["paneton900g","paneton900"]),PANETON_85G:number(["paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])};if(Object.values(quantities).some(v=>v>0)){const stockOk=await loadStock(warehouse,quantities);if(!stockOk)throw new Error(`No se pudo cargar stock de ${name}.`);}count++;}if(!count)throw new Error("No se encontraron almacenes válidos.");await load();notify(`${count} almacén(es) importado(s).`);}catch(e){notify(e instanceof Error?e.message:"No se pudo importar el archivo.",true);}};
+  const example=()=>downloadCsv("ejemplo-importacion-almacenes.csv",["Nombre de Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón 900 g","Panetón 85 g","Avena","Batea","Mandil","Spaghetti"],[["HUARAZ","CENTRO","ANCASH","HUARAZ","HUARAZ","ACTIVO",18,200,240,0,0,200]]);
+  return <section className="panel"><div className="panel-header"><div><h2>Almacén</h2><p>Carga el catálogo de almacenes y su stock inicial. Esta etapa no descuenta consumos históricos.</p></div><div className="panel-actions"><CsvImportButton label="Importar almacenes" onImport={importFile} testId="button-import-warehouses"/><CsvExampleButton onDownload={example} testId="button-example-warehouses"/><Btn onClick={()=>setModal(true)}><Plus/> Nuevo almacén</Btn></div></div><div className="panel-body"><div className="record-list">{warehouses.length?warehouses.map(w=><article className="record" key={w.id}><span className="record-icon"><Store/></span><div className="record-main"><strong>{w.name}</strong><small>{[w.region,w.department,w.province,w.district].filter(Boolean).join(" · ")}</small><em>Panetón 900 g {w.stock?.PANETON_900G||0} · Panetón 85 g {w.stock?.PANETON_85G||0} · Avena {w.stock?.AVENA||0} · Batea {w.stock?.BATEA||0} · Mandil {w.stock?.MANDIL||0} · Spaghetti {w.stock?.SPAGHETTI||0}</em></div><StatusPill status={w.status}/>{!Object.values(w.stock||{}).some(v=>Number(v)>0)&&<Btn onClick={()=>setRecharge(w)}><Plus/> Cargar stock inicial</Btn>}</article>):<Empty title="Sin almacenes" detail="Crea o importa los almacenes para comenzar." />}</div></div>{modal&&<WarehouseCreateModal onSave={save} close={()=>setModal(false)}/>} {recharge&&<WarehouseInitialStockModal warehouse={recharge} onSave={loadStock} close={()=>setRecharge(null)}/>}</section>;
+}
+function WarehouseCreateModal({onSave,close}:{onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState("");const [region,setRegion]=useState("");const [department,setDepartment]=useState("");const [province,setProvince]=useState("");const [district,setDistrict]=useState("");const save=async()=>{if(!name.trim()||!region.trim()||!department.trim()||!province.trim()||!district.trim())return;const ok=await onSave({id:`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status:"ACTIVO",marketIds:[],stock:{},updatedAt:new Date().toISOString()});if(ok)close();};return <Modal title="Nuevo almacén" detail="Registra el almacén sin modificar la información histórica existente." close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={save}>Guardar almacén</Btn></div></Modal>}
+function WarehouseInitialStockModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});return <Modal title="Cargar stock inicial" detail={warehouse.name} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={label}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(warehouse,quantities))close();}}><Plus/> Guardar stock inicial</Btn></div></Modal>}
+
 function CatalogProductModal({
   product,
   onSave,
@@ -5600,6 +5618,7 @@ function CoordinatorApp({
           onExport={exportSales}
         />
       )}
+      {tab === "almacen" && <WarehouseCatalog notify={notify} />}
       {tab === "mercados" && (
         <section className="panel">
           <div className="panel-header">
@@ -7151,6 +7170,7 @@ function AnalystApp({
   const tabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
+    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["almacen", "Almacén"]] : []),
     ["usuarios", "Usuarios"],
     ["clientes", "Clientes"],
     ...(canManageCatalogs
