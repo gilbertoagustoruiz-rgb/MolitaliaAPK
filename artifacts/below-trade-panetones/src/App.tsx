@@ -5169,6 +5169,12 @@ function LegacySalesDashboard({
   );
 }
 
+function WarehouseStockSummary() {
+  const [warehouses,setWarehouses]=useState<Warehouse[]>([]);
+  useEffect(()=>{void fetch("/api/app-storage/warehouses").then(async r=>{const p=await r.json();if(r.ok)setWarehouses(Array.isArray(p.warehouses)?p.warehouses:[]);}).catch(()=>setWarehouses([]));},[]);
+  return <section className="panel"><div className="panel-header"><div><h2>Stock actual de Almacenes</h2><p>Existencias centralizadas. Los promotores ya no administran stock personal.</p></div></div><div className="panel-body summary-table-wrap">{warehouses.length?<div className="stock-reconciliation-table"><div className="stock-reconciliation-row header"><span>Almacén</span><span>Panetón 900 g</span><span>Panetón 85 g</span><span>Avena</span><span>Batea</span><span>Mandil</span><span>Spaghetti</span></div>{warehouses.map(w=><div className="stock-reconciliation-row" key={w.id}><div><strong>{w.name}</strong><small>{w.department} · {w.province} · {w.district}</small></div><span>{Number(w.stock?.PANETON_900G)||0}</span><span>{Number(w.stock?.PANETON_85G)||0}</span><span>{Number(w.stock?.AVENA)||0}</span><span>{Number(w.stock?.BATEA)||0}</span><span>{Number(w.stock?.MANDIL)||0}</span><span>{Number(w.stock?.SPAGHETTI)||0}</span></div>)}</div>:<Empty title="Sin almacenes" detail="No hay existencias de almacén disponibles."/>}</div></section>;
+}
+
 function SalesDashboard({
   sales,
   markets,
@@ -5375,94 +5381,7 @@ function SalesDashboard({
           </div>
         </section>
       </div>
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2>Stock administrado por Almacén</h2>
-            <p>
-              El stock personal de promotores fue desactivado. Las existencias vigentes se administran exclusivamente desde el módulo Almacén.
-            </p>
-          </div>
-        </div>
-        <div className="panel-body summary-table-wrap">
-          {lowStockRows.length > 0 && (
-            <div className="stock-callout stock-callout-alert">
-              <AlertTriangle />
-              <div>
-                <strong>
-                  {lowStockRows.length} promotor
-                  {lowStockRows.length === 1 ? "" : "es"} con stock menor o
-                  igual al 20%
-                </strong>
-                <small>
-                  Recarga stock para:{" "}
-                  {lowStockRows
-                    .map(
-                      (row) =>
-                        `${row.promoter.name} (${row.lowStock.join(", ")})`,
-                    )
-                    .join(" · ")}
-                </small>
-              </div>
-            </div>
-          )}
-          {stockRows.length ? (
-            <div className="stock-reconciliation-table">
-              <div className="stock-reconciliation-row header">
-                <span>Promotor</span>
-                <span>Degustación personal</span>
-                {redemptionItems.map((item) => (
-                  <span key={item.id}>{item.label}</span>
-                ))}
-              </div>
-              {stockRows.map((row) => (
-                <div
-                  className={`stock-reconciliation-row ${row.lowStock.length ? "needs-stock" : ""}`}
-                  key={row.promoter.id}
-                >
-                  <div>
-                    <strong>{row.promoter.name}</strong>
-                    <small>
-                      DNI {row.promoter.dni} ·{" "}
-                      {row.promoter.roleLabel || row.promoter.role}
-                    </small>
-                    {row.lowStock.length > 0 && (
-                      <small className="stock-alert-text">
-                        Recargar: {row.lowStock.join(", ")}
-                      </small>
-                    )}
-                  </div>
-                  <b>
-                    {row.tastingStock}
-                    <small>panetones</small>
-                  </b>
-                  {redemptionItems.map((item) => (
-                    <span
-                      key={item.id}
-                      className={
-                        isBelowStockThreshold(
-                          row.redemptionStock[item.id],
-                          DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM[item.id],
-                        )
-                          ? "stock-low-cell"
-                          : ""
-                      }
-                    >
-                      {row.redemptionStock[item.id]}
-                      <small>unidades</small>
-                    </span>
-                  ))}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Empty
-              title="Stock personal desactivado"
-              detail="Consulta y administra las existencias desde el módulo Almacén."
-            />
-          )}
-        </div>
-      </section>
+      <WarehouseStockSummary />
       <div className="summary-sections">
         <section className="panel">
           <div className="panel-header">
