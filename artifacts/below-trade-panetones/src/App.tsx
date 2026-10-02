@@ -156,6 +156,7 @@ type Sale = {
   amountSoles: number;
   weightKg?: number;
   unitPrices?: Record<string, number>;
+  presentation?: "CAJA" | "LATA" | "BOLSA";
   planchas?: number;
   mix: Record<string, number>;
   bonus?: string;
@@ -168,6 +169,22 @@ type Sale = {
   updatedAt?: string;
   status: SyncStatus;
 };
+const UNIT_SALE_PRODUCTS = [
+  { sku: "COSTA-800", label: "PANETON COSTA 800 GR", brand: "COSTA", weightKg: 0.8 },
+  { sku: "COSTA-BOLSA-800", label: "PANETON COSTA BOLSA 800 GR", brand: "COSTA", weightKg: 0.8 },
+  { sku: "TODINNO-TODINNITO", label: "PANETÓN TODINNO + TODINNITO", brand: "TODINNO", weightKg: 0.9 },
+  { sku: "TODINNITO-85", label: "TODINNITO 85GR", brand: "TODINNITO", weightKg: 0.085 },
+  { sku: "PASQUALINO-800", label: "PASQUALINO 800 GR.", brand: "PASQUALINO", weightKg: 0.8 },
+  { sku: "TODINNO-900-BOLSA-TODINNITO", label: "PANETÓN TODINNO 900 GR BOLSA + TODINNITO", brand: "TODINNO", weightKg: 0.9 },
+  { sku: "TODINNO-CHOCOTINNO-450", label: "PANETON TODINNO CHOCOTINNO 450GR.", brand: "TODINNO", weightKg: 0.45 },
+  { sku: "MINI-COSTA-MINIONS-80", label: "MINI COSTA MINIONS 80G", brand: "COSTA", weightKg: 0.08 },
+  { sku: "MINI-COSTA-JURASSIC-80", label: "MINI COSTA JURASSIC 80G", brand: "COSTA", weightKg: 0.08 },
+  { sku: "TODINNO-LATA-900", label: "TODINNO LATA 900GR", brand: "TODINNO", weightKg: 0.9 },
+  { sku: "TODINNITO-CHOCOTINNO-450", label: "PANETON TODINNITO + CHOTINNO 450", brand: "TODINNITO", weightKg: 0.45 },
+  { sku: "TODINNITO-BOLSA", label: "PANETON TODINNITO BOLSA", brand: "TODINNITO", weightKg: 0.085 },
+] as const;
+const SALE_PRESENTATIONS = ["CAJA", "LATA", "BOLSA"] as const;
+
 type Attendance = {
   id: string;
   promoterId: string;
@@ -8700,6 +8717,7 @@ function PromoterApp({
   const [sku, setSku] = useState(products[0].sku);
   const [unitQtyInput, setUnitQtyInput] = useState("1");
   const [unitPriceSoles, setUnitPriceSoles] = useState("");
+  const [presentation, setPresentation] = useState<"CAJA" | "LATA" | "BOLSA">("BOLSA");
   const [brandPrices, setBrandPrices] = useState<Record<string, string>>({});
   const [planchasInput, setPlanchasInput] = useState("1");
   const [mixInputs, setMixInputs] = useState<Record<string, string>>({});
@@ -8735,9 +8753,7 @@ function PromoterApp({
       ),
     [productPrices],
   );
-  const unitProducts = availableProducts.filter((product) =>
-    product.saleModes?.includes("UNIDADES"),
-  );
+  const unitProducts = UNIT_SALE_PRODUCTS;
   const planchaCatalogProducts = availableProducts
     .filter((product) => product.saleModes?.includes("PLANCHAS"))
     .sort((first, second) => {
@@ -8796,7 +8812,7 @@ function PromoterApp({
   const selectedProduct =
     unitProducts.find((product) => product.sku === sku) ||
     unitProducts[0] ||
-    normalizedProducts([])[0];
+    UNIT_SALE_PRODUCTS[0];
   const planchaProductByBrand = Object.fromEntries(
     planchaCatalogProducts.map((product) => [product.brand, product]),
   );
@@ -9132,6 +9148,7 @@ function PromoterApp({
         mode === "UNIDADES"
           ? { [selectedProduct.sku]: unitPrice }
           : brandUnitPrices,
+      presentation: mode === "UNIDADES" ? presentation : undefined,
       planchas: mode === "PLANCHAS" ? planchas : undefined,
       mix: mode === "PLANCHAS" ? mix : { [selectedProduct.brand]: unitQty },
       bonus,
@@ -9425,12 +9442,12 @@ function PromoterApp({
         {mode === "UNIDADES" ? (
           <div className="form-grid">
             <SelectField
-              label="Panetón / marca"
+              label="Producto *"
               value={sku}
               onChange={setSku}
               items={unitProducts.map((product) => ({
                 value: product.sku,
-                label: `${product.brand} · ${product.product} · ${formatKilos(product.weightKg || 0)}`,
+                label: product.label,
               }))}
             />
             <Field label="Unidades (máximo 5)">
@@ -9462,6 +9479,12 @@ function PromoterApp({
                 testId="input-unit-price"
               />
             </Field>
+            <SelectField
+              label="Presentación *"
+              value={presentation}
+              onChange={(value) => setPresentation(value as "CAJA" | "LATA" | "BOLSA")}
+              items={SALE_PRESENTATIONS.map((value) => ({ value, label: value }))}
+            />
           </div>
         ) : (
           <div className="plancha-box">
