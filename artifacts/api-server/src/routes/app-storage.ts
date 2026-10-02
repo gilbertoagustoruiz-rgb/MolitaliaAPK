@@ -1184,6 +1184,9 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
+    const supplyMovements = await db.query(
+      "SELECT id,market_id,kind,item_id,quantity,actor_id,data FROM inventory_movements WHERE kind IN ('AJUSTE_CANJES','AJUSTE_DEGUSTACION') ORDER BY movement_date,id"
+    );
     const canjeMovements = await db.query(
       "SELECT id,market_id,actor_id,item_id,quantity,data FROM inventory_movements WHERE kind='CANJE' ORDER BY movement_date,id"
     );
@@ -1194,7 +1197,43 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       "SELECT id,market_id,promoter_id,data FROM sales WHERE data ? 'redemptionItems' ORDER BY sale_date,id"
     );
     const saleIdsWithCanjeMovement=new Set<string>();
-    let canjesProcessed=0,tastingsProcessed=0,skipped=0;
+    let suppliesProcessed=0,canjesProcessed=0,tastingsProcessed=0,skipped=0;
+    for(const row of supplyMovements.rows){
+      const movementId=String(row.id||"");
+      const ref=`SUPPLY:${movementId}`;
+      const done=await db.query("SELECT 1 FROM warehouse_movements WHERE data->>'referenceId'=$1 AND quantity>0 LIMIT 1",[ref]);
+      if(done.rows.length){skipped++;continue;}
+      const source=isRecord(row.data)?row.data:{};
+      const marketId=String(row.market_id||value(source,"marketId")||"");
+      if(!marketId || marketId.startsWith("PERSONAL:")){skipped++;continue;}
+      const warehouse=await warehouseForMarket(db as unknown as QueryClient,marketId);
+      const locked=await db.query("SELECT id,name,stock FROM warehouses WHERE id=$1 FOR UPDATE",[warehouse.id]);
+      const stock=isRecord(locked.rows[0]?.stock)?{...locked.rows[0].stock}:{};
+      const requirements:Record<string,number>={};
+      const quantity=Math.max(0,Math.floor(Number(row.quantity)||0));
+      if(String(row.kind)==="AJUSTE_DEGUSTACION"){
+        requirements.PANETON_900G=quantity;
+      } else {
+        const components=isRecord(source.canjeComponents)?source.canjeComponents:null;
+        if(components){
+          for(const itemId of redemptionItemIds) requirements[itemId]=Math.max(0,Math.floor((Number(components[itemId])||0)*quantity));
+        } else {
+          const itemId=String(row.item_id||value(source,"itemId"));
+          if(redemptionItemIds.includes(itemId)) requirements[itemId]=quantity;
+        }
+      }
+      if(!Object.values(requirements).some(Number)){skipped++;continue;}
+      const now=new Date().toISOString();
+      for(const [itemId,raw] of Object.entries(requirements)){
+        const amount=Math.max(0,Math.floor(Number(raw)||0));
+        if(!amount)continue;
+        stock[itemId]=Math.max(0,Number(stock[itemId])||0)+amount;
+        const movement={id:`ALM-SUP-${randomUUID()}`,warehouseId:String(warehouse.id),marketId,kind:"REGULARIZACION_ABASTECIMIENTO",itemId,quantity:amount,actorId:String(row.actor_id||actor.id),referenceId:ref,date:now,sourceKind:String(row.kind),sourceMovementId:movementId};
+        await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,warehouse.id,movement.kind,itemId,amount,movement.actorId,now,movement]);
+      }
+      await db.query("UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",[warehouse.id,stock]);
+      suppliesProcessed++;
+    }
     for(const row of canjeMovements.rows){
       const movementId=String(row.id||"");
       const match=movementId.match(/^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/);
@@ -1238,7 +1277,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       tastingsProcessed++;
     }
     await db.query("COMMIT");
-    res.json({canjesProcessed,tastingsProcessed,skipped,totalProcessed:canjesProcessed+tastingsProcessed});
+    res.json({suppliesProcessed,canjesProcessed,tastingsProcessed,skipped,totalProcessed:suppliesProcessed+canjesProcessed+tastingsProcessed});
   } catch(error) {
     await db.query("ROLLBACK").catch(()=>undefined);
     req.log.error({err:error},"Unable to regularize warehouse history");
