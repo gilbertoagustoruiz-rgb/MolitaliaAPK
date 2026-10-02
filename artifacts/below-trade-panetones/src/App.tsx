@@ -3035,14 +3035,13 @@ function NewMarketModal({
             testId="input-new-market-district"
           />
         </Field>
-        <Field label="Almacén *">
-          <Select
-            value={warehouseId}
-            onChange={setWarehouseId}
-            options={[{ value: "", label: "Seleccionar almacén" }, ...warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))]}
-            placeholder="Seleccionar almacén"
-          />
-        </Field>
+        <SelectField
+          label="Almacén *"
+          value={warehouseId}
+          onChange={setWarehouseId}
+          items={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))}
+          placeholder="Seleccionar almacén"
+        />
       </div>
       <div className="modal-actions">
         <Btn variant="outline" onClick={close}>
