@@ -1252,6 +1252,34 @@ router.post("/app-storage/warehouses", async (req, res): Promise<void> => {
   }
 });
 
+router.put("/app-storage/warehouses/:id/import-stock", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede corregir stock importado." });
+  const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
+  const allowed = ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"];
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const found = await db.query("SELECT stock,data FROM warehouses WHERE id=$1 FOR UPDATE", [req.params.id]);
+    if (!found.rows[0]) throw new Error("El almacén no existe.");
+    const stock = isRecord(found.rows[0].stock) ? { ...found.rows[0].stock } : {};
+    const now = new Date().toISOString();
+    for (const itemId of allowed) {
+      if (!Object.prototype.hasOwnProperty.call(quantities,itemId)) continue;
+      stock[itemId] = Math.max(0, Math.floor(Number(quantities[itemId]) || 0));
+    }
+    const movement = { id:`ALM-IMP-${randomUUID()}`,warehouseId:req.params.id,kind:"CORRECCION_IMPORTACION",quantities,actorId:actor.id,date:now };
+    await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,req.params.id,movement.kind,"MULTI",0,actor.id,now,movement]);
+    const data=isRecord(found.rows[0].data)?{...found.rows[0].data,stock,updatedAt:now}:{id:req.params.id,stock,updatedAt:now};
+    await db.query("UPDATE warehouses SET stock=$2,data=$3,updated_at=now() WHERE id=$1",[req.params.id,stock,data]);
+    await db.query("COMMIT");
+    res.json({stock});
+  } catch(error) {
+    await db.query("ROLLBACK").catch(()=>undefined);
+    res.status(409).json({message:error instanceof Error?error.message:"No se pudo corregir el stock importado."});
+  } finally { db.release(); }
+});
+
 router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<void> => {
   const actor = await authorizedWarehouseActor(req);
   if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede cargar stock." });
