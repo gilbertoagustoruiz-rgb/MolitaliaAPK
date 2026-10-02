@@ -1234,7 +1234,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       if(correction.rows.length){
         const data=isRecord(correction.rows[0].data)?correction.rows[0].data:{};
         const quantities=isRecord(data.quantities)?data.quantities:{};
-        for(const itemId of warehouseItemIds) stock[itemId]=Math.max(0,Math.floor(Number(quantities[itemId])||0));
+        for(const itemId of ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"]) stock[itemId]=Math.max(0,Math.floor(Number(quantities[itemId])||0));
         baseDate=correction.rows[0].movement_date ? new Date(correction.rows[0].movement_date).toISOString() : null;
       } else {
         const initial=await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity,MIN(movement_date) AS base_date FROM warehouse_movements WHERE warehouse_id=$1 AND kind='CARGA_INICIAL' GROUP BY item_id",[warehouseId]);
