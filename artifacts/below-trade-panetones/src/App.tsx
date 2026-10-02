@@ -8970,6 +8970,24 @@ function PromoterApp({
         "NINGUNO" as const,
       ])
     : (["NINGUNO" as const]);
+  useEffect(() => {
+    if (planchas < 10) {
+      setPlanchaAccessory("NINGUNO");
+      return;
+    }
+    const month = saleDate.getMonth() + 1;
+    const preferred =
+      (month === 9 || month === 10) && warehouseRedemptionStock.MANDIL > 0
+        ? "MANDIL"
+        : month === 11 && warehouseRedemptionStock.BATEA > 0
+          ? "BATEA"
+          : "NINGUNO";
+    setPlanchaAccessory(preferred);
+  }, [
+    selectedWarehouse?.id,
+    planchas >= 10,
+    saleDate.getMonth(),
+  ]);
   const effectivePlanchaAccessory = availablePlanchaAccessories.includes(planchaAccessory)
     ? planchaAccessory
     : availablePlanchaAccessories[0];
