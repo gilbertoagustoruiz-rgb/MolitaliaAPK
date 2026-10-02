@@ -6060,6 +6060,17 @@ function AnalystApp({
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
+  const [marketWarehouses, setMarketWarehouses] = useState<Warehouse[]>([]);
+  useEffect(() => {
+    void fetch("/api/app-storage/warehouses")
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || "No se pudieron cargar los almacenes.");
+        setMarketWarehouses(Array.isArray(payload.warehouses) ? payload.warehouses : []);
+      })
+      .catch(() => setMarketWarehouses([]));
+  }, []);
+  const marketWarehouseMap = Object.fromEntries(marketWarehouses.map((warehouse) => [warehouse.id, warehouse.name]));
   const loadTradeApprovals = async () => {
     setTradeApprovalsLoading(true);
     try {
@@ -7226,6 +7237,7 @@ function AnalystApp({
       market.department,
       market.province,
       market.district,
+      market.warehouseId ? marketWarehouseMap[market.warehouseId] || market.warehouseId : "SIN ALMACÉN",
       marketAssignmentSummary[market.id]?.clients || 0,
       marketAssignmentSummary[market.id]?.promoters || 0,
     ]),
@@ -7391,24 +7403,25 @@ function AnalystApp({
             <TableSearch
               value={marketSearch}
               onChange={setMarketSearch}
-              fields="Código, nombre, región, departamento, provincia, distrito y cantidades de clientes y promotores."
+              fields="Código, nombre, región, departamento, provincia, distrito, almacén y cantidades de clientes y promotores."
               count={searchedMarkets.length}
               total={markets.length}
             />
             <div className="module-table-wrap">
               <div className="module-table">
-                <div className="module-table-row module-table-header cols-8">
+                <div className="module-table-row module-table-header cols-9">
                   <span>Mercado</span>
                   <span>Región</span>
                   <span>Departamento</span>
                   <span>Provincia</span>
                   <span>Distrito</span>
+                  <span>Almacén</span>
                   <span>Clientes</span>
                   <span>Promotores</span>
                   <span>Acciones</span>
                 </div>
                 {searchedMarkets.map((market) => (
-                  <div className="module-table-row cols-8" key={market.id}>
+                  <div className="module-table-row cols-9" key={market.id}>
                     <span>
                       <strong>{market.name}</strong>
                       <small>{market.id}</small>
@@ -7419,6 +7432,7 @@ function AnalystApp({
                     <span>{market.department}</span>
                     <span>{market.province}</span>
                     <span>{market.district}</span>
+                    <span><strong>{market.warehouseId ? marketWarehouseMap[market.warehouseId] || market.warehouseId : "SIN ALMACÉN"}</strong></span>
                     <span>
                       <strong>
                         {marketAssignmentSummary[market.id]?.clients || 0}
