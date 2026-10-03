@@ -2349,45 +2349,40 @@ router.post(
         const product = value(input, "product");
         const brand = value(input, "brand").toUpperCase();
         const weightKg = numeric(input, "weightKg");
-        const unitPrice = numeric(input, "unitPrice");
+        const unitPrice = Math.max(0, numeric(input, "unitPrice"));
         const saleModes = Array.isArray(input.saleModes)
           ? input.saleModes.filter((mode) =>
               ["UNIDADES", "PLANCHAS"].includes(String(mode)),
             )
           : [];
-        if (
-          !sku ||
-          !product ||
-          !brand ||
-          weightKg <= 0 ||
-          unitPrice <= 0 ||
-          !saleModes.length
-        )
+        if (!sku || !product || !brand || weightKg <= 0 || !saleModes.length)
           throw new Error(
-            "El producto requiere SKU, nombre, marca, peso, precio y al menos un tipo de venta.",
+            "El producto requiere SKU, nombre, marca, peso y al menos un tipo de venta.",
           );
-        if (saleModes.includes("PLANCHAS")) {
-          const duplicatedBrand = await pool.query(
-            "SELECT sku FROM product_prices WHERE sku<>$1 AND COALESCE(data->>'status','ACTIVO')='ACTIVO' AND data->>'brand'=$2 AND data->'saleModes' ? 'PLANCHAS' LIMIT 1",
-            [sku, brand],
-          );
-          if (duplicatedBrand.rows.length)
-            throw new Error(
-              "Ya existe un producto activo para planchas con esta marca.",
-            );
-        }
+        const presentationValue = value(input, "presentation").toUpperCase();
+        const presentation = ["CAJA", "BOLSA", "LATA"].includes(presentationValue)
+          ? presentationValue
+          : "BOLSA";
+        const unitMeasure = Math.max(
+          1,
+          Math.floor(numeric(input, "unitMeasure") || numeric(input, "unitsPerPackage") || 1),
+        );
+        const unitsPerPlancha = Math.max(
+          1,
+          Math.floor(numeric(input, "unitsPerPlancha") || 1),
+        );
         const record = {
           sku,
           product,
           brand,
+          presentation,
+          unitMeasure,
           weightKg,
           saleModes,
-          unitsPerPackage: Math.max(
-            1,
-            Math.floor(numeric(input, "unitsPerPackage") || 1),
-          ),
+          unitsPerPlancha,
+          unitsPerPackage: unitMeasure,
           unitPrice,
-          totalPrice: numeric(input, "totalPrice") || unitPrice,
+          totalPrice: numeric(input, "totalPrice") || unitPrice * unitMeasure,
           status: value(input, "status") === "INACTIVO" ? "INACTIVO" : "ACTIVO",
           updatedAt,
         };
