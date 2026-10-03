@@ -157,6 +157,14 @@ type Sale = {
   weightKg?: number;
   unitPrices?: Record<string, number>;
   presentation?: "CAJA" | "LATA" | "BOLSA";
+  planchaType?: "FLAT" | "MIX";
+  planchaLines?: Array<{
+    sku: string;
+    product: string;
+    units: number;
+    unitPrice: number;
+    presentation: "CAJA" | "LATA" | "BOLSA";
+  }>;
   planchas?: number;
   mix: Record<string, number>;
   bonus?: string;
@@ -184,6 +192,36 @@ const UNIT_SALE_PRODUCTS = [
   { sku: "TODINNITO-BOLSA", label: "PANETON TODINNITO BOLSA", brand: "TODINNITO", weightKg: 0.085 },
 ] as const;
 const SALE_PRESENTATIONS = ["CAJA", "LATA", "BOLSA"] as const;
+const PLANCHA_UNITS_BY_SKU: Record<string, number> = {
+  "COSTA-800": 6,
+  "COSTA-BOLSA-800": 6,
+  "TODINNO-TODINNITO": 6,
+  "TODINNITO-85": 48,
+  "PASQUALINO-800": 6,
+  "TODINNO-900-BOLSA-TODINNITO": 6,
+  "TODINNO-CHOCOTINNO-450": 6,
+  "MINI-COSTA-MINIONS-80": 48,
+  "MINI-COSTA-JURASSIC-80": 48,
+  "TODINNO-LATA-900": 6,
+  "TODINNITO-CHOCOTINNO-450": 6,
+  "TODINNITO-BOLSA": 6,
+};
+type PlanchaLine = {
+  id: string;
+  sku: string;
+  units: string;
+  unitPrice: string;
+  presentation: "CAJA" | "LATA" | "BOLSA";
+};
+function newPlanchaLine(index = 0): PlanchaLine {
+  return {
+    id: crypto.randomUUID(),
+    sku: UNIT_SALE_PRODUCTS[index]?.sku || UNIT_SALE_PRODUCTS[0].sku,
+    units: "",
+    unitPrice: "",
+    presentation: "BOLSA",
+  };
+}
 
 type Attendance = {
   id: string;
@@ -8799,7 +8837,8 @@ function PromoterApp({
   const [presentation, setPresentation] = useState<"CAJA" | "LATA" | "BOLSA">("BOLSA");
   const [brandPrices, setBrandPrices] = useState<Record<string, string>>({});
   const [planchasInput, setPlanchasInput] = useState("1");
-  const [mixInputs, setMixInputs] = useState<Record<string, string>>({});
+  const [planchaType, setPlanchaType] = useState<"FLAT" | "MIX">("FLAT");
+  const [planchaLines, setPlanchaLines] = useState<PlanchaLine[]>([newPlanchaLine()]);
   const [selectedBonusProductId, setSelectedBonusProductId] = useState<
     CanjeProductId | ""
   >("");
@@ -8836,41 +8875,10 @@ function PromoterApp({
     [productPrices],
   );
   const unitProducts = UNIT_SALE_PRODUCTS;
-  const planchaCatalogProducts = availableProducts
-    .filter((product) => product.saleModes?.includes("PLANCHAS"))
-    .sort((first, second) => {
-      const order = (brand: string) => {
-        const normalized = brand.toUpperCase();
-        if (normalized.includes("TODIN")) return 0;
-        if (normalized.includes("COSTA")) return 1;
-        if (normalized.includes("PASCUAL")) return 2;
-        return 99;
-      };
-      return order(first.brand) - order(second.brand) ||
-        first.brand.localeCompare(second.brand, "es");
-    });
   useEffect(() => {
     const price = priceBySku[sku]?.unitPrice;
     setUnitPriceSoles(price ? String(price) : "");
   }, [sku, priceBySku]);
-  useEffect(() => {
-    setBrandPrices(
-      Object.fromEntries(
-        planchaCatalogProducts.map((product) => [
-          product.brand,
-          String(product.unitPrice || ""),
-        ]),
-      ),
-    );
-    setMixInputs((current) =>
-      Object.fromEntries(
-        planchaCatalogProducts.map((product) => [
-          product.brand,
-          current[product.brand] || "0",
-        ]),
-      ),
-    );
-  }, [productPrices]);
   useEffect(() => {
     if (!unitProducts.some((product) => product.sku === sku) && unitProducts[0])
       setSku(unitProducts[0].sku);
@@ -8885,25 +8893,52 @@ function PromoterApp({
   }, [selectedMarketId, selectedClientId]);
   const unitQty = Number(unitQtyInput) || 0;
   const planchas = Number(planchasInput) || 0;
-  const mix = Object.fromEntries(
-    Object.entries(mixInputs).map(([brand, value]) => [
-      brand,
-      Number(value) || 0,
-    ]),
-  );
   const selectedProduct =
     unitProducts.find((product) => product.sku === sku) ||
     unitProducts[0] ||
     UNIT_SALE_PRODUCTS[0];
-  const planchaProductByBrand = Object.fromEntries(
-    planchaCatalogProducts.map((product) => [product.brand, product]),
-  );
-  const brandUnitPrices = Object.fromEntries(
-    Object.keys(mix).map((brand) => [
-      brand,
-      parseSoles(brandPrices[brand] || ""),
-    ]),
-  ) as Record<string, number>;
+  useEffect(() => {
+    if (planchaType !== "FLAT" || !planchaLines[0]) return;
+    const expected = planchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0].sku] || 6);
+    if (planchaLines[0].units !== String(expected)) {
+      setPlanchaLines((current) =>
+        current.map((line, index) => index === 0 ? { ...line, units: String(expected) } : line),
+      );
+    }
+  }, [planchaType, planchas, planchaLines[0]?.sku]);
+  const normalizedPlanchaLines = planchaLines.map((line) => {
+    const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
+    return {
+      ...line,
+      product,
+      units: Math.max(0, Math.trunc(Number(line.units) || 0)),
+      unitPrice: parseSoles(line.unitPrice || ""),
+    };
+  });
+  const totalMix = normalizedPlanchaLines.reduce((sum, line) => sum + line.units, 0);
+  const total = mode === "UNIDADES" ? unitQty : totalMix;
+  const unitPrice = parseSoles(unitPriceSoles);
+  const saleAmount =
+    mode === "UNIDADES"
+      ? unitQty * unitPrice
+      : normalizedPlanchaLines.reduce(
+          (sum, line) => sum + line.units * (line.unitPrice || 0),
+          0,
+        );
+  const orderWeightKg =
+    mode === "UNIDADES"
+      ? unitQty * selectedProduct.weightKg
+      : normalizedPlanchaLines.reduce(
+          (sum, line) => sum + line.units * line.product.weightKg,
+          0,
+        );
+  const weightPerPlanchaKg =
+    mode === "PLANCHAS" && planchas > 0 ? orderWeightKg / planchas : 0;
+  const pricesValid =
+    mode === "UNIDADES"
+      ? unitPrice > 0
+      : normalizedPlanchaLines.length > 0 &&
+        normalizedPlanchaLines.every((line) => line.units > 0 && line.unitPrice > 0);
   const promoterStock = administrative
     ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
     : userRedemptionStock(user);
@@ -9027,7 +9062,14 @@ function PromoterApp({
   const validUnitQty =
     mode === "PLANCHAS" ||
     (Number.isInteger(unitQty) && unitQty >= 1 && unitQty <= 5);
-  const validMix = mode === "UNIDADES" || totalMix === planchas * 6;
+  const validMix =
+    mode === "UNIDADES" ||
+    (planchaType === "FLAT"
+      ? normalizedPlanchaLines.length === 1 &&
+        normalizedPlanchaLines[0].units ===
+          planchas * (PLANCHA_UNITS_BY_SKU[normalizedPlanchaLines[0].sku] || 6)
+      : normalizedPlanchaLines.length >= 2 &&
+        normalizedPlanchaLines.every((line) => line.units > 0));
   const saleFormValid = Boolean(
     clientId &&
     (!bonus || finalClientName.trim()) &&
@@ -9289,10 +9331,24 @@ function PromoterApp({
       unitPrices:
         mode === "UNIDADES"
           ? { [selectedProduct.sku]: unitPrice }
-          : brandUnitPrices,
+          : Object.fromEntries(normalizedPlanchaLines.map((line) => [line.sku, line.unitPrice])),
       presentation: mode === "UNIDADES" ? presentation : undefined,
+      planchaType: mode === "PLANCHAS" ? planchaType : undefined,
+      planchaLines:
+        mode === "PLANCHAS"
+          ? normalizedPlanchaLines.map((line) => ({
+              sku: line.sku,
+              product: line.product.label,
+              units: line.units,
+              unitPrice: line.unitPrice,
+              presentation: line.presentation,
+            }))
+          : undefined,
       planchas: mode === "PLANCHAS" ? planchas : undefined,
-      mix: mode === "PLANCHAS" ? mix : { [selectedProduct.brand]: unitQty },
+      mix:
+        mode === "PLANCHAS"
+          ? Object.fromEntries(normalizedPlanchaLines.map((line) => [line.product.label, line.units]))
+          : { [selectedProduct.brand]: unitQty },
       bonus,
       redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
       redemptionItems: bonus ? requiredRedemptions : undefined,
@@ -9632,75 +9688,158 @@ function PromoterApp({
           </div>
         ) : (
           <div className="plancha-box">
+            <Field label="Tipo de plancha *">
+              <div className="sale-mode-grid">
+                <button
+                  type="button"
+                  className={planchaType === "FLAT" ? "active" : ""}
+                  onClick={() => {
+                    setPlanchaType("FLAT");
+                    setPlanchaLines([planchaLines[0] || newPlanchaLine()]);
+                  }}
+                  data-testid="plancha-flat"
+                >
+                  Plancha Flat
+                </button>
+                <button
+                  type="button"
+                  className={planchaType === "MIX" ? "active" : ""}
+                  onClick={() => {
+                    setPlanchaType("MIX");
+                    setPlanchaLines((current) =>
+                      current.length >= 2 ? current : [current[0] || newPlanchaLine(), newPlanchaLine(1)],
+                    );
+                  }}
+                  data-testid="plancha-mix"
+                >
+                  Plancha Mix
+                </button>
+              </div>
+            </Field>
             <Field label="Cantidad de planchas">
               <Input
                 type="number"
                 value={planchasInput}
                 onChange={(value) =>
                   setPlanchasInput(
-                    value === ""
-                      ? ""
-                      : String(Math.max(1, Math.trunc(Number(value)))),
+                    value === "" ? "" : String(Math.max(1, Math.trunc(Number(value)))),
                   )
                 }
                 min={1}
                 testId="input-sale-planchas"
               />
             </Field>
-            <p className="formula">
-              Total requerido: <strong>{planchas * 6} unidades</strong> · cada
-              marca puede iniciar en 0 · {formatKilos(weightPerPlanchaKg)} por
-              plancha
-            </p>
-            <div className="brand-mix">
-              {Object.entries(mixInputs).map(([brand, quantity]) => (
-                <Field label={brand} key={brand}>
-                  <Input
-                    type="number"
-                    value={quantity}
-                    onChange={(value) =>
-                      setMixInputs({
-                        ...mixInputs,
-                        [brand]:
-                          value === ""
-                            ? ""
-                            : String(Math.max(0, Math.trunc(Number(value)))),
-                      })
-                    }
-                    min={0}
-                  />
-                </Field>
-              ))}
-            </div>
-            <div className="brand-prices">
-              {Object.entries(mix).map(([brand]) => (
-                <Field
-                  label={`${brand} · precio unitario (S/) *`}
-                  key={`price-${brand}`}
-                >
-                  <Input
-                    type="number"
-                    value={brandPrices[brand] || ""}
-                    onChange={(value) =>
-                      setBrandPrices({ ...brandPrices, [brand]: value })
-                    }
-                    min={0.01}
-                    step={0.01}
-                    placeholder="0.00"
-                    testId={`input-price-${brand.toLowerCase()}`}
-                  />
-                </Field>
-              ))}
-            </div>
+            {planchaLines.map((line, index) => {
+              const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
+              const unitsPerPlancha = PLANCHA_UNITS_BY_SKU[line.sku] || 6;
+              const expectedFlatUnits = planchas * unitsPerPlancha;
+              return (
+                <div className="plancha-line" key={line.id}>
+                  <Field label={planchaType === "MIX" ? `Producto ${index + 1} *` : "Producto *"}>
+                    <select
+                      className="select"
+                      value={line.sku}
+                      onChange={(event) => {
+                        const nextSku = event.target.value;
+                        setPlanchaLines((current) =>
+                          current.map((item) =>
+                            item.id === line.id
+                              ? {
+                                  ...item,
+                                  sku: nextSku,
+                                  units:
+                                    planchaType === "FLAT"
+                                      ? String(planchas * (PLANCHA_UNITS_BY_SKU[nextSku] || 6))
+                                      : item.units,
+                                }
+                              : item,
+                          ),
+                        );
+                      }}
+                    >
+                      {UNIT_SALE_PRODUCTS.map((item) => (
+                        <option value={item.sku} key={item.sku}>{item.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="brand-mix">
+                    <Field label="Unidades *">
+                      <Input
+                        type="number"
+                        value={planchaType === "FLAT" ? String(expectedFlatUnits) : line.units}
+                        onChange={(value) =>
+                          setPlanchaLines((current) =>
+                            current.map((item) =>
+                              item.id === line.id
+                                ? { ...item, units: value === "" ? "" : String(Math.max(0, Math.trunc(Number(value)))) }
+                                : item,
+                            ),
+                          )
+                        }
+                        min={1}
+                      />
+                    </Field>
+                    <Field label="Precio unitario (S/) *">
+                      <Input
+                        type="number"
+                        value={line.unitPrice}
+                        onChange={(value) =>
+                          setPlanchaLines((current) =>
+                            current.map((item) => item.id === line.id ? { ...item, unitPrice: value } : item),
+                          )
+                        }
+                        min={0.01}
+                        step={0.01}
+                        placeholder="0.00"
+                      />
+                    </Field>
+                    <SelectField
+                      label="Presentación *"
+                      value={line.presentation}
+                      onChange={(value) =>
+                        setPlanchaLines((current) =>
+                          current.map((item) =>
+                            item.id === line.id
+                              ? { ...item, presentation: value as "CAJA" | "LATA" | "BOLSA" }
+                              : item,
+                          ),
+                        )
+                      }
+                      items={SALE_PRESENTATIONS.map((value) => ({ value, label: value }))}
+                    />
+                  </div>
+                  <p className="formula">
+                    {product.label} · {unitsPerPlancha} unidades por plancha
+                  </p>
+                  {planchaType === "MIX" && planchaLines.length > 2 && (
+                    <Btn
+                      type="button"
+                      variant="outline"
+                      onClick={() => setPlanchaLines((current) => current.filter((item) => item.id !== line.id))}
+                    >
+                      Eliminar producto
+                    </Btn>
+                  )}
+                </div>
+              );
+            })}
+            {planchaType === "MIX" && (
+              <Btn
+                type="button"
+                variant="outline"
+                onClick={() => setPlanchaLines((current) => [...current, newPlanchaLine(current.length)])}
+              >
+                Agregar Producto
+              </Btn>
+            )}
             <div className={`mix-status ${validMix ? "valid" : "invalid"}`}>
               {validMix ? (
-                <>
-                  <CheckCircle2 /> Mix válido: {totalMix} unidades
-                </>
+                <><CheckCircle2 /> {planchaType === "FLAT" ? "Plancha Flat válida" : `Mix registrado: ${totalMix} unidades`}</>
               ) : (
                 <>
-                  Debes sumar {planchas * 6} unidades entre las marcas
-                  utilizadas.
+                  {planchaType === "FLAT"
+                    ? `Este producto requiere ${planchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0]?.sku] || 6)} unidades para ${planchas} planchas.`
+                    : "Agrega al menos 2 productos con sus unidades y precios."}
                 </>
               )}
             </div>
