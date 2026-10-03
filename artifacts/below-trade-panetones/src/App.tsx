@@ -6538,27 +6538,53 @@ function AnalystApp({
     try {
       const records = await parseImportRecords(file);
       const currentCatalog = normalizedProducts(productPrices);
-      let imported = 0;
+      const grouped = new Map<
+        string,
+        {
+          sku: string;
+          product: string;
+          brand: string;
+          presentation: "CAJA" | "BOLSA" | "LATA";
+          unitMeasure: number;
+          weightKg: number;
+          unitsPerPlancha: number;
+          unitPrice: number;
+          saleModes: Set<SaleMode>;
+          status: Status;
+        }
+      >();
       let skipped = 0;
-      for (const [index, record] of records.entries()) {
-        const productName = csvField(record, [
+
+      const baseProductName = (value: string) =>
+        value
+          .replace(/\s*-?\s*\(?\s*PLANCHA\s*\*\s*\d+\s*\)?\s*$/i, "")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      for (const record of records) {
+        const rawProduct = csvField(record, [
           "producto",
           "nombreproducto",
           "descripcion",
         ]).trim();
         const brand = csvField(record, ["marca", "brand"]).trim().toUpperCase();
-        if (!productName || !brand) {
+        if (!rawProduct || !brand) {
           skipped += 1;
           continue;
         }
-        const presentationRaw = csvField(record, ["presentacion", "presentation"]);
-        const presentationValue = normalizeCsvHeader(presentationRaw);
+
+        const productName = baseProductName(rawProduct).toUpperCase();
+        const planchaMatch = rawProduct.match(/PLANCHA\s*\*\s*(\d+)/i);
+        const presentationValue = normalizeCsvHeader(
+          csvField(record, ["presentacion", "presentation"]),
+        );
         const presentation: "CAJA" | "BOLSA" | "LATA" =
           presentationValue === "caja"
             ? "CAJA"
             : presentationValue === "lata"
               ? "LATA"
               : "BOLSA";
+
         const measure = Math.max(
           1,
           Math.floor(
@@ -6567,79 +6593,142 @@ function AnalystApp({
                 "medidaunitaria",
                 "medida",
                 "unidad",
-                "unidadesporemapeque",
                 "unidadesporempaque",
               ]),
             ) || 1,
           ),
         );
-        const gramsRaw = csvField(record, ["gramaje", "gramos", "peso", "pesogr"]);
-        const grams = csvNumber(gramsRaw);
+        const grams = csvNumber(
+          csvField(record, ["gramaje", "gramos", "peso", "pesogr"]),
+        );
         if (grams <= 0) {
           skipped += 1;
           continue;
         }
+
         const modalityRaw = normalizeCsvHeader(
           csvField(record, ["modalidad", "tipoventa", "ventamodalidad"]),
         );
-        const saleModes: SaleMode[] =
+        const inferredPlancha = Boolean(planchaMatch) || measure > 1;
+        const rowModes: SaleMode[] =
           modalityRaw === "planchas" || modalityRaw === "plancha"
             ? ["PLANCHAS"]
             : modalityRaw === "unidades" || modalityRaw === "unidad"
               ? ["UNIDADES"]
-              : ["UNIDADES", "PLANCHAS"];
-        const unitsPerPlancha = saleModes.includes("PLANCHAS")
-          ? Math.max(
-              1,
-              Math.floor(
-                csvNumber(
-                  csvField(record, [
-                    "unidadesporplancha",
-                    "undxplancha",
-                    "undplancha",
-                    "unidadesplancha",
-                  ]),
-                ) || 6,
-              ),
-            )
-          : 1;
-        const explicitSku = csvField(record, ["sku", "codigo", "codigoproducto"]).trim();
-        const existing = currentCatalog.find(
+              : modalityRaw === "ambos"
+                ? ["UNIDADES", "PLANCHAS"]
+                : inferredPlancha
+                  ? ["PLANCHAS"]
+                  : ["UNIDADES"];
+
+        const explicitUnitsPerPlancha = Math.floor(
+          csvNumber(
+            csvField(record, [
+              "unidadesporplancha",
+              "undxplancha",
+              "undplancha",
+              "unidadesplancha",
+            ]),
+          ),
+        );
+        const rowUnitsPerPlancha = Math.max(
+          1,
+          explicitUnitsPerPlancha ||
+            Number(planchaMatch?.[1] || 0) ||
+            (rowModes.includes("PLANCHAS") ? measure : 1),
+        );
+
+        const unitGrams =
+          rowModes.includes("PLANCHAS") && rowUnitsPerPlancha > 1
+            ? grams / rowUnitsPerPlancha
+            : grams / Math.max(1, measure);
+
+        const key = [
+          normalizeCsvHeader(brand),
+          normalizeCsvHeader(productName),
+          presentation,
+        ].join("|");
+        const existingCatalog = currentCatalog.find(
           (item) =>
             normalizeCsvHeader(item.product) === normalizeCsvHeader(productName) &&
             normalizeCsvHeader(item.brand || "") === normalizeCsvHeader(brand) &&
             (item.presentation || "BOLSA") === presentation,
         );
+        const existingGroup = grouped.get(key);
+        const explicitSku = csvField(record, [
+          "sku",
+          "codigo",
+          "codigoproducto",
+        ]).trim();
         const generatedSku =
           explicitSku ||
-          existing?.sku ||
+          existingCatalog?.sku ||
           `MAR-${normalizeCsvHeader(brand).toUpperCase()}-${normalizeCsvHeader(productName)
             .toUpperCase()
-            .slice(0, 28)}-${index + 1}`;
-        const unitPrice = Math.max(
+            .slice(0, 24)}-${presentation}`;
+
+        const rowPrice = Math.max(
           0,
           csvNumber(
             csvField(record, [
               "preciounitario",
               "precio",
               "preciounitarios",
-              "preciounitarios",
             ]),
           ),
         );
+        const rowStatus = csvStatus(csvField(record, ["estado", "status"]));
+
+        if (!existingGroup) {
+          grouped.set(key, {
+            sku: generatedSku,
+            product: productName,
+            brand,
+            presentation,
+            unitMeasure: rowModes.includes("UNIDADES") ? measure : 1,
+            weightKg: unitGrams / 1000,
+            unitsPerPlancha: rowUnitsPerPlancha,
+            unitPrice: rowPrice || Number(existingCatalog?.unitPrice || 0),
+            saleModes: new Set(rowModes),
+            status: rowStatus,
+          });
+          continue;
+        }
+
+        rowModes.forEach((mode) => existingGroup.saleModes.add(mode));
+        if (rowModes.includes("UNIDADES")) {
+          existingGroup.unitMeasure = measure;
+          existingGroup.weightKg = unitGrams / 1000;
+        }
+        if (rowModes.includes("PLANCHAS"))
+          existingGroup.unitsPerPlancha = rowUnitsPerPlancha;
+        if (!existingGroup.unitPrice && rowPrice) existingGroup.unitPrice = rowPrice;
+        if (explicitSku) existingGroup.sku = explicitSku;
+        existingGroup.status = rowStatus;
+        grouped.set(key, existingGroup);
+      }
+
+      if (!grouped.size)
+        throw new Error(
+          "No se encontraron productos válidos. Revisa PRODUCTO, MARCA y GRAMAJE.",
+        );
+
+      let imported = 0;
+      for (const item of grouped.values()) {
+        const saleModes = Array.from(item.saleModes);
         const catalogRecord: ProductPrice = {
-          sku: generatedSku,
-          product: productName.toUpperCase(),
-          brand,
-          presentation,
-          unitMeasure: measure,
-          weightKg: grams / 1000,
-          unitsPerPlancha,
-          unitsPerPackage: measure,
-          unitPrice,
-          totalPrice: unitPrice * measure,
+          sku: item.sku.toUpperCase(),
+          product: item.product,
+          brand: item.brand,
+          presentation: item.presentation,
+          unitMeasure: item.unitMeasure,
+          weightKg: item.weightKg,
+          unitsPerPlancha: item.unitsPerPlancha,
+          unitsPerPackage: item.unitMeasure,
+          unitPrice: item.unitPrice,
+          totalPrice: item.unitPrice * item.unitMeasure,
           saleModes,
-          status: csvStatus(csvField(record, ["estado", "status"])),
+          status: item.status,
           updatedAt: new Date().toISOString(),
         };
         await adminRequest("/catalog/products", {
@@ -6649,14 +6738,10 @@ function AnalystApp({
         });
         imported += 1;
       }
-      if (!imported)
-        throw new Error(
-          "No se encontraron productos válidos. Revisa PRODUCTO, MARCA y GRAMAJE.",
-        );
+
       notify(
-        `${imported} producto(s) importado(s) al módulo Marcas${skipped ? ` · ${skipped} fila(s) omitida(s)` : ""}.`,
+        `${imported} producto(s) actualizado(s) en Marcas${skipped ? ` · ${skipped} fila(s) omitida(s)` : ""}.`,
       );
-      window.location.reload();
     } catch (error) {
       notify(
         error instanceof Error
