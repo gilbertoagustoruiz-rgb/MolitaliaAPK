@@ -1381,54 +1381,135 @@ function catalogProductForLegacyBrand(
   );
 }
 
+function catalogProductForSaleKey(
+  key: string,
+  productPrices: ProductPrice[] = [],
+) {
+  const catalog = normalizedProducts(productPrices).filter(
+    (item) => item.status === "ACTIVO",
+  );
+  const normalizedKey = normalizeCsvHeader(key);
+  if (!normalizedKey) return undefined;
+
+  const bySku = catalog.find(
+    (item) => normalizeCsvHeader(item.sku) === normalizedKey,
+  );
+  if (bySku) return bySku;
+
+  const byProduct = catalog.find(
+    (item) => normalizeCsvHeader(item.product) === normalizedKey,
+  );
+  if (byProduct) return byProduct;
+
+  const byBrand = catalog.find(
+    (item) => normalizeCsvHeader(item.brand || "") === normalizedKey,
+  );
+  if (byBrand) return catalogProductForLegacyBrand(itemBrand(byBrand), productPrices) || byBrand;
+
+  const brandMatches = Array.from(
+    new Set(
+      catalog
+        .map((item) => item.brand || "")
+        .filter(Boolean)
+        .filter((brand) => normalizedKey.includes(normalizeCsvHeader(brand))),
+    ),
+  );
+  if (brandMatches.length === 1)
+    return (
+      catalogProductForLegacyBrand(brandMatches[0], productPrices) ||
+      catalog.find(
+        (item) =>
+          normalizeCsvHeader(item.brand || "") ===
+          normalizeCsvHeader(brandMatches[0]),
+      )
+    );
+
+  return catalog.find((item) => {
+    const normalizedProduct = normalizeCsvHeader(item.product);
+    return (
+      normalizedProduct.includes(normalizedKey) ||
+      normalizedKey.includes(normalizedProduct)
+    );
+  });
+}
+
+function itemBrand(product: ProductPrice) {
+  return product.brand || product.product;
+}
+
 function saleExportBreakdown(
   sale: Sale,
   productPrices: ProductPrice[] = [],
 ) {
+  const catalog = normalizedProducts(productPrices);
   if (sale.mode === "PLANCHAS") {
     if (sale.planchaLines?.length) {
       return sale.planchaLines
         .filter((line) => Number(line.units) > 0)
         .map((line) => {
-          const catalogProduct = normalizedProducts(productPrices).find(
-            (item) => item.sku === line.sku,
-          );
+          const catalogProduct =
+            catalog.find((item) => item.sku === line.sku) ||
+            catalogProductForSaleKey(line.product || line.sku, productPrices);
           return {
+            sku: catalogProduct?.sku || line.sku,
+            product: catalogProduct?.product || line.product || line.sku,
+            brand: catalogProduct?.brand || line.product || line.sku,
             label: catalogProduct?.product || line.product || line.sku,
             units: Number(line.units),
-            unitPrice: Number(line.unitPrice || sale.unitPrices?.[line.sku] || 0),
+            unitPrice: Number(
+              line.unitPrice || sale.unitPrices?.[line.sku] || 0,
+            ),
           };
         });
     }
     return Object.entries(sale.mix || {})
       .filter(([, quantity]) => Number(quantity) > 0)
-      .map(([brand, quantity]) => {
-        const catalogProduct = catalogProductForLegacyBrand(brand, productPrices);
+      .map(([key, quantity]) => {
+        const catalogProduct =
+          catalogProductForSaleKey(key, productPrices) ||
+          catalogProductForLegacyBrand(key, productPrices);
         return {
-          label: catalogProduct?.product || brand,
+          sku: catalogProduct?.sku || key,
+          product: catalogProduct?.product || key,
+          brand: catalogProduct?.brand || key,
+          label: catalogProduct?.product || key,
           units: Number(quantity),
-          unitPrice: Number(sale.unitPrices?.[brand] ?? 0),
+          unitPrice: Number(
+            sale.unitPrices?.[key] ??
+              sale.unitPrices?.[catalogProduct?.sku || ""] ??
+              0,
+          ),
         };
       });
   }
 
   const sku = Object.keys(sale.unitPrices || {})[0];
-  const catalogProduct = normalizedProducts(productPrices).find(
-    (item) => item.sku === sku,
-  );
+  const mixKey = Object.keys(sale.mix || {})[0] || "";
+  const catalogProduct =
+    catalog.find((item) => item.sku === sku) ||
+    catalogProductForSaleKey(sku || mixKey, productPrices) ||
+    catalogProductForSaleKey(mixKey, productPrices);
   const legacyProduct = products.find((item) => item.sku === sku);
   const brand =
     catalogProduct?.brand ||
     legacyProduct?.brand ||
-    Object.keys(sale.mix || {})[0] ||
+    mixKey ||
     "Producto";
+  const productLabel =
+    catalogProduct?.product ||
+    legacyProduct?.name ||
+    mixKey ||
+    brand;
   return [
     {
+      sku: catalogProduct?.sku || sku,
+      product: productLabel,
+      brand,
       label: catalogProduct
         ? `${catalogProduct.brand} · ${catalogProduct.product}`
         : legacyProduct
           ? `${legacyProduct.brand} · ${legacyProduct.name}`
-          : brand,
+          : productLabel,
       units: sale.units,
       unitPrice: Number(
         sale.unitPrices?.[sku] ??
@@ -1437,6 +1518,7 @@ function saleExportBreakdown(
     },
   ];
 }
+
 type SalesSummaryRow = {
   key: string;
   region: string;
@@ -1884,30 +1966,43 @@ function enrichSaleMarketLocation(sale: Sale, markets: Market[]) {
     marketDistrict,
   };
 }
-function aggregateSalesByBrand(sales: Sale[]) {
+function aggregateSalesByBrand(
+  sales: Sale[],
+  productPrices: ProductPrice[] = [],
+) {
   const grouped = new Map<string, SalesMetricRow>();
   sales.forEach((sale) => {
-    const entries = Object.entries(sale.mix || {});
-    const brandEntries = entries.length
-      ? entries
-      : [["SIN MARCA", sale.units] as [string, number]];
-    brandEntries.forEach(([brand, rawQuantity]) => {
-      const units = Number(rawQuantity) || 0;
+    const breakdown = saleExportBreakdown(sale, productPrices);
+    const effectiveBreakdown = breakdown.length
+      ? breakdown
+      : [
+          {
+            brand: "SIN MARCA",
+            units: sale.units,
+            unitPrice:
+              sale.units > 0 ? Number(sale.amountSoles) / sale.units : 0,
+          },
+        ];
+    effectiveBreakdown.forEach((item) => {
+      const units = Number(item.units) || 0;
       if (units <= 0) return;
-      const unitPrice = Number(sale.unitPrices?.[brand] ?? 0);
+      const resolvedBrand =
+        catalogProductForSaleKey(String(item.brand || ""), productPrices)
+          ?.brand ||
+        item.brand ||
+        "SIN MARCA";
+      const key = String(resolvedBrand).toUpperCase();
       const amount =
         sale.mode === "PLANCHAS"
-          ? units * unitPrice
+          ? units * Number(item.unitPrice || 0)
           : sale.units > 0
             ? sale.amountSoles * (units / sale.units)
             : 0;
+      const catalogProduct =
+        catalogProductForSaleKey(String(item.sku || item.product || ""), productPrices) ||
+        catalogProductForSaleKey(String(item.brand || ""), productPrices);
       const kilos =
-        sale.mode === "PLANCHAS"
-          ? units *
-            (planchaProducts[brand as keyof typeof planchaProducts]?.weightKg ||
-              0)
-          : saleWeightKg(sale) * (sale.units > 0 ? units / sale.units : 0);
-      const key = brand.toUpperCase();
+        units * Number(catalogProduct?.weightKg || 0);
       const current = grouped.get(key) || {
         key,
         label: key,
@@ -1928,6 +2023,7 @@ function aggregateSalesByBrand(sales: Sale[]) {
     (first, second) => second.units - first.units,
   );
 }
+
 function parseSoles(value: string) {
   return Number(value.replace(",", "."));
 }
@@ -5436,6 +5532,7 @@ function SalesDashboard({
   markets,
   users,
   movements,
+  productPrices = [],
   onViewSales,
   onExport,
 }: {
@@ -5443,6 +5540,7 @@ function SalesDashboard({
   markets: Market[];
   users: AppUser[];
   movements: InventoryMovement[];
+  productPrices?: ProductPrice[];
   onViewSales: () => void;
   onExport: () => void;
 }) {
@@ -5478,7 +5576,10 @@ function SalesDashboard({
     () => aggregateSalesByPromoter(sales, users),
     [sales, users],
   );
-  const brandRows = useMemo(() => aggregateSalesByBrand(sales), [sales]);
+  const brandRows = useMemo(
+    () => aggregateSalesByBrand(sales, productPrices),
+    [sales, productPrices],
+  );
   const totals = sales.reduce(
     (result, sale) => ({
       soles: result.soles + (Number(sale.amountSoles) || 0),
@@ -5738,6 +5839,7 @@ function CoordinatorApp({
   inventory,
   movements,
   assignments,
+  productPrices,
   notify,
 }: {
   user: AppUser;
@@ -5748,6 +5850,7 @@ function CoordinatorApp({
   inventory: MarketInventory[];
   movements: InventoryMovement[];
   assignments: PromoterAssignment[];
+  productPrices: ProductPrice[];
   notify: (message: string, error?: boolean) => void;
 }) {
   const [tab, setTab] = useState("inicio");
@@ -5878,6 +5981,7 @@ function CoordinatorApp({
           markets={allowedMarkets}
           users={allowedUsers}
           movements={movements}
+          productPrices={productPrices}
           onViewSales={() => setTab("ventas")}
           onExport={exportSales}
         />
@@ -6357,6 +6461,7 @@ function AnalystApp({
         inventory={inventory}
         movements={movements}
         assignments={assignments}
+        productPrices={productPrices}
         notify={notify}
       />
     );
@@ -7798,6 +7903,7 @@ function AnalystApp({
           markets={markets}
           users={users}
           movements={movements}
+          productPrices={productPrices}
           onViewSales={() => setTab("ventas")}
           onExport={exportSummary}
         />
