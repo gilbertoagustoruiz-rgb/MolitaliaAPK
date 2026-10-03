@@ -154,6 +154,15 @@ type Sale = {
   amountSoles: number;
   weightKg?: number;
   unitPrices?: Record<string, number>;
+  presentation?: "CAJA" | "LATA" | "BOLSA";
+  planchaType?: "FLAT" | "MIX";
+  planchaLines?: Array<{
+    sku: string;
+    product: string;
+    units: number;
+    unitPrice: number;
+    presentation: "CAJA" | "LATA" | "BOLSA";
+  }>;
   planchas?: number;
   mix: Record<string, number>;
   bonus?: string;
@@ -166,6 +175,52 @@ type Sale = {
   updatedAt?: string;
   status: SyncStatus;
 };
+const UNIT_SALE_PRODUCTS = [
+  { sku: "COSTA-800", label: "PANETON COSTA 800 GR", brand: "COSTA", weightKg: 0.8 },
+  { sku: "COSTA-BOLSA-800", label: "PANETON COSTA BOLSA 800 GR", brand: "COSTA", weightKg: 0.8 },
+  { sku: "TODINNO-TODINNITO", label: "PANETÓN TODINNO + TODINNITO", brand: "TODINNO", weightKg: 0.9 },
+  { sku: "TODINNITO-85", label: "TODINNITO 85GR", brand: "TODINNITO", weightKg: 0.085 },
+  { sku: "PASQUALINO-800", label: "PASQUALINO 800 GR.", brand: "PASQUALINO", weightKg: 0.8 },
+  { sku: "TODINNO-900-BOLSA-TODINNITO", label: "PANETÓN TODINNO 900 GR BOLSA + TODINNITO", brand: "TODINNO", weightKg: 0.9 },
+  { sku: "TODINNO-CHOCOTINNO-450", label: "PANETON TODINNO CHOCOTINNO 450GR.", brand: "TODINNO", weightKg: 0.45 },
+  { sku: "MINI-COSTA-MINIONS-80", label: "MINI COSTA MINIONS 80G", brand: "COSTA", weightKg: 0.08 },
+  { sku: "MINI-COSTA-JURASSIC-80", label: "MINI COSTA JURASSIC 80G", brand: "COSTA", weightKg: 0.08 },
+  { sku: "TODINNO-LATA-900", label: "TODINNO LATA 900GR", brand: "TODINNO", weightKg: 0.9 },
+  { sku: "TODINNITO-CHOCOTINNO-450", label: "PANETON TODINNITO + CHOTINNO 450", brand: "TODINNITO", weightKg: 0.45 },
+  { sku: "TODINNITO-BOLSA", label: "PANETON TODINNITO BOLSA", brand: "TODINNITO", weightKg: 0.085 },
+] as const;
+const SALE_PRESENTATIONS = ["CAJA", "LATA", "BOLSA"] as const;
+const PLANCHA_UNITS_BY_SKU: Record<string, number> = {
+  "COSTA-800": 6,
+  "COSTA-BOLSA-800": 6,
+  "TODINNO-TODINNITO": 6,
+  "TODINNITO-85": 48,
+  "PASQUALINO-800": 6,
+  "TODINNO-900-BOLSA-TODINNITO": 6,
+  "TODINNO-CHOCOTINNO-450": 6,
+  "MINI-COSTA-MINIONS-80": 48,
+  "MINI-COSTA-JURASSIC-80": 48,
+  "TODINNO-LATA-900": 6,
+  "TODINNITO-CHOCOTINNO-450": 6,
+  "TODINNITO-BOLSA": 6,
+};
+type PlanchaLine = {
+  id: string;
+  sku: string;
+  units: string;
+  unitPrice: string;
+  presentation: "CAJA" | "LATA" | "BOLSA";
+};
+function newPlanchaLine(index = 0): PlanchaLine {
+  return {
+    id: crypto.randomUUID(),
+    sku: UNIT_SALE_PRODUCTS[index]?.sku || UNIT_SALE_PRODUCTS[0].sku,
+    units: "",
+    unitPrice: "",
+    presentation: "BOLSA",
+  };
+}
+
 type Attendance = {
   id: string;
   promoterId: string;
@@ -187,6 +242,8 @@ type SessionClosure = {
   marketId: string;
   clientId?: string;
   tastingUsed: number;
+  tasting900g?: number;
+  tasting85g?: number;
   leads: number;
   automatic?: boolean;
   closureType?: "MANUAL" | "AUTOMATICO";
@@ -207,7 +264,7 @@ type CanjeProductId =
   | "CANJE_AVENA_144_SPAGHETTI_100_BATEA_4"
   | "CANJE_AVENA_30_SPAGHETTI_10"
   | "CANJE_AVENA_144_SPAGHETTI_100";
-type DegustacionProductId = "PANETON";
+type DegustacionProductId = "PANETON" | "PANETON_900G" | "PANETON_85G";
 type RedemptionStock = Record<RedemptionItemId, number>;
 type WarehouseStock = Record<"PANETON_900G" | "PANETON_85G" | RedemptionItemId, number>;
 type Warehouse = { id:string; name:string; region:string; department:string; province:string; district:string; status:Status; marketIds:string[]; stock:Partial<WarehouseStock>; updatedAt:string };
@@ -262,6 +319,7 @@ type CloudSnapshot = {
   categories: Category[];
 };
 
+const LOCAL_WAREHOUSE_DEMO = import.meta.env.DEV && window.location.hostname === "localhost";
 const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
@@ -1875,6 +1933,68 @@ function saleRedemptionRequirements(sale: Sale) {
     Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)),
   );
 }
+function planchaCanjeRequirements(
+  planchas: number,
+  date: Date,
+  accessory: "MANDIL" | "BATEA" | "NINGUNO",
+  multiplier = 1,
+): Partial<RedemptionStock> {
+  const month = date.getMonth() + 1;
+  const m10Avena = month === 12 ? 30 : 24;
+  let avena = 0;
+  let spaghetti = 0;
+  let accessoryQty = 0;
+  if (planchas >= 80) {
+    avena = 144;
+    spaghetti = 100;
+    accessoryQty = 4;
+  } else if (planchas >= 20) {
+    avena = m10Avena * 2;
+    spaghetti = 20;
+    accessoryQty = 2;
+  } else if (planchas >= 14) {
+    avena = m10Avena + 12;
+    spaghetti = 13;
+    accessoryQty = 1;
+  } else if (planchas >= 11) {
+    avena = m10Avena + 3;
+    spaghetti = 11;
+    accessoryQty = 1;
+  } else if (planchas >= 10) {
+    avena = m10Avena;
+    spaghetti = 10;
+    accessoryQty = 1;
+  } else if (planchas >= 8) {
+    avena = 24;
+    spaghetti = 6;
+  } else if (planchas >= 5) {
+    avena = 15;
+    spaghetti = 4;
+  } else if (planchas >= 4) {
+    avena = 12;
+    spaghetti = 3;
+  } else if (planchas >= 2) {
+    avena = 6;
+    spaghetti = 2;
+  } else if (planchas >= 1) {
+    avena = 3;
+    spaghetti = 1;
+  }
+  const factor = planchas >= 80 ? Math.max(1, Math.min(4, multiplier)) : 1;
+  const requirements: Partial<RedemptionStock> = {
+    AVENA: avena * factor,
+    SPAGHETTI: spaghetti * factor,
+  };
+  if (planchas >= 10 && accessory !== "NINGUNO" && accessoryQty > 0)
+    requirements[accessory] = accessoryQty * factor;
+  return requirements;
+}
+function canjeRequirementsLabel(requirements: Partial<RedemptionStock>) {
+  return requiredRedemptionEntries(requirements)
+    .map(([itemId, quantity]) => `${quantity} ${redemptionLabel(itemId)}`)
+    .join(" + ");
+}
+
 function bonusProductsFor(
   mode: "UNIDADES" | "PLANCHAS",
   total: number,
@@ -4340,64 +4460,90 @@ function AdminDegustacionesModule({
 }
 
 function TastingExitModal({
-  available,
+  available900g,
+  available85g,
   onConfirm,
   close,
 }: {
-  available: number;
-  onConfirm: (tastingUsed: number) => void;
+  available900g: number;
+  available85g: number;
+  onConfirm: (usage: { paneton900g: number; paneton85g: number; contacts: number }) => void;
   close: () => void;
 }) {
-  const [quantity, setQuantity] = useState("0");
-  const parsedQuantity = quantity === "" ? NaN : Number(quantity);
-  const valid =
-    Number.isInteger(parsedQuantity) &&
-    parsedQuantity >= 0 &&
-    parsedQuantity <= available;
+  const [quantity900g, setQuantity900g] = useState("0");
+  const [quantity85g, setQuantity85g] = useState("0");
+  const paneton900g = quantity900g === "" ? NaN : Number(quantity900g);
+  const paneton85g = quantity85g === "" ? NaN : Number(quantity85g);
+  const contacts900g = Number.isFinite(paneton900g) ? paneton900g * 80 : 0;
+  const contacts85g = Number.isFinite(paneton85g) ? paneton85g * 10 : 0;
+  const contacts = contacts900g + contacts85g;
+  const valid900g =
+    Number.isInteger(paneton900g) && paneton900g >= 0 && paneton900g <= 2 && paneton900g <= available900g;
+  const valid85g =
+    Number.isInteger(paneton85g) && paneton85g >= 0 && paneton85g <= 8 && paneton85g <= available85g;
+  const valid = valid900g && valid85g && paneton900g + paneton85g > 0;
   return (
     <Modal
       title="Registrar salida del cliente"
-      detail="Indica la degustación utilizada durante esta visita antes de confirmar la salida."
+      detail="Registra los panetones utilizados en degustación. El consumo se descontará del Almacén del Mercado."
       close={close}
     >
       <div className="logout-declaration">
         <div className="stock-callout">
           <PackageCheck />
           <div>
-            <strong>{available} disponibles</strong>
-            <small>Tu stock personal de degustación</small>
+            <strong>Stock de degustación del Almacén</strong>
+            <small>900 g: {available900g} disponibles · 85 g: {available85g} disponibles</small>
           </div>
         </div>
-        <Field label="Panetones utilizados en degustación *">
+        <Field label="Panetón 900 g utilizado *">
           <Input
             type="number"
-            value={quantity}
-            onChange={(value) => setQuantity(value.replace(/\D/g, ""))}
+            value={quantity900g}
+            onChange={(value) => setQuantity900g(value.replace(/\D/g, ""))}
             min={0}
-            max={available}
+            max={2}
             step={1}
             placeholder="0"
-            testId="input-tasting-usage"
+            testId="input-tasting-900g"
           />
         </Field>
-        {Number.isFinite(parsedQuantity) && parsedQuantity > available && (
-          <p className="modal-error">
-            La cantidad ingresada supera el stock disponible ({available}).
-          </p>
+        <p className="modal-hint">Máximo 2 · 80 contactos por cada Panetón 900 g.</p>
+        <Field label="Panetón 85 g utilizado *">
+          <Input
+            type="number"
+            value={quantity85g}
+            onChange={(value) => setQuantity85g(value.replace(/\D/g, ""))}
+            min={0}
+            max={8}
+            step={1}
+            placeholder="0"
+            testId="input-tasting-85g"
+          />
+        </Field>
+        <p className="modal-hint">Máximo 8 · 10 contactos por cada Panetón 85 g.</p>
+        <div className="stock-callout">
+          <Users />
+          <div>
+            <strong>{contacts} contactos calculados</strong>
+            <small>{contacts900g} por 900 g + {contacts85g} por 85 g</small>
+          </div>
+        </div>
+        {!valid900g && Number.isFinite(paneton900g) && (
+          <p className="modal-error">900 g: máximo 2 y no puede superar el stock disponible ({available900g}).</p>
         )}
-        <p className="modal-hint">
-          {available > 0
-            ? "Si no utilizaste degustación, registra 0. La cantidad indicada se descontará al confirmar la salida del cliente."
-            : "No tienes stock personal disponible. Registra 0 para confirmar la salida."}
-        </p>
+        {!valid85g && Number.isFinite(paneton85g) && (
+          <p className="modal-error">85 g: máximo 8 y no puede superar el stock disponible ({available85g}).</p>
+        )}
+        {valid900g && valid85g && paneton900g + paneton85g === 0 && (
+          <p className="modal-error">Registra al menos un Panetón utilizado para cerrar la sesión.</p>
+        )}
       </div>
       <div className="modal-actions">
-        <Btn variant="outline" onClick={close}>
-          Cancelar
-        </Btn>
+        <Btn variant="outline" onClick={close}>Cancelar</Btn>
         <Btn
           disabled={!valid}
-          onClick={() => onConfirm(parsedQuantity)}
+          onClick={() => onConfirm({ paneton900g, paneton85g, contacts })}
           testId="button-confirm-client-exit"
         >
           <CheckCircle2 /> Confirmar salida
@@ -8498,6 +8644,34 @@ function PromoterApp({
   const adminSaleId = useRef(
     `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`,
   );
+  useEffect(() => {
+    let cancelled = false;
+    if (LOCAL_WAREHOUSE_DEMO) {
+      setWarehouses(readStore<Warehouse[]>("bt-demo-warehouses", []));
+      return () => {
+        cancelled = true;
+      };
+    }
+    void fetch("/api/app-storage/warehouses")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("No se pudo consultar almacenes");
+        return response.json();
+      })
+      .then((payload) => {
+        const loadedWarehouses = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.warehouses)
+            ? payload.warehouses
+            : [];
+        if (!cancelled) setWarehouses(loadedWarehouses);
+      })
+      .catch(() => {
+        if (!cancelled) setWarehouses([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const promoterAssignment = assignments.find((assignment) =>
     assignmentMatchesUser(assignment, user),
   );
@@ -8534,13 +8708,17 @@ function PromoterApp({
   const [sku, setSku] = useState(products[0].sku);
   const [unitQtyInput, setUnitQtyInput] = useState("1");
   const [unitPriceSoles, setUnitPriceSoles] = useState("");
-  const [brandPrices, setBrandPrices] = useState<Record<string, string>>({});
+  const [presentation, setPresentation] = useState<"CAJA" | "LATA" | "BOLSA">("BOLSA");
   const [planchasInput, setPlanchasInput] = useState("1");
-  const [mixInputs, setMixInputs] = useState<Record<string, string>>({});
+  const [planchaType, setPlanchaType] = useState<"FLAT" | "MIX">("FLAT");
+  const [planchaLines, setPlanchaLines] = useState<PlanchaLine[]>([newPlanchaLine()]);
   const [selectedBonusProductId, setSelectedBonusProductId] = useState<
     CanjeProductId | ""
   >("");
   const [redemptionCount, setRedemptionCount] = useState(1);
+  const [planchaAccessory, setPlanchaAccessory] = useState<"MANDIL" | "BATEA" | "NINGUNO">("NINGUNO");
+  const [planchaMultiplier, setPlanchaMultiplier] = useState(1);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [comment, setComment] = useState("");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
@@ -8569,44 +8747,11 @@ function PromoterApp({
       ),
     [productPrices],
   );
-  const unitProducts = availableProducts.filter((product) =>
-    product.saleModes?.includes("UNIDADES"),
-  );
-  const planchaCatalogProducts = availableProducts
-    .filter((product) => product.saleModes?.includes("PLANCHAS"))
-    .sort((first, second) => {
-      const order = (brand: string) => {
-        const normalized = brand.toUpperCase();
-        if (normalized.includes("TODIN")) return 0;
-        if (normalized.includes("COSTA")) return 1;
-        if (normalized.includes("PASCUAL")) return 2;
-        return 99;
-      };
-      return order(first.brand) - order(second.brand) ||
-        first.brand.localeCompare(second.brand, "es");
-    });
+  const unitProducts = UNIT_SALE_PRODUCTS;
   useEffect(() => {
     const price = priceBySku[sku]?.unitPrice;
     setUnitPriceSoles(price ? String(price) : "");
   }, [sku, priceBySku]);
-  useEffect(() => {
-    setBrandPrices(
-      Object.fromEntries(
-        planchaCatalogProducts.map((product) => [
-          product.brand,
-          String(product.unitPrice || ""),
-        ]),
-      ),
-    );
-    setMixInputs((current) =>
-      Object.fromEntries(
-        planchaCatalogProducts.map((product) => [
-          product.brand,
-          current[product.brand] || "0",
-        ]),
-      ),
-    );
-  }, [productPrices]);
   useEffect(() => {
     if (!unitProducts.some((product) => product.sku === sku) && unitProducts[0])
       setSku(unitProducts[0].sku);
@@ -8620,50 +8765,57 @@ function PromoterApp({
     });
   }, [selectedMarketId, selectedClientId]);
   const unitQty = Number(unitQtyInput) || 0;
-  const planchas = Number(planchasInput) || 0;
-  const mix = Object.fromEntries(
-    Object.entries(mixInputs).map(([brand, value]) => [
-      brand,
-      Number(value) || 0,
-    ]),
-  );
+  const requestedFlatPlanchas = Number(planchasInput) || 0;
   const selectedProduct =
     unitProducts.find((product) => product.sku === sku) ||
     unitProducts[0] ||
-    normalizedProducts([])[0];
-  const planchaProductByBrand = Object.fromEntries(
-    planchaCatalogProducts.map((product) => [product.brand, product]),
-  );
-  const brandUnitPrices = Object.fromEntries(
-    Object.keys(mix).map((brand) => [
-      brand,
-      parseSoles(brandPrices[brand] || ""),
-    ]),
-  ) as Record<string, number>;
-  const promoterStock = administrative
-    ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
-    : userRedemptionStock(user);
-  const redemptionTotal = sumRedemptionStock(promoterStock);
-  const totalMix = Object.values(mix).reduce(
-    (sum, quantity) => sum + quantity,
-    0,
-  );
+    UNIT_SALE_PRODUCTS[0];
+  useEffect(() => {
+    if (planchaType !== "FLAT" || !planchaLines[0]) return;
+    const expected = requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0].sku] || 6);
+    if (planchaLines[0].units !== String(expected)) {
+      setPlanchaLines((current) =>
+        current.map((line, index) => index === 0 ? { ...line, units: String(expected) } : line),
+      );
+    }
+  }, [planchaType, requestedFlatPlanchas, planchaLines[0]?.sku]);
+  const normalizedPlanchaLines = planchaLines.map((line) => {
+    const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
+    return {
+      ...line,
+      product,
+      units: Math.max(0, Math.trunc(Number(line.units) || 0)),
+      unitPrice: parseSoles(line.unitPrice || ""),
+    };
+  });
+  const totalMix = normalizedPlanchaLines.reduce((sum, line) => sum + line.units, 0);
+  const planchaEquivalents = normalizedPlanchaLines.map((line) => ({
+    ...line,
+    planchas: line.units / (PLANCHA_UNITS_BY_SKU[line.sku] || 6),
+  }));
+  const calculatedPlanchas =
+    planchaType === "FLAT"
+      ? requestedFlatPlanchas
+      : planchaEquivalents.reduce((sum, line) => sum + line.planchas, 0);
+  const planchas =
+    mode === "PLANCHAS" && Number.isFinite(calculatedPlanchas)
+      ? Math.floor(calculatedPlanchas)
+      : 0;
+
   const total = mode === "UNIDADES" ? unitQty : totalMix;
   const unitPrice = parseSoles(unitPriceSoles);
   const saleAmount =
     mode === "UNIDADES"
       ? unitQty * unitPrice
-      : Object.entries(mix).reduce(
-          (sum, [brand, quantity]) =>
-            sum + quantity * (brandUnitPrices[brand] || 0),
+      : normalizedPlanchaLines.reduce(
+          (sum, line) => sum + line.units * (line.unitPrice || 0),
           0,
         );
   const orderWeightKg =
     mode === "UNIDADES"
       ? unitQty * selectedProduct.weightKg
-      : Object.entries(mix).reduce(
-          (sum, [brand, quantity]) =>
-            sum + quantity * (planchaProductByBrand[brand]?.weightKg || 0),
+      : normalizedPlanchaLines.reduce(
+          (sum, line) => sum + line.units * line.product.weightKg,
           0,
         );
   const weightPerPlanchaKg =
@@ -8671,9 +8823,28 @@ function PromoterApp({
   const pricesValid =
     mode === "UNIDADES"
       ? unitPrice > 0
-      : Object.entries(mix)
-          .filter(([, quantity]) => quantity > 0)
-          .every(([brand]) => (brandUnitPrices[brand] || 0) > 0);
+      : normalizedPlanchaLines.length > 0 &&
+        normalizedPlanchaLines.every((line) => line.units > 0 && line.unitPrice > 0);
+  const promoterStock = administrative
+    ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
+    : userRedemptionStock(user);
+  const selectedWarehouse = warehouses.find((warehouse) =>
+    warehouse.marketIds?.includes(selectedMarketId),
+  );
+  const warehouseRedemptionStock = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: Math.max(0, Number(selectedWarehouse?.stock?.[item.id]) || 0),
+    }),
+    {} as RedemptionStock,
+  );
+  const warehouseTastingStock = {
+    PANETON_900G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_900G) || 0),
+    PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
+  };
+  const redemptionTotal = sumRedemptionStock(
+    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock,
+  );
   const bonusProducts = bonusProductsFor(
     mode,
     total,
@@ -8684,31 +8855,92 @@ function PromoterApp({
   const selectedBonusProduct =
     bonusProducts.find((product) => product.id === selectedBonusProductId) ||
     bonusProducts[0];
-  const bonus = selectedBonusProduct?.label;
+  const saleDate = administrative
+    ? new Date(administrative.date + "-05:00")
+    : new Date();
+  const mandilBaseRequirements = planchaCanjeRequirements(planchas, saleDate, "MANDIL", 1);
+  const bateaBaseRequirements = planchaCanjeRequirements(planchas, saleDate, "BATEA", 1);
+  const canCoverRequirements = (requirements: Partial<RedemptionStock>) =>
+    requiredRedemptionEntries(requirements).every(
+      ([itemId, quantity]) => warehouseRedemptionStock[itemId] >= quantity,
+    );
+  const availablePlanchaAccessories = planchas >= 10
+    ? ([
+        ...(canCoverRequirements(mandilBaseRequirements) ? ["MANDIL" as const] : []),
+        ...(canCoverRequirements(bateaBaseRequirements) ? ["BATEA" as const] : []),
+        "NINGUNO" as const,
+      ])
+    : (["NINGUNO" as const]);
+  useEffect(() => {
+    if (planchas < 10) {
+      setPlanchaAccessory("NINGUNO");
+      return;
+    }
+    const month = saleDate.getMonth() + 1;
+    const preferred =
+      (month === 9 || month === 10) && availablePlanchaAccessories.includes("MANDIL")
+        ? "MANDIL"
+        : month === 11 && availablePlanchaAccessories.includes("BATEA")
+          ? "BATEA"
+          : "NINGUNO";
+    setPlanchaAccessory(preferred);
+  }, [
+    selectedWarehouse?.id,
+    planchas >= 10,
+    saleDate.getMonth(),
+  ]);
+  const effectivePlanchaAccessory = availablePlanchaAccessories.includes(planchaAccessory)
+    ? planchaAccessory
+    : availablePlanchaAccessories[0];
+  useEffect(() => {
+    if (planchas < 80 && planchaMultiplier !== 1) setPlanchaMultiplier(1);
+  }, [planchas, planchaMultiplier]);
   const automaticUnitCanjeCount =
     mode === "UNIDADES" ? Math.floor(unitQty / 2) : 0;
-  const canjeCount = bonus
-    ? mode === "UNIDADES"
-      ? automaticUnitCanjeCount
-      : redemptionCount
-    : 0;
-  const requiredRedemptions = multiplyRedemptionRequirements(
-    selectedBonusProduct?.components || {},
-    canjeCount,
+  const canjeCount = mode === "UNIDADES"
+    ? (selectedBonusProduct ? automaticUnitCanjeCount : 0)
+    : planchas >= 1
+      ? 1
+      : 0;
+  const planchaRequirements = planchaCanjeRequirements(
+    planchas,
+    saleDate,
+    effectivePlanchaAccessory,
+    planchaMultiplier,
   );
+  const requiredRedemptions =
+    mode === "PLANCHAS"
+      ? planchaRequirements
+      : multiplyRedemptionRequirements(
+          selectedBonusProduct?.components || {},
+          canjeCount,
+        );
+  const bonus =
+    mode === "PLANCHAS" && planchas >= 1
+      ? canjeRequirementsLabel(requiredRedemptions)
+      : selectedBonusProduct?.label;
+  const stockForCanje =
+    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock;
   const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
-    ([itemId, quantity]) => promoterStock[itemId] < quantity,
+    ([itemId, quantity]) => stockForCanje[itemId] < quantity,
   );
-  const exceptionNeedsComment = Boolean(
-    mode === "PLANCHAS" && bonus && canjeCount === 3 && !comment.trim(),
-  );
+  const exceptionNeedsComment = false;
   const exchangeEvidenceRequired = Boolean(
     bonus || mode === "PLANCHAS",
   );
   const validUnitQty =
     mode === "PLANCHAS" ||
     (Number.isInteger(unitQty) && unitQty >= 1 && unitQty <= 5);
-  const validMix = mode === "UNIDADES" || totalMix === planchas * 6;
+  const validMix =
+    mode === "UNIDADES" ||
+    (planchaType === "FLAT"
+      ? normalizedPlanchaLines.length === 1 &&
+        normalizedPlanchaLines[0].units ===
+          requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[normalizedPlanchaLines[0].sku] || 6)
+      : normalizedPlanchaLines.length >= 2 &&
+        normalizedPlanchaLines.every((line) => line.units > 0) &&
+        calculatedPlanchas >= 1 &&
+        Number.isInteger(calculatedPlanchas));
   const saleFormValid = Boolean(
     clientId &&
     (!bonus || finalClientName.trim()) &&
@@ -8880,7 +9112,8 @@ function PromoterApp({
         : latestAttendanceFor(clientId)?.type === "ENTRADA" &&
           !exitedToday(clientId))),
   );
-  const requiresTradeApproval = mode === "PLANCHAS" && planchas > 80;
+  const requiresTradeApproval =
+    mode === "PLANCHAS" && (planchas >= 80 || planchaMultiplier > 1);
   const canConfirm = Boolean(
     !savingAdminSale &&
     (!administrative ||
@@ -8907,6 +9140,10 @@ function PromoterApp({
   const saveSale = async () => {
     if (!selectedMarket) {
       notify("Selecciona un mercado válido antes de registrar la venta.", true);
+      return;
+    }
+    if (mode === "PLANCHAS" && !selectedWarehouse) {
+      notify("El mercado seleccionado no tiene un almacén asignado para descontar el canje.", true);
       return;
     }
     if (!canSellForSelectedClient) {
@@ -8965,11 +9202,26 @@ function PromoterApp({
       unitPrices:
         mode === "UNIDADES"
           ? { [selectedProduct.sku]: unitPrice }
-          : brandUnitPrices,
+          : Object.fromEntries(normalizedPlanchaLines.map((line) => [line.sku, line.unitPrice])),
+      presentation: mode === "UNIDADES" ? presentation : undefined,
+      planchaType: mode === "PLANCHAS" ? planchaType : undefined,
+      planchaLines:
+        mode === "PLANCHAS"
+          ? normalizedPlanchaLines.map((line) => ({
+              sku: line.sku,
+              product: line.product.label,
+              units: line.units,
+              unitPrice: line.unitPrice,
+              presentation: line.presentation,
+            }))
+          : undefined,
       planchas: mode === "PLANCHAS" ? planchas : undefined,
-      mix: mode === "PLANCHAS" ? mix : { [selectedProduct.brand]: unitQty },
+      mix:
+        mode === "PLANCHAS"
+          ? Object.fromEntries(normalizedPlanchaLines.map((line) => [line.product.label, line.units]))
+          : { [selectedProduct.brand]: unitQty },
       bonus,
-      redemptionCount: canjeCount,
+      redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
       redemptionItems: bonus ? requiredRedemptions : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
@@ -8982,6 +9234,32 @@ function PromoterApp({
     };
     if (requiresTradeApproval) {
       try {
+        if (LOCAL_WAREHOUSE_DEMO) {
+          const current = readStore<TradeApproval[]>("bt-demo-trade-approvals", []);
+          const approval: TradeApproval = {
+            id: `TRADE-${crypto.randomUUID()}`,
+            promoterId: user.id,
+            clientId: sale.clientId,
+            marketId: sale.marketId,
+            status: "PENDIENTE",
+            requestedAt: now,
+            sale,
+          };
+          writeStore("bt-demo-trade-approvals", [approval, ...current]);
+          setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
+          setPlanchaLines([newPlanchaLine()]);
+          setPlanchaType("FLAT");
+          setRedemptionCount(1);
+          setPlanchaMultiplier(1);
+          setComment("");
+          setReceipt(null);
+          setExchange(null);
+          setReceiptUrl("");
+          setExchangeUrl("");
+          setView("LISTA");
+          notify("Solicitud enviada a Aprobaciones Trade.");
+          return;
+        }
         const response = await fetch("/api/app-storage/trade-approvals", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -8993,15 +9271,10 @@ function PromoterApp({
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.message || "No se pudo solicitar la aprobación.");
         setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
-        setBrandPrices(
-          Object.fromEntries(
-            planchaCatalogProducts.map((product) => [
-              product.brand,
-              String(product.unitPrice || ""),
-            ]),
-          ),
-        );
+        setPlanchaLines([newPlanchaLine()]);
+        setPlanchaType("FLAT");
         setRedemptionCount(1);
+        setPlanchaMultiplier(1);
         setComment("");
         setReceipt(null);
         setExchange(null);
@@ -9034,7 +9307,7 @@ function PromoterApp({
     const next = [sale, ...sales];
     setSales(next);
     writeStore("bt-sales", next);
-    if (bonus) {
+    if (bonus && mode === "UNIDADES") {
       const nextPromoterStock = requiredRedemptionEntries(
         requiredRedemptions,
       ).reduce(
@@ -9045,7 +9318,7 @@ function PromoterApp({
         { ...promoterStock },
       );
       onUpdateUser(
-        user,
+        withUserStock(user, userTastingStock(user), nextPromoterStock),
       );
       const currentMovements = readStore<InventoryMovement[]>(
         "bt-inventory-movements",
@@ -9070,15 +9343,10 @@ function PromoterApp({
       writeStore("bt-inventory-movements", nextMovements);
     }
     setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
-    setBrandPrices(
-      Object.fromEntries(
-        planchaCatalogProducts.map((product) => [
-          product.brand,
-          String(product.unitPrice || ""),
-        ]),
-      ),
-    );
+    setPlanchaLines([newPlanchaLine()]);
+    setPlanchaType("FLAT");
     setRedemptionCount(1);
+    setPlanchaMultiplier(1);
     setComment("");
     setReceipt(null);
     setExchange(null);
@@ -9091,10 +9359,17 @@ function PromoterApp({
         : "Venta sin canje registrada",
     );
   };
-  const finalizeAttendance = (tastingUsed = 0) => {
-    const stock = userTastingStock(user);
-    if (tastingUsed > stock) {
-      notify(`Solo tienes ${stock} panetones de degustación disponibles`, true);
+  const finalizeAttendance = (usage = { paneton900g: 0, paneton85g: 0, contacts: 0 }) => {
+    const tasting900g = Math.max(0, Math.trunc(usage.paneton900g || 0));
+    const tasting85g = Math.max(0, Math.trunc(usage.paneton85g || 0));
+    const tastingUsed = tasting900g + tasting85g;
+    const contacts = tasting900g * 80 + tasting85g * 10;
+    if (tasting900g > 2 || tasting85g > 8) {
+      notify("La degustación supera el máximo permitido por presentación.", true);
+      return;
+    }
+    if (tasting900g > warehouseTastingStock.PANETON_900G || tasting85g > warehouseTastingStock.PANETON_85G) {
+      notify(`Stock insuficiente en ${selectedWarehouse?.name || "el Almacén del Mercado"} para la degustación indicada.`, true);
       return;
     }
     const now = new Date();
@@ -9117,24 +9392,71 @@ function PromoterApp({
     setAttendance(next);
     writeStore("bt-attendance", next);
     if (type === "SALIDA") {
-      const movement: InventoryMovement = {
-        id: `DEG-${id}`,
-        marketId: selectedMarketId,
-        kind: "DEGUSTACION",
-        quantity: tastingUsed,
-        actorId: user.id,
-        actorName: user.name,
+      const tastingMovements: InventoryMovement[] = [
+        ...(tasting900g > 0 ? [{
+          id: `DEG-${id}-900G`,
+          marketId: selectedMarketId,
+          kind: "DEGUSTACION" as const,
+          quantity: tasting900g,
+          actorId: user.id,
+          actorName: user.name,
+          promoterId: user.id,
+          degustacionProductId: "PANETON_900G" as const,
+          degustacionProductLabel: "Panetón 900 g",
+          date: now.toISOString(),
+          status: syncStatus(),
+        }] : []),
+        ...(tasting85g > 0 ? [{
+          id: `DEG-${id}-85G`,
+          marketId: selectedMarketId,
+          kind: "DEGUSTACION" as const,
+          quantity: tasting85g,
+          actorId: user.id,
+          actorName: user.name,
+          promoterId: user.id,
+          degustacionProductId: "PANETON_85G" as const,
+          degustacionProductLabel: "Panetón 85 g",
+          date: now.toISOString(),
+          status: syncStatus(),
+        }] : []),
+      ];
+      const nextMovements = [...tastingMovements, ...movements];
+      setMovements(nextMovements);
+      writeStore("bt-inventory-movements", nextMovements);
+      if (LOCAL_WAREHOUSE_DEMO && selectedWarehouse) {
+        const nextWarehouses = warehouses.map((warehouse) =>
+          warehouse.id === selectedWarehouse.id
+            ? {
+                ...warehouse,
+                stock: {
+                  ...warehouse.stock,
+                  PANETON_900G: Math.max(0, Number(warehouse.stock.PANETON_900G) - tasting900g),
+                  PANETON_85G: Math.max(0, Number(warehouse.stock.PANETON_85G) - tasting85g),
+                },
+                updatedAt: now.toISOString(),
+              }
+            : warehouse,
+        );
+        setWarehouses(nextWarehouses);
+        writeStore("bt-demo-warehouses", nextWarehouses);
+      }
+      const closure: SessionClosure = {
+        id: `CLOSE-${id}`,
         promoterId: user.id,
+        promoterRole: user.role,
+        promoterRoleLabel: user.roleLabel || user.role,
+        marketId: selectedMarketId,
+        clientId: markClientId,
+        tastingUsed,
+        tasting900g,
+        tasting85g,
+        leads: contacts,
+        closureType: "MANUAL",
         date: now.toISOString(),
         status: syncStatus(),
       };
-      const nextMovements =
-        tastingUsed > 0 ? [movement, ...movements] : movements;
-      onUpdateUser(
-        user,
-      );
-      setMovements(nextMovements);
-      writeStore("bt-inventory-movements", nextMovements);
+      const closures = readStore<SessionClosure[]>("bt-session-closures", []);
+      writeStore("bt-session-closures", [closure, ...closures]);
     }
     setMarkPhoto(null);
     setMarkPhotoUrl("");
@@ -9259,12 +9581,12 @@ function PromoterApp({
         {mode === "UNIDADES" ? (
           <div className="form-grid">
             <SelectField
-              label="Panetón / marca"
+              label="Producto *"
               value={sku}
               onChange={setSku}
               items={unitProducts.map((product) => ({
                 value: product.sku,
-                label: `${product.brand} · ${product.product} · ${formatKilos(product.weightKg || 0)}`,
+                label: product.label,
               }))}
             />
             <Field label="Unidades (máximo 5)">
@@ -9296,78 +9618,169 @@ function PromoterApp({
                 testId="input-unit-price"
               />
             </Field>
+            <SelectField
+              label="Presentación *"
+              value={presentation}
+              onChange={(value) => setPresentation(value as "CAJA" | "LATA" | "BOLSA")}
+              items={SALE_PRESENTATIONS.map((value) => ({ value, label: value }))}
+            />
           </div>
         ) : (
           <div className="plancha-box">
-            <Field label="Cantidad de planchas">
-              <Input
-                type="number"
-                value={planchasInput}
-                onChange={(value) =>
-                  setPlanchasInput(
-                    value === ""
-                      ? ""
-                      : String(Math.max(1, Math.trunc(Number(value)))),
-                  )
-                }
-                min={1}
-                testId="input-sale-planchas"
-              />
+            <Field label="Tipo de plancha *">
+              <select
+                className="select"
+                value={planchaType}
+                onChange={(event) => {
+                  const nextType = event.target.value as "FLAT" | "MIX";
+                  setPlanchaType(nextType);
+                  if (nextType === "FLAT") {
+                    setPlanchaLines((current) => [current[0] || newPlanchaLine()]);
+                  } else {
+                    setPlanchaLines((current) =>
+                      current.length >= 2
+                        ? current
+                        : [current[0] || newPlanchaLine(), newPlanchaLine(1)],
+                    );
+                  }
+                }}
+                data-testid="select-plancha-type"
+              >
+                <option value="FLAT">Plancha Flat</option>
+                <option value="MIX">Plancha Mix</option>
+              </select>
             </Field>
-            <p className="formula">
-              Total requerido: <strong>{planchas * 6} unidades</strong> · cada
-              marca puede iniciar en 0 · {formatKilos(weightPerPlanchaKg)} por
-              plancha
-            </p>
-            <div className="brand-mix">
-              {Object.entries(mixInputs).map(([brand, quantity]) => (
-                <Field label={brand} key={brand}>
-                  <Input
-                    type="number"
-                    value={quantity}
-                    onChange={(value) =>
-                      setMixInputs({
-                        ...mixInputs,
-                        [brand]:
-                          value === ""
-                            ? ""
-                            : String(Math.max(0, Math.trunc(Number(value)))),
-                      })
-                    }
-                    min={0}
-                  />
-                </Field>
-              ))}
-            </div>
-            <div className="brand-prices">
-              {Object.entries(mix).map(([brand]) => (
-                <Field
-                  label={`${brand} · precio unitario (S/) *`}
-                  key={`price-${brand}`}
-                >
-                  <Input
-                    type="number"
-                    value={brandPrices[brand] || ""}
-                    onChange={(value) =>
-                      setBrandPrices({ ...brandPrices, [brand]: value })
-                    }
-                    min={0.01}
-                    step={0.01}
-                    placeholder="0.00"
-                    testId={`input-price-${brand.toLowerCase()}`}
-                  />
-                </Field>
-              ))}
-            </div>
+            {planchaType === "FLAT" && (
+              <Field label="Cantidad de planchas">
+                <Input
+                  type="number"
+                  value={planchasInput}
+                  onChange={(value) =>
+                    setPlanchasInput(
+                      value === "" ? "" : String(Math.max(1, Math.trunc(Number(value)))),
+                    )
+                  }
+                  min={1}
+                  testId="input-sale-planchas"
+                />
+              </Field>
+            )}
+            {planchaType === "MIX" && (
+              <p className="formula">
+                El sistema calculará las planchas automáticamente según las unidades y la equivalencia de cada producto.
+              </p>
+            )}
+            {planchaLines.map((line, index) => {
+              const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
+              const unitsPerPlancha = PLANCHA_UNITS_BY_SKU[line.sku] || 6;
+              const expectedFlatUnits = requestedFlatPlanchas * unitsPerPlancha;
+              return (
+                <div className="plancha-line" key={line.id}>
+                  <Field label={planchaType === "MIX" ? `Producto ${index + 1} *` : "Producto *"}>
+                    <select
+                      className="select"
+                      value={line.sku}
+                      onChange={(event) => {
+                        const nextSku = event.target.value;
+                        setPlanchaLines((current) =>
+                          current.map((item) =>
+                            item.id === line.id
+                              ? {
+                                  ...item,
+                                  sku: nextSku,
+                                  units:
+                                    planchaType === "FLAT"
+                                      ? String(requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[nextSku] || 6))
+                                      : item.units,
+                                }
+                              : item,
+                          ),
+                        );
+                      }}
+                    >
+                      {UNIT_SALE_PRODUCTS.map((item) => (
+                        <option value={item.sku} key={item.sku}>{item.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="brand-mix">
+                    <Field label="Unidades *">
+                      <Input
+                        type="number"
+                        value={planchaType === "FLAT" ? String(expectedFlatUnits) : line.units}
+                        onChange={(value) =>
+                          setPlanchaLines((current) =>
+                            current.map((item) =>
+                              item.id === line.id
+                                ? { ...item, units: value === "" ? "" : String(Math.max(0, Math.trunc(Number(value)))) }
+                                : item,
+                            ),
+                          )
+                        }
+                        min={1}
+                      />
+                    </Field>
+                    <Field label="Precio unitario (S/) *">
+                      <Input
+                        type="number"
+                        value={line.unitPrice}
+                        onChange={(value) =>
+                          setPlanchaLines((current) =>
+                            current.map((item) => item.id === line.id ? { ...item, unitPrice: value } : item),
+                          )
+                        }
+                        min={0.01}
+                        step={0.01}
+                        placeholder="0.00"
+                      />
+                    </Field>
+                    <SelectField
+                      label="Presentación *"
+                      value={line.presentation}
+                      onChange={(value) =>
+                        setPlanchaLines((current) =>
+                          current.map((item) =>
+                            item.id === line.id
+                              ? { ...item, presentation: value as "CAJA" | "LATA" | "BOLSA" }
+                              : item,
+                          ),
+                        )
+                      }
+                      items={SALE_PRESENTATIONS.map((value) => ({ value, label: value }))}
+                    />
+                  </div>
+                  <p className="formula">
+                    {product.label} · {unitsPerPlancha} unidades por plancha
+                  </p>
+                  {planchaType === "MIX" && planchaLines.length > 2 && (
+                    <Btn
+                      type="button"
+                      variant="outline"
+                      onClick={() => setPlanchaLines((current) => current.filter((item) => item.id !== line.id))}
+                    >
+                      Eliminar producto
+                    </Btn>
+                  )}
+                </div>
+              );
+            })}
+            {planchaType === "MIX" && (
+              <Btn
+                type="button"
+                variant="outline"
+                onClick={() => setPlanchaLines((current) => [...current, newPlanchaLine(current.length)])}
+              >
+                Agregar Producto
+              </Btn>
+            )}
             <div className={`mix-status ${validMix ? "valid" : "invalid"}`}>
               {validMix ? (
-                <>
-                  <CheckCircle2 /> Mix válido: {totalMix} unidades
-                </>
+                <><CheckCircle2 /> {planchaType === "FLAT" ? "Plancha Flat válida" : `Mix válido: ${planchas} planchas · ${totalMix} unidades`}</>
               ) : (
                 <>
-                  Debes sumar {planchas * 6} unidades entre las marcas
-                  utilizadas.
+                  {planchaType === "FLAT"
+                    ? `Este producto requiere ${requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0]?.sku] || 6)} unidades para ${requestedFlatPlanchas} planchas.`
+                    : "Agrega al menos 2 productos. La suma de sus equivalencias debe completar una cantidad entera de planchas."}
                 </>
               )}
             </div>
@@ -9402,50 +9815,55 @@ function PromoterApp({
             )}
           </div>
         </div>
-        {bonus && mode === "PLANCHAS" && (planchas === 10 || planchas > 80) && (
+        {bonus && mode === "PLANCHAS" && planchas >= 10 && (
           <Field label="Dinámica de canje *">
             <select
               className="select"
-              value={selectedBonusProduct?.id || ""}
+              value={effectivePlanchaAccessory}
               onChange={(event) =>
-                setSelectedBonusProductId(event.target.value as CanjeProductId)
+                setPlanchaAccessory(
+                  event.target.value as "MANDIL" | "BATEA" | "NINGUNO",
+                )
               }
               data-testid="select-canje-dinamica"
             >
-              {bonusProducts.map((product) => (
-                <option value={product.id} key={product.id}>
-                  {product.label}
+              {availablePlanchaAccessories.map((accessory) => (
+                <option value={accessory} key={accessory}>
+                  {accessory === "MANDIL"
+                    ? "Con Mandil"
+                    : accessory === "BATEA"
+                      ? "Con Batea"
+                      : "Sin Mandil / Batea"}
                 </option>
               ))}
             </select>
           </Field>
         )}
-        {bonus && mode === "UNIDADES" && (
-          <p className="sale-form-note">
-            Canje automático: {canjeCount} canje{canjeCount === 1 ? "" : "s"} de
-            Avena por {unitQty} unidades.
-          </p>
-        )}
-        {bonus && mode === "PLANCHAS" && (
-          <Field label="Número de canjes utilizados *">
+        {bonus && mode === "PLANCHAS" && planchas >= 80 && (
+          <Field label="Multiplicador solicitado *">
             <select
               className="select"
-              value={redemptionCount}
-              onChange={(event) =>
-                setRedemptionCount(Number(event.target.value))
-              }
-              data-testid="select-redemption-count"
+              value={planchaMultiplier}
+              onChange={(event) => setPlanchaMultiplier(Number(event.target.value))}
+              data-testid="select-canje-multiplicador"
             >
-              <option value={1}>1 canje</option>
-              <option value={2}>2 canjes</option>
-              <option value={3}>3 canjes (excepción)</option>
+              <option value={1}>Sin multiplicador (x1)</option>
+              <option value={2}>x2 · requiere aprobación Trade</option>
+              <option value={3}>x3 · requiere aprobación Trade</option>
+              <option value={4}>x4 · requiere aprobación Trade</option>
             </select>
           </Field>
+        )}
+        {bonus && mode === "PLANCHAS" && (
+          <p className="sale-form-note">
+            Canje calculado automáticamente: {bonus}
+            {selectedWarehouse ? ` · Almacén: ${selectedWarehouse.name}` : " · Mercado sin almacén asignado"}
+          </p>
         )}
         {bonus && missingRedemption && (
           <div className="stock-warning">
             <PackageCheck /> No hay stock suficiente de{" "}
-            {redemptionLabel(missingRedemption[0])} para este canje.
+            {redemptionLabel(missingRedemption[0])} en el almacén del mercado para este canje.
           </div>
         )}
         {bonus && canjeCount === 3 && (
@@ -9681,14 +10099,6 @@ function PromoterApp({
                 {selectedMarket.district} · {selectedMarket.province} ·{" "}
                 {selectedMarket.department}
               </p>
-            </div>
-            <div className="market-stock-mini">
-              <span>
-                Mis premios <strong>{redemptionTotal}</strong>
-              </span>
-              <span>
-                Mi degustación <strong>{userTastingStock(user)}</strong>
-              </span>
             </div>
             <StatusPill status="ACTIVO" />
           </div>
@@ -9963,10 +10373,11 @@ function PromoterApp({
           {view === "NUEVA" && module === "VENTAS" && saleForm}
           {tastingExitPrompt && (
             <TastingExitModal
-              available={userTastingStock(user)}
-              onConfirm={(tastingUsed) => {
+              available900g={warehouseTastingStock.PANETON_900G}
+              available85g={warehouseTastingStock.PANETON_85G}
+              onConfirm={(usage) => {
                 setTastingExitPrompt(false);
-                finalizeAttendance(tastingUsed);
+                finalizeAttendance(usage);
               }}
               close={() => setTastingExitPrompt(false)}
             />
