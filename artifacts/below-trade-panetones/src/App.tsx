@@ -6578,12 +6578,18 @@ function AnalystApp({
         const presentationValue = normalizeCsvHeader(
           csvField(record, ["presentacion", "presentation"]),
         );
-        const presentation: "CAJA" | "BOLSA" | "LATA" =
+        const presentation: "CAJA" | "BOLSA" | "LATA" | null =
           presentationValue === "caja"
             ? "CAJA"
-            : presentationValue === "lata"
-              ? "LATA"
-              : "BOLSA";
+            : presentationValue === "bolsa"
+              ? "BOLSA"
+              : presentationValue === "lata"
+                ? "LATA"
+                : null;
+        if (!presentation) {
+          skipped += 1;
+          continue;
+        }
 
         const measure = Math.max(
           1,
@@ -6638,10 +6644,9 @@ function AnalystApp({
             (rowModes.includes("PLANCHAS") ? measure : 1),
         );
 
-        const unitGrams =
-          rowModes.includes("PLANCHAS") && rowUnitsPerPlancha > 1
-            ? grams / rowUnitsPerPlancha
-            : grams / Math.max(1, measure);
+        // En el archivo de Marcas, GRAMAJE siempre representa el peso
+        // de una unidad del producto, incluso en las filas de PLANCHA.
+        const unitGrams = grams;
 
         const key = [
           normalizeCsvHeader(brand),
@@ -6652,7 +6657,7 @@ function AnalystApp({
           (item) =>
             normalizeCsvHeader(item.product) === normalizeCsvHeader(productName) &&
             normalizeCsvHeader(item.brand || "") === normalizeCsvHeader(brand) &&
-            (item.presentation || "BOLSA") === presentation,
+            item.presentation === presentation,
         );
         const existingGroup = grouped.get(key);
         const explicitSku = csvField(record, [
