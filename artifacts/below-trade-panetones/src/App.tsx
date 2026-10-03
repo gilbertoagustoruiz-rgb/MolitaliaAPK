@@ -9646,32 +9646,27 @@ function PromoterApp({
         ) : (
           <div className="plancha-box">
             <Field label="Tipo de plancha *">
-              <div className="mode-switch">
-                <button
-                  type="button"
-                  className={planchaType === "FLAT" ? "selected" : ""}
-                  onClick={() => {
-                    setPlanchaType("FLAT");
-                    setPlanchaLines([planchaLines[0] || newPlanchaLine()]);
-                  }}
-                  data-testid="plancha-flat"
-                >
-                  Plancha Flat
-                </button>
-                <button
-                  type="button"
-                  className={planchaType === "MIX" ? "selected" : ""}
-                  onClick={() => {
-                    setPlanchaType("MIX");
+              <select
+                className="select"
+                value={planchaType}
+                onChange={(event) => {
+                  const nextType = event.target.value as "FLAT" | "MIX";
+                  setPlanchaType(nextType);
+                  if (nextType === "FLAT") {
+                    setPlanchaLines((current) => [current[0] || newPlanchaLine()]);
+                  } else {
                     setPlanchaLines((current) =>
-                      current.length >= 2 ? current : [current[0] || newPlanchaLine(), newPlanchaLine(1)],
+                      current.length >= 2
+                        ? current
+                        : [current[0] || newPlanchaLine(), newPlanchaLine(1)],
                     );
-                  }}
-                  data-testid="plancha-mix"
-                >
-                  Plancha Mix
-                </button>
-              </div>
+                  }
+                }}
+                data-testid="select-plancha-type"
+              >
+                <option value="FLAT">Plancha Flat</option>
+                <option value="MIX">Plancha Mix</option>
+              </select>
             </Field>
             <Field label="Cantidad de planchas">
               <Input
