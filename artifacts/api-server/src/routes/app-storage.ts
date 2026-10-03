@@ -1047,15 +1047,36 @@ async function syncSnapshot(
               `SALE:${value(record, "id")}`,
             );
           }
-          if (isNewRecord && name === "movements" && value(record, "kind") === "DEGUSTACION") {
-            await applyWarehouseStockMovement(
-              client as unknown as QueryClient,
-              value(record, "marketId"),
-              { PANETON_900G: Math.max(0, Math.floor(numeric(record, "quantity"))) },
-              "DEGUSTACION",
-              value(record, "promoterId") || value(record, "actorId") || "SYNC",
-              `DEG:${value(record, "id")}`,
+          if (name === "movements" && value(record, "kind") === "DEGUSTACION") {
+            const movementId = value(record, "id");
+            const existingMovement = await client.query(
+              "SELECT id FROM inventory_movements WHERE id=$1 LIMIT 1",
+              [movementId],
             );
+            if (!existingMovement.rows.length) {
+              const productId = value(record, "degustacionProductId");
+              const quantity = Math.max(0, Math.trunc(Number(record.quantity) || 0));
+              const maxQuantity =
+                productId === "PANETON_900G"
+                  ? 2
+                  : productId === "PANETON_85G"
+                    ? 8
+                    : 0;
+              if (!maxQuantity)
+                throw new Error("La presentación de degustación no es válida.");
+              if (quantity < 1 || quantity > maxQuantity)
+                throw new Error(
+                  `Cantidad inválida para ${productId}. Máximo permitido: ${maxQuantity}.`,
+                );
+              await applyWarehouseStockMovement(
+                client as unknown as QueryClient,
+                value(record, "marketId"),
+                { [productId]: quantity },
+                "DEGUSTACION",
+                value(record, "actorId") || value(record, "promoterId"),
+                `DEGUSTACION:${movementId}`,
+              );
+            }
           }
           await upsertRecord(client as unknown as QueryClient, name, record);
         }
