@@ -2027,6 +2027,55 @@ function aggregateSalesByBrand(
   );
 }
 
+type PresentationSalesRow = {
+  presentation: "CAJA" | "BOLSA" | "LATA" | "SIN PRESENTACIÓN";
+  units: number;
+  soles: number;
+  products: Set<string>;
+};
+
+function aggregateSalesByPresentation(
+  sales: Sale[],
+  productPrices: ProductPrice[] = [],
+) {
+  const grouped = new Map<string, PresentationSalesRow>();
+  sales.forEach((sale) => {
+    const breakdown = saleExportBreakdown(sale, productPrices);
+    breakdown.forEach((item) => {
+      const catalogProduct =
+        catalogProductForSaleKey(String(item.sku || item.product || ""), productPrices) ||
+        catalogProductForSaleKey(String(item.brand || ""), productPrices);
+      const presentation =
+        catalogProduct?.presentation ||
+        sale.presentation ||
+        "SIN PRESENTACIÓN";
+      const key = presentation;
+      const units = Number(item.units) || 0;
+      if (units <= 0) return;
+      const soles =
+        sale.units > 0
+          ? Number(sale.amountSoles || 0) * (units / Number(sale.units || 1))
+          : units * Number(item.unitPrice || 0);
+      const current =
+        grouped.get(key) ||
+        {
+          presentation,
+          units: 0,
+          soles: 0,
+          products: new Set<string>(),
+        };
+      current.units += units;
+      current.soles += soles;
+      if (item.product) current.products.add(String(item.product));
+      grouped.set(key, current);
+    });
+  });
+  const order = ["CAJA", "BOLSA", "LATA", "SIN PRESENTACIÓN"];
+  return Array.from(grouped.values()).sort(
+    (a, b) => order.indexOf(a.presentation) - order.indexOf(b.presentation),
+  );
+}
+
 function parseSoles(value: string) {
   return Number(value.replace(",", "."));
 }
@@ -5583,6 +5632,14 @@ function SalesDashboard({
     () => aggregateSalesByBrand(sales, productPrices),
     [sales, productPrices],
   );
+  const presentationRows = useMemo(
+    () => aggregateSalesByPresentation(sales, productPrices),
+    [sales, productPrices],
+  );
+  const maxPresentationUnits = Math.max(
+    ...presentationRows.map((row) => row.units),
+    1,
+  );
   const totals = sales.reduce(
     (result, sale) => ({
       soles: result.soles + (Number(sale.amountSoles) || 0),
@@ -5748,7 +5805,52 @@ function SalesDashboard({
             )}
           </div>
         </section>
-      </div>      <div className="summary-sections">
+      </div>
+      <section className="panel presentation-chart-panel">
+        <div className="panel-header">
+          <div>
+            <h2>Detalle por Presentación</h2>
+            <p>Unidades vendidas agrupadas por la presentación del producto registrada en Marcas.</p>
+          </div>
+        </div>
+        <div className="panel-body">
+          {presentationRows.length ? (
+            <div className="presentation-bars">
+              {presentationRows.map((row) => (
+                <div className="presentation-bar-item" key={row.presentation}>
+                  <div className="presentation-bar-value">
+                    <strong>{row.units.toLocaleString("es-PE")}</strong>
+                    <small>unidades</small>
+                  </div>
+                  <div className="presentation-bar-stage">
+                    <span
+                      style={{
+                        height: `${Math.max(
+                          8,
+                          (row.units / maxPresentationUnits) * 100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="presentation-bar-label">
+                    <strong>{row.presentation}</strong>
+                    <small>
+                      {row.products.size} producto{row.products.size === 1 ? "" : "s"} ·{" "}
+                      {formatSoles(row.soles)}
+                    </small>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty
+              title="Sin detalle por presentación"
+              detail="El gráfico aparecerá cuando existan ventas relacionadas al catálogo Marcas."
+            />
+          )}
+        </div>
+      </section>
+      <div className="summary-sections">
         <section className="panel">
           <div className="panel-header">
             <div>
