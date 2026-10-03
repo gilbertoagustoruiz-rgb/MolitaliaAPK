@@ -207,6 +207,20 @@ const PLANCHA_UNITS_BY_SKU: Record<string, number> = {
   "TODINNITO-CHOCOTINNO-450": 6,
   "TODINNITO-BOLSA": 6,
 };
+const DEFAULT_PRODUCT_PRESENTATION_BY_SKU: Record<string, "CAJA" | "BOLSA" | "LATA"> = {
+  "COSTA-800": "CAJA",
+  "COSTA-BOLSA-800": "BOLSA",
+  "TODINNO-TODINNITO": "CAJA",
+  "TODINNITO-85": "CAJA",
+  "PASQUALINO-800": "BOLSA",
+  "TODINNO-900-BOLSA-TODINNITO": "BOLSA",
+  "TODINNO-CHOCOTINNO-450": "CAJA",
+  "MINI-COSTA-MINIONS-80": "CAJA",
+  "MINI-COSTA-JURASSIC-80": "CAJA",
+  "TODINNO-LATA-900": "LATA",
+  "TODINNITO-CHOCOTINNO-450": "CAJA",
+  "TODINNITO-BOLSA": "BOLSA",
+};
 type PlanchaLine = {
   id: string;
   sku: string;
@@ -556,17 +570,15 @@ function normalizedProducts(
   }
 > {
   if (!productPrices.length)
-    return products.map((product) => ({
-      ...product,
-      product: product.name,
-      saleModes: [
-        "UNIDADES",
-        ...(products.slice(0, 3).some((item) => item.sku === product.sku)
-          ? ["PLANCHAS"]
-          : []),
-      ] as SaleMode[],
-      presentation: "BOLSA" as const,
+    return UNIT_SALE_PRODUCTS.map((product) => ({
+      sku: product.sku,
+      product: product.label,
+      brand: product.brand,
+      name: product.label,
+      weightKg: product.weightKg,
+      presentation: DEFAULT_PRODUCT_PRESENTATION_BY_SKU[product.sku] || "BOLSA",
       unitMeasure: 1,
+      saleModes: ["UNIDADES", "PLANCHAS"] as SaleMode[],
       unitsPerPlancha: PLANCHA_UNITS_BY_SKU[product.sku] || 6,
       unitsPerPackage: 1,
       unitPrice: 0,
@@ -575,7 +587,7 @@ function normalizedProducts(
       updatedAt: "",
     }));
   return productPrices.map((item) => {
-    const fallback = products.find((product) => product.sku === item.sku);
+    const fallback = UNIT_SALE_PRODUCTS.find((product) => product.sku === item.sku);
     return {
       ...item,
       brand: item.brand || fallback?.brand || item.product,
@@ -583,17 +595,11 @@ function normalizedProducts(
       weightKg: Number(item.weightKg ?? fallback?.weightKg ?? 0),
       saleModes: item.saleModes?.length
         ? item.saleModes
-        : fallback
-          ? ([
-              "UNIDADES",
-              ...(products
-                .slice(0, 3)
-                .some((product) => product.sku === fallback.sku)
-                ? ["PLANCHAS"]
-                : []),
-            ] as SaleMode[])
-          : (["UNIDADES"] as SaleMode[]),
-      presentation: item.presentation || ("BOLSA" as const),
+        : (["UNIDADES", "PLANCHAS"] as SaleMode[]),
+      presentation:
+        item.presentation ||
+        DEFAULT_PRODUCT_PRESENTATION_BY_SKU[item.sku] ||
+        ("BOLSA" as const),
       unitMeasure: Math.max(1, Math.floor(Number(item.unitMeasure) || 1)),
       unitsPerPlancha: Math.max(
         1,
