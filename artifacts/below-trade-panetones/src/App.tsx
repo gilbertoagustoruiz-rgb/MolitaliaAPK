@@ -9646,10 +9646,10 @@ function PromoterApp({
         ) : (
           <div className="plancha-box">
             <Field label="Tipo de plancha *">
-              <div className="sale-mode-grid">
+              <div className="mode-switch">
                 <button
                   type="button"
-                  className={planchaType === "FLAT" ? "active" : ""}
+                  className={planchaType === "FLAT" ? "selected" : ""}
                   onClick={() => {
                     setPlanchaType("FLAT");
                     setPlanchaLines([planchaLines[0] || newPlanchaLine()]);
@@ -9660,7 +9660,7 @@ function PromoterApp({
                 </button>
                 <button
                   type="button"
-                  className={planchaType === "MIX" ? "active" : ""}
+                  className={planchaType === "MIX" ? "selected" : ""}
                   onClick={() => {
                     setPlanchaType("MIX");
                     setPlanchaLines((current) =>
