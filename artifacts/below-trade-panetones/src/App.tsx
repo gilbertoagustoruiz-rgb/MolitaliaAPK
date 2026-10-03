@@ -9025,6 +9025,10 @@ function PromoterApp({
     }),
     {} as RedemptionStock,
   );
+  const warehouseTastingStock = {
+    PANETON_900G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_900G) || 0),
+    PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
+  };
   const redemptionTotal = sumRedemptionStock(
     mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock,
   );
@@ -9551,7 +9555,7 @@ function PromoterApp({
       notify("La degustación supera el máximo permitido por presentación.", true);
       return;
     }
-    if (tasting900g > warehouseRedemptionStock.PANETON_900G || tasting85g > warehouseRedemptionStock.PANETON_85G) {
+    if (tasting900g > warehouseTastingStock.PANETON_900G || tasting85g > warehouseTastingStock.PANETON_85G) {
       notify(`Stock insuficiente en ${selectedWarehouse?.name || "el Almacén del Mercado"} para la degustación indicada.`, true);
       return;
     }
@@ -10556,8 +10560,8 @@ function PromoterApp({
           {view === "NUEVA" && module === "VENTAS" && saleForm}
           {tastingExitPrompt && (
             <TastingExitModal
-              available900g={warehouseRedemptionStock.PANETON_900G}
-              available85g={warehouseRedemptionStock.PANETON_85G}
+              available900g={warehouseTastingStock.PANETON_900G}
+              available85g={warehouseTastingStock.PANETON_85G}
               onConfirm={(usage) => {
                 setTastingExitPrompt(false);
                 finalizeAttendance(usage);
