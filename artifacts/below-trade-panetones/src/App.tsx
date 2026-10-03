@@ -6500,6 +6500,173 @@ function AnalystApp({
     );
     notify("Marcaciones con links de fotos descargadas");
   };
+  const exportBrands = () => {
+    const rows = normalizedProducts(productPrices).map((product) => [
+      product.sku,
+      product.presentation || "BOLSA",
+      product.product,
+      product.brand || "",
+      product.unitMeasure || 1,
+      Math.round((product.weightKg || 0) * 1000),
+      product.saleModes?.includes("PLANCHAS") ? product.unitsPerPlancha || 6 : "",
+      product.saleModes?.length === 2
+        ? "AMBOS"
+        : product.saleModes?.[0] || "UNIDADES",
+      Number(product.unitPrice || 0).toFixed(2),
+      product.status || "ACTIVO",
+    ]);
+    downloadCsv(
+      `marcas-productos-${today}.csv`,
+      [
+        "SKU",
+        "PRESENTACION",
+        "PRODUCTO",
+        "MARCA",
+        "MEDIDA UNITARIA",
+        "GRAMAJE",
+        "UNIDADES POR PLANCHA",
+        "MODALIDAD",
+        "PRECIO UNITARIO (S/)",
+        "ESTADO",
+      ],
+      rows,
+    );
+    notify("Catálogo de Marcas y productos descargado.");
+  };
+
+  const importBrandsFile = async (file: File) => {
+    try {
+      const records = await parseImportRecords(file);
+      const currentCatalog = normalizedProducts(productPrices);
+      let imported = 0;
+      let skipped = 0;
+      for (const [index, record] of records.entries()) {
+        const productName = csvField(record, [
+          "producto",
+          "nombreproducto",
+          "descripcion",
+        ]).trim();
+        const brand = csvField(record, ["marca", "brand"]).trim().toUpperCase();
+        if (!productName || !brand) {
+          skipped += 1;
+          continue;
+        }
+        const presentationRaw = csvField(record, ["presentacion", "presentation"]);
+        const presentationValue = normalizeCsvHeader(presentationRaw);
+        const presentation: "CAJA" | "BOLSA" | "LATA" =
+          presentationValue === "caja"
+            ? "CAJA"
+            : presentationValue === "lata"
+              ? "LATA"
+              : "BOLSA";
+        const measure = Math.max(
+          1,
+          Math.floor(
+            csvNumber(
+              csvField(record, [
+                "medidaunitaria",
+                "medida",
+                "unidad",
+                "unidadesporemapeque",
+                "unidadesporempaque",
+              ]),
+            ) || 1,
+          ),
+        );
+        const gramsRaw = csvField(record, ["gramaje", "gramos", "peso", "pesogr"]);
+        const grams = csvNumber(gramsRaw);
+        if (grams <= 0) {
+          skipped += 1;
+          continue;
+        }
+        const modalityRaw = normalizeCsvHeader(
+          csvField(record, ["modalidad", "tipoventa", "ventamodalidad"]),
+        );
+        const saleModes: SaleMode[] =
+          modalityRaw === "planchas" || modalityRaw === "plancha"
+            ? ["PLANCHAS"]
+            : modalityRaw === "unidades" || modalityRaw === "unidad"
+              ? ["UNIDADES"]
+              : ["UNIDADES", "PLANCHAS"];
+        const unitsPerPlancha = saleModes.includes("PLANCHAS")
+          ? Math.max(
+              1,
+              Math.floor(
+                csvNumber(
+                  csvField(record, [
+                    "unidadesporplancha",
+                    "undxplancha",
+                    "undplancha",
+                    "unidadesplancha",
+                  ]),
+                ) || 6,
+              ),
+            )
+          : 1;
+        const explicitSku = csvField(record, ["sku", "codigo", "codigoproducto"]).trim();
+        const existing = currentCatalog.find(
+          (item) =>
+            normalizeCsvHeader(item.product) === normalizeCsvHeader(productName) &&
+            normalizeCsvHeader(item.brand || "") === normalizeCsvHeader(brand) &&
+            (item.presentation || "BOLSA") === presentation,
+        );
+        const generatedSku =
+          explicitSku ||
+          existing?.sku ||
+          `MAR-${normalizeCsvHeader(brand).toUpperCase()}-${normalizeCsvHeader(productName)
+            .toUpperCase()
+            .slice(0, 28)}-${index + 1}`;
+        const unitPrice = Math.max(
+          0,
+          csvNumber(
+            csvField(record, [
+              "preciounitario",
+              "precio",
+              "preciounitarios",
+              "preciounitarios",
+            ]),
+          ),
+        );
+        const catalogRecord: ProductPrice = {
+          sku: generatedSku,
+          product: productName.toUpperCase(),
+          brand,
+          presentation,
+          unitMeasure: measure,
+          weightKg: grams / 1000,
+          unitsPerPlancha,
+          unitsPerPackage: measure,
+          unitPrice,
+          totalPrice: unitPrice * measure,
+          saleModes,
+          status: csvStatus(csvField(record, ["estado", "status"])),
+          updatedAt: new Date().toISOString(),
+        };
+        await adminRequest("/catalog/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ record: catalogRecord }),
+        });
+        imported += 1;
+      }
+      if (!imported)
+        throw new Error(
+          "No se encontraron productos válidos. Revisa PRODUCTO, MARCA y GRAMAJE.",
+        );
+      notify(
+        `${imported} producto(s) importado(s) al módulo Marcas${skipped ? ` · ${skipped} fila(s) omitida(s)` : ""}.`,
+      );
+      window.location.reload();
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo importar el catálogo de Marcas.",
+        true,
+      );
+    }
+  };
+
   const exportMarkets = async () => {
     try {
       const response = await fetch("/api/app-storage/warehouses");
@@ -7775,9 +7942,19 @@ function AnalystApp({
                 Catálogo maestro para Venta Unitaria, Planchas y agrupación del dashboard por Marca.
               </p>
             </div>
-            <Btn onClick={() => setModal("product")} testId="button-new-brand-product">
-              <Plus /> Nuevo producto
-            </Btn>
+            <div className="panel-actions">
+              <Btn variant="outline" onClick={exportBrands} testId="button-export-brands">
+                <Download /> Descargar
+              </Btn>
+              <CsvImportButton
+                label="Importar marcas"
+                onImport={importBrandsFile}
+                testId="button-import-brands"
+              />
+              <Btn onClick={() => setModal("product")} testId="button-new-brand-product">
+                <Plus /> Nuevo producto
+              </Btn>
+            </div>
           </div>
           <div className="panel-body sales-panel-body">
             <TableSearch
