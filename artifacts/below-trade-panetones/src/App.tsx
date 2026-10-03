@@ -1941,7 +1941,7 @@ function planchaCanjeRequirements(
     avena = 3;
     spaghetti = 1;
   }
-  const factor = planchas > 80 ? Math.max(1, Math.min(4, multiplier)) : 1;
+  const factor = planchas >= 80 ? Math.max(1, Math.min(4, multiplier)) : 1;
   const requirements: Partial<RedemptionStock> = {
     AVENA: avena * factor,
     SPAGHETTI: spaghetti * factor,
@@ -8891,20 +8891,20 @@ function PromoterApp({
     });
   }, [selectedMarketId, selectedClientId]);
   const unitQty = Number(unitQtyInput) || 0;
-  const planchas = Number(planchasInput) || 0;
+  const requestedFlatPlanchas = Number(planchasInput) || 0;
   const selectedProduct =
     unitProducts.find((product) => product.sku === sku) ||
     unitProducts[0] ||
     UNIT_SALE_PRODUCTS[0];
   useEffect(() => {
     if (planchaType !== "FLAT" || !planchaLines[0]) return;
-    const expected = planchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0].sku] || 6);
+    const expected = requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0].sku] || 6);
     if (planchaLines[0].units !== String(expected)) {
       setPlanchaLines((current) =>
         current.map((line, index) => index === 0 ? { ...line, units: String(expected) } : line),
       );
     }
-  }, [planchaType, planchas, planchaLines[0]?.sku]);
+  }, [planchaType, requestedFlatPlanchas, planchaLines[0]?.sku]);
   const normalizedPlanchaLines = planchaLines.map((line) => {
     const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
     return {
@@ -8915,6 +8915,19 @@ function PromoterApp({
     };
   });
   const totalMix = normalizedPlanchaLines.reduce((sum, line) => sum + line.units, 0);
+  const planchaEquivalents = normalizedPlanchaLines.map((line) => ({
+    ...line,
+    planchas: line.units / (PLANCHA_UNITS_BY_SKU[line.sku] || 6),
+  }));
+  const calculatedPlanchas =
+    planchaType === "FLAT"
+      ? requestedFlatPlanchas
+      : planchaEquivalents.reduce((sum, line) => sum + line.planchas, 0);
+  const planchas =
+    mode === "PLANCHAS" && Number.isFinite(calculatedPlanchas)
+      ? Math.floor(calculatedPlanchas)
+      : 0;
+
   const total = mode === "UNIDADES" ? unitQty : totalMix;
   const unitPrice = parseSoles(unitPriceSoles);
   const saleAmount =
@@ -8967,10 +8980,16 @@ function PromoterApp({
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
+  const mandilBaseRequirements = planchaCanjeRequirements(planchas, saleDate, "MANDIL", 1);
+  const bateaBaseRequirements = planchaCanjeRequirements(planchas, saleDate, "BATEA", 1);
+  const canCoverRequirements = (requirements: Partial<RedemptionStock>) =>
+    requiredRedemptionEntries(requirements).every(
+      ([itemId, quantity]) => warehouseRedemptionStock[itemId] >= quantity,
+    );
   const availablePlanchaAccessories = planchas >= 10
     ? ([
-        ...(warehouseRedemptionStock.MANDIL > 0 ? ["MANDIL" as const] : []),
-        ...(warehouseRedemptionStock.BATEA > 0 ? ["BATEA" as const] : []),
+        ...(canCoverRequirements(mandilBaseRequirements) ? ["MANDIL" as const] : []),
+        ...(canCoverRequirements(bateaBaseRequirements) ? ["BATEA" as const] : []),
         "NINGUNO" as const,
       ])
     : (["NINGUNO" as const]);
@@ -8981,9 +9000,9 @@ function PromoterApp({
     }
     const month = saleDate.getMonth() + 1;
     const preferred =
-      (month === 9 || month === 10) && warehouseRedemptionStock.MANDIL > 0
+      (month === 9 || month === 10) && availablePlanchaAccessories.includes("MANDIL")
         ? "MANDIL"
-        : month === 11 && warehouseRedemptionStock.BATEA > 0
+        : month === 11 && availablePlanchaAccessories.includes("BATEA")
           ? "BATEA"
           : "NINGUNO";
     setPlanchaAccessory(preferred);
@@ -8995,6 +9014,9 @@ function PromoterApp({
   const effectivePlanchaAccessory = availablePlanchaAccessories.includes(planchaAccessory)
     ? planchaAccessory
     : availablePlanchaAccessories[0];
+  useEffect(() => {
+    if (planchas < 80 && planchaMultiplier !== 1) setPlanchaMultiplier(1);
+  }, [planchas, planchaMultiplier]);
   const automaticUnitCanjeCount =
     mode === "UNIDADES" ? Math.floor(unitQty / 2) : 0;
   const canjeCount = mode === "UNIDADES"
@@ -9036,9 +9058,10 @@ function PromoterApp({
     (planchaType === "FLAT"
       ? normalizedPlanchaLines.length === 1 &&
         normalizedPlanchaLines[0].units ===
-          planchas * (PLANCHA_UNITS_BY_SKU[normalizedPlanchaLines[0].sku] || 6)
+          requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[normalizedPlanchaLines[0].sku] || 6)
       : normalizedPlanchaLines.length >= 2 &&
-        normalizedPlanchaLines.every((line) => line.units > 0));
+        normalizedPlanchaLines.every((line) => line.units > 0) &&
+        planchaEquivalents.every((line) => Number.isInteger(line.planchas)));
   const saleFormValid = Boolean(
     clientId &&
     (!bonus || finalClientName.trim()) &&
@@ -9211,7 +9234,7 @@ function PromoterApp({
           !exitedToday(clientId))),
   );
   const requiresTradeApproval =
-    mode === "PLANCHAS" && (planchas > 80 || planchaMultiplier > 1);
+    mode === "PLANCHAS" && (planchas >= 80 || planchaMultiplier > 1);
   const canConfirm = Boolean(
     !savingAdminSale &&
     (!administrative ||
@@ -9668,23 +9691,30 @@ function PromoterApp({
                 <option value="MIX">Plancha Mix</option>
               </select>
             </Field>
-            <Field label="Cantidad de planchas">
-              <Input
-                type="number"
-                value={planchasInput}
-                onChange={(value) =>
-                  setPlanchasInput(
-                    value === "" ? "" : String(Math.max(1, Math.trunc(Number(value)))),
-                  )
-                }
-                min={1}
-                testId="input-sale-planchas"
-              />
-            </Field>
+            {planchaType === "FLAT" && (
+              <Field label="Cantidad de planchas">
+                <Input
+                  type="number"
+                  value={planchasInput}
+                  onChange={(value) =>
+                    setPlanchasInput(
+                      value === "" ? "" : String(Math.max(1, Math.trunc(Number(value)))),
+                    )
+                  }
+                  min={1}
+                  testId="input-sale-planchas"
+                />
+              </Field>
+            )}
+            {planchaType === "MIX" && (
+              <p className="formula">
+                El sistema calculará las planchas automáticamente según las unidades y la equivalencia de cada producto.
+              </p>
+            )}
             {planchaLines.map((line, index) => {
               const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
               const unitsPerPlancha = PLANCHA_UNITS_BY_SKU[line.sku] || 6;
-              const expectedFlatUnits = planchas * unitsPerPlancha;
+              const expectedFlatUnits = requestedFlatPlanchas * unitsPerPlancha;
               return (
                 <div className="plancha-line" key={line.id}>
                   <Field label={planchaType === "MIX" ? `Producto ${index + 1} *` : "Producto *"}>
@@ -9701,7 +9731,7 @@ function PromoterApp({
                                   sku: nextSku,
                                   units:
                                     planchaType === "FLAT"
-                                      ? String(planchas * (PLANCHA_UNITS_BY_SKU[nextSku] || 6))
+                                      ? String(requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[nextSku] || 6))
                                       : item.units,
                                 }
                               : item,
@@ -9786,12 +9816,12 @@ function PromoterApp({
             )}
             <div className={`mix-status ${validMix ? "valid" : "invalid"}`}>
               {validMix ? (
-                <><CheckCircle2 /> {planchaType === "FLAT" ? "Plancha Flat válida" : `Mix registrado: ${totalMix} unidades`}</>
+                <><CheckCircle2 /> {planchaType === "FLAT" ? "Plancha Flat válida" : `Mix válido: ${planchas} planchas · ${totalMix} unidades`}</>
               ) : (
                 <>
                   {planchaType === "FLAT"
-                    ? `Este producto requiere ${planchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0]?.sku] || 6)} unidades para ${planchas} planchas.`
-                    : "Agrega al menos 2 productos con sus unidades y precios."}
+                    ? `Este producto requiere ${requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0]?.sku] || 6)} unidades para ${requestedFlatPlanchas} planchas.`
+                    : "Agrega al menos 2 productos. Cada producto debe completar planchas enteras según su equivalencia."}
                 </>
               )}
             </div>
@@ -9850,7 +9880,7 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {bonus && mode === "PLANCHAS" && planchas > 80 && (
+        {bonus && mode === "PLANCHAS" && planchas >= 80 && (
           <Field label="Multiplicador solicitado *">
             <select
               className="select"
