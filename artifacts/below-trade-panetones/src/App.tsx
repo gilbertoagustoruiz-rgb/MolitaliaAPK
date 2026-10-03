@@ -9072,7 +9072,8 @@ function PromoterApp({
           requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[normalizedPlanchaLines[0].sku] || 6)
       : normalizedPlanchaLines.length >= 2 &&
         normalizedPlanchaLines.every((line) => line.units > 0) &&
-        planchaEquivalents.every((line) => Number.isInteger(line.planchas)));
+        calculatedPlanchas >= 1 &&
+        Number.isInteger(calculatedPlanchas));
   const saleFormValid = Boolean(
     clientId &&
     (!bonus || finalClientName.trim()) &&
@@ -9832,7 +9833,7 @@ function PromoterApp({
                 <>
                   {planchaType === "FLAT"
                     ? `Este producto requiere ${requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0]?.sku] || 6)} unidades para ${requestedFlatPlanchas} planchas.`
-                    : "Agrega al menos 2 productos. Cada producto debe completar planchas enteras según su equivalencia."}
+                    : "Agrega al menos 2 productos. La suma de sus equivalencias debe completar una cantidad entera de planchas."}
                 </>
               )}
             </div>
