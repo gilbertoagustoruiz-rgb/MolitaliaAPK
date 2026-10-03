@@ -4475,7 +4475,7 @@ function TastingExitModal({
     Number.isInteger(paneton900g) && paneton900g >= 0 && paneton900g <= 2 && paneton900g <= available900g;
   const valid85g =
     Number.isInteger(paneton85g) && paneton85g >= 0 && paneton85g <= 8 && paneton85g <= available85g;
-  const valid = valid900g && valid85g;
+  const valid = valid900g && valid85g && paneton900g + paneton85g > 0;
   return (
     <Modal
       title="Registrar salida del cliente"
@@ -4528,6 +4528,9 @@ function TastingExitModal({
         )}
         {!valid85g && Number.isFinite(paneton85g) && (
           <p className="modal-error">85 g: máximo 8 y no puede superar el stock disponible ({available85g}).</p>
+        )}
+        {valid900g && valid85g && paneton900g + paneton85g === 0 && (
+          <p className="modal-error">Registra al menos un Panetón utilizado para cerrar la sesión.</p>
         )}
       </div>
       <div className="modal-actions">
@@ -9610,8 +9613,8 @@ function PromoterApp({
                 ...warehouse,
                 stock: {
                   ...warehouse.stock,
-                  PANETON_900G: Math.max(0, warehouse.stock.PANETON_900G - tasting900g),
-                  PANETON_85G: Math.max(0, warehouse.stock.PANETON_85G - tasting85g),
+                  PANETON_900G: Math.max(0, Number(warehouse.stock.PANETON_900G) - tasting900g),
+                  PANETON_85G: Math.max(0, Number(warehouse.stock.PANETON_85G) - tasting85g),
                 },
                 updatedAt: now.toISOString(),
               }
