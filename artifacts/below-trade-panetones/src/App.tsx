@@ -8835,7 +8835,6 @@ function PromoterApp({
   const [unitQtyInput, setUnitQtyInput] = useState("1");
   const [unitPriceSoles, setUnitPriceSoles] = useState("");
   const [presentation, setPresentation] = useState<"CAJA" | "LATA" | "BOLSA">("BOLSA");
-  const [brandPrices, setBrandPrices] = useState<Record<string, string>>({});
   const [planchasInput, setPlanchasInput] = useState("1");
   const [planchaType, setPlanchaType] = useState<"FLAT" | "MIX">("FLAT");
   const [planchaLines, setPlanchaLines] = useState<PlanchaLine[]>([newPlanchaLine()]);
@@ -8955,36 +8954,6 @@ function PromoterApp({
   const redemptionTotal = sumRedemptionStock(
     mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock,
   );
-  const totalMix = Object.values(mix).reduce(
-    (sum, quantity) => sum + quantity,
-    0,
-  );
-  const total = mode === "UNIDADES" ? unitQty : totalMix;
-  const unitPrice = parseSoles(unitPriceSoles);
-  const saleAmount =
-    mode === "UNIDADES"
-      ? unitQty * unitPrice
-      : Object.entries(mix).reduce(
-          (sum, [brand, quantity]) =>
-            sum + quantity * (brandUnitPrices[brand] || 0),
-          0,
-        );
-  const orderWeightKg =
-    mode === "UNIDADES"
-      ? unitQty * selectedProduct.weightKg
-      : Object.entries(mix).reduce(
-          (sum, [brand, quantity]) =>
-            sum + quantity * (planchaProductByBrand[brand]?.weightKg || 0),
-          0,
-        );
-  const weightPerPlanchaKg =
-    mode === "PLANCHAS" && planchas > 0 ? orderWeightKg / planchas : 0;
-  const pricesValid =
-    mode === "UNIDADES"
-      ? unitPrice > 0
-      : Object.entries(mix)
-          .filter(([, quantity]) => quantity > 0)
-          .every(([brand]) => (brandUnitPrices[brand] || 0) > 0);
   const bonusProducts = bonusProductsFor(
     mode,
     total,
@@ -9374,14 +9343,8 @@ function PromoterApp({
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.message || "No se pudo solicitar la aprobación.");
         setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
-        setBrandPrices(
-          Object.fromEntries(
-            planchaCatalogProducts.map((product) => [
-              product.brand,
-              String(product.unitPrice || ""),
-            ]),
-          ),
-        );
+        setPlanchaLines([newPlanchaLine()]);
+        setPlanchaType("FLAT");
         setRedemptionCount(1);
         setPlanchaMultiplier(1);
         setComment("");
@@ -9452,14 +9415,8 @@ function PromoterApp({
       writeStore("bt-inventory-movements", nextMovements);
     }
     setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
-    setBrandPrices(
-      Object.fromEntries(
-        planchaCatalogProducts.map((product) => [
-          product.brand,
-          String(product.unitPrice || ""),
-        ]),
-      ),
-    );
+    setPlanchaLines([newPlanchaLine()]);
+    setPlanchaType("FLAT");
     setRedemptionCount(1);
     setPlanchaMultiplier(1);
     setComment("");
