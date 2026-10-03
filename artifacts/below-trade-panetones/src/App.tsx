@@ -1968,7 +1968,7 @@ function bonusProductsFor(
     return total >= 2
       ? canjeProducts.filter((product) => product.id === "CANJE_AVENA_1")
       : [];
-  if (planchas > 80) {
+  if (planchas >= 80) {
     const fixed = canjeProducts.find(
       (product) => product.id === "CANJE_AVENA_144_SPAGHETTI_100",
     );
