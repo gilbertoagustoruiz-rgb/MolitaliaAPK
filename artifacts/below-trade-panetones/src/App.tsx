@@ -8789,7 +8789,12 @@ function PromoterApp({
         return response.json();
       })
       .then((payload) => {
-        if (!cancelled) setWarehouses(Array.isArray(payload) ? payload : []);
+        const loadedWarehouses = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.warehouses)
+            ? payload.warehouses
+            : [];
+        if (!cancelled) setWarehouses(loadedWarehouses);
       })
       .catch(() => {
         if (!cancelled) setWarehouses([]);
