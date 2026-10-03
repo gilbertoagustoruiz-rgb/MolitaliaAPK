@@ -128,8 +128,11 @@ type ProductPrice = {
   sku: string;
   product: string;
   brand?: string;
+  presentation?: "CAJA" | "BOLSA" | "LATA";
+  unitMeasure?: number;
   weightKg?: number;
   saleModes?: SaleMode[];
+  unitsPerPlancha?: number;
   unitsPerPackage: number;
   unitPrice: number;
   totalPrice: number;
@@ -562,6 +565,9 @@ function normalizedProducts(
           ? ["PLANCHAS"]
           : []),
       ] as SaleMode[],
+      presentation: "BOLSA" as const,
+      unitMeasure: 1,
+      unitsPerPlancha: PLANCHA_UNITS_BY_SKU[product.sku] || 6,
       unitsPerPackage: 1,
       unitPrice: 0,
       totalPrice: 0,
@@ -587,6 +593,12 @@ function normalizedProducts(
                 : []),
             ] as SaleMode[])
           : (["UNIDADES"] as SaleMode[]),
+      presentation: item.presentation || ("BOLSA" as const),
+      unitMeasure: Math.max(1, Math.floor(Number(item.unitMeasure) || 1)),
+      unitsPerPlancha: Math.max(
+        1,
+        Math.floor(Number(item.unitsPerPlancha) || PLANCHA_UNITS_BY_SKU[item.sku] || 6),
+      ),
       status: item.status || ("ACTIVO" as Status),
     };
   });
@@ -3201,13 +3213,17 @@ function CatalogProductModal({
   const [sku, setSku] = useState(product?.sku || "");
   const [name, setName] = useState(product?.product || "");
   const [brand, setBrand] = useState(product?.brand || "");
-  const [weight, setWeight] = useState(String(product?.weightKg || ""));
-  const [price, setPrice] = useState(String(product?.unitPrice || ""));
-  const [unitsPerPackage, setUnitsPerPackage] = useState(
-    String(product?.unitsPerPackage || 1),
+  const [presentation, setPresentation] = useState<"CAJA" | "BOLSA" | "LATA">(
+    product?.presentation || "BOLSA",
   );
+  const [unitMeasure, setUnitMeasure] = useState(String(product?.unitMeasure || 1));
+  const [weight, setWeight] = useState(String(product?.weightKg || ""));
+  const [unitsPerPlancha, setUnitsPerPlancha] = useState(
+    String(product?.unitsPerPlancha || 6),
+  );
+  const [price, setPrice] = useState(String(product?.unitPrice || ""));
   const [saleModes, setSaleModes] = useState<SaleMode[]>(
-    product?.saleModes?.length ? product.saleModes : ["UNIDADES"],
+    product?.saleModes?.length ? product.saleModes : ["UNIDADES", "PLANCHAS"],
   );
   const [status, setStatus] = useState<Status>(product?.status || "ACTIVO");
   const [saving, setSaving] = useState(false);
@@ -3223,21 +3239,27 @@ function CatalogProductModal({
       !name.trim() ||
       !brand.trim() ||
       Number(weight) <= 0 ||
-      Number(price) <= 0 ||
+      Number(unitMeasure) <= 0 ||
+      (saleModes.includes("PLANCHAS") && Number(unitsPerPlancha) <= 0) ||
       !saleModes.length ||
       saving
     )
       return;
     setSaving(true);
-    const packageUnits = Math.max(1, Math.floor(Number(unitsPerPackage) || 1));
+    const measure = Math.max(1, Math.floor(Number(unitMeasure) || 1));
+    const perPlancha = Math.max(1, Math.floor(Number(unitsPerPlancha) || 1));
+    const unitPrice = Math.max(0, Number(price) || 0);
     const saved = await onSave({
       sku: sku.trim().toUpperCase(),
-      product: name.trim(),
+      product: name.trim().toUpperCase(),
       brand: brand.trim().toUpperCase(),
+      presentation,
+      unitMeasure: measure,
       weightKg: Number(weight),
-      unitPrice: Number(price),
-      unitsPerPackage: packageUnits,
-      totalPrice: Number(price) * packageUnits,
+      unitsPerPlancha: perPlancha,
+      unitsPerPackage: measure,
+      unitPrice,
+      totalPrice: unitPrice * measure,
       saleModes,
       status,
       updatedAt: new Date().toISOString(),
@@ -3247,12 +3269,12 @@ function CatalogProductModal({
   };
   return (
     <Modal
-      title={product ? "Editar producto" : "Nuevo producto"}
-      detail="Define cómo aparecerá en las ventas unitarias y por planchas."
+      title={product ? "Editar producto / marca" : "Nuevo producto / marca"}
+      detail="Este catálogo alimenta las ventas por Unidades y Planchas y permite agrupar correctamente el dashboard por Marca."
       close={close}
     >
       <div className="form-grid">
-        <Field label="SKU *">
+        <Field label="SKU / Código *">
           <Input value={sku} onChange={setSku} readOnly={Boolean(product)} />
         </Field>
         <Field label="Producto *">
@@ -3261,7 +3283,26 @@ function CatalogProductModal({
         <Field label="Marca *">
           <Input value={brand} onChange={setBrand} />
         </Field>
-        <Field label="Peso por unidad (kg) *">
+        <SelectField
+          label="Presentación *"
+          value={presentation}
+          onChange={(value) => setPresentation(value as "CAJA" | "BOLSA" | "LATA")}
+          items={[
+            { value: "CAJA", label: "CAJA" },
+            { value: "BOLSA", label: "BOLSA" },
+            { value: "LATA", label: "LATA" },
+          ]}
+        />
+        <Field label="Medida unitaria *">
+          <Input
+            type="number"
+            value={unitMeasure}
+            onChange={setUnitMeasure}
+            min={1}
+            step={1}
+          />
+        </Field>
+        <Field label="Gramaje por unidad (kg) *">
           <Input
             type="number"
             value={weight}
@@ -3270,21 +3311,23 @@ function CatalogProductModal({
             step={0.001}
           />
         </Field>
-        <Field label="Precio unitario (S/) *">
+        <Field label="Unidades por plancha *">
+          <Input
+            type="number"
+            value={unitsPerPlancha}
+            onChange={setUnitsPerPlancha}
+            min={1}
+            step={1}
+            disabled={!saleModes.includes("PLANCHAS")}
+          />
+        </Field>
+        <Field label="Precio unitario referencial (S/)">
           <Input
             type="number"
             value={price}
             onChange={setPrice}
-            min={0.01}
+            min={0}
             step={0.01}
-          />
-        </Field>
-        <Field label="Unidades por empaque">
-          <Input
-            type="number"
-            value={unitsPerPackage}
-            onChange={setUnitsPerPackage}
-            min={1}
           />
         </Field>
         <Field label="Disponible en *">
@@ -3295,7 +3338,7 @@ function CatalogProductModal({
                 checked={saleModes.includes("UNIDADES")}
                 onChange={() => toggleMode("UNIDADES")}
               />{" "}
-              Unidades
+              Venta unitaria
             </label>
             <label>
               <input
@@ -3328,17 +3371,19 @@ function CatalogProductModal({
             !name.trim() ||
             !brand.trim() ||
             Number(weight) <= 0 ||
-            Number(price) <= 0 ||
-            !saleModes.length
+            Number(unitMeasure) <= 0 ||
+            !saleModes.length ||
+            (saleModes.includes("PLANCHAS") && Number(unitsPerPlancha) <= 0)
           }
-          onClick={save}
+          onClick={() => void save()}
         >
-          {saving ? "Guardando..." : "Guardar producto"}
+          <CheckCircle2 /> {saving ? "Guardando..." : "Guardar"}
         </Btn>
       </div>
     </Modal>
   );
 }
+
 function CatalogCategoryModal({
   category,
   onSave,
@@ -7268,7 +7313,10 @@ function AnalystApp({
       product.sku,
       product.product,
       product.brand,
+      product.presentation,
+      product.unitMeasure,
       product.weightKg,
+      product.unitsPerPlancha,
       product.unitPrice,
       product.saleModes?.join(" "),
       product.status,
@@ -7390,6 +7438,7 @@ function AnalystApp({
     ["clientes", "Clientes"],
     ...(canManageCatalogs
       ? [
+          ["marcas", "Marcas"],
           ["categorias", "Categorías"],
         ]
       : []),
@@ -7711,17 +7760,16 @@ function AnalystApp({
           </div>
         </section>
       )}
-      {tab === "productos" && (
+      {tab === "marcas" && (
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Productos</h2>
+              <h2>Marcas y productos</h2>
               <p>
-                Catálogo de PostgreSQL utilizado en ventas por unidades y
-                planchas.
+                Catálogo maestro para Venta Unitaria, Planchas y agrupación del dashboard por Marca.
               </p>
             </div>
-            <Btn onClick={() => setModal("product")}>
+            <Btn onClick={() => setModal("product")} testId="button-new-brand-product">
               <Plus /> Nuevo producto
             </Btn>
           </div>
@@ -7729,43 +7777,48 @@ function AnalystApp({
             <TableSearch
               value={productSearch}
               onChange={setProductSearch}
-              fields="SKU, producto, marca, peso, precio, tipo de venta y estado."
+              fields="SKU, presentación, producto, marca, medida unitaria, gramaje, unidades por plancha, modalidad y estado."
               count={filteredProducts.length}
               total={catalogProducts.length}
             />
             {filteredProducts.length ? (
               <div className="module-table-wrap">
                 <div className="module-table">
-                  <div className="module-table-row module-table-header catalog-product-columns">
-                    <span>SKU</span>
+                  <div className="module-table-row module-table-header cols-9">
+                    <span>Presentación</span>
                     <span>Producto</span>
                     <span>Marca</span>
-                    <span>Peso</span>
-                    <span>Precio</span>
-                    <span>Venta</span>
+                    <span>Medida unitaria</span>
+                    <span>Gramaje</span>
+                    <span>Und. x plancha</span>
+                    <span>Modalidad</span>
                     <span>Estado</span>
                     <span>Acciones</span>
                   </div>
                   {filteredProducts.map((product) => (
-                    <article
-                      className="module-table-row catalog-product-columns"
-                      key={product.sku}
-                    >
+                    <article className="module-table-row cols-9" key={product.sku}>
                       <span>
-                        <b className="module-table-id">{product.sku}</b>
+                        <strong>{product.presentation || "BOLSA"}</strong>
+                        <small>{product.sku}</small>
                       </span>
                       <span>
                         <strong>{product.product}</strong>
-                        <small>{product.unitsPerPackage} por empaque</small>
                       </span>
                       <span>
                         <strong>{product.brand}</strong>
                       </span>
                       <span>
-                        <strong>{formatKilos(product.weightKg || 0)}</strong>
+                        <strong>{product.unitMeasure || 1}</strong>
                       </span>
                       <span>
-                        <strong>{formatSoles(product.unitPrice)}</strong>
+                        <strong>{Math.round((product.weightKg || 0) * 1000)} Gr</strong>
+                      </span>
+                      <span>
+                        <strong>
+                          {product.saleModes?.includes("PLANCHAS")
+                            ? product.unitsPerPlancha || 6
+                            : "—"}
+                        </strong>
                       </span>
                       <span>
                         <strong>{product.saleModes?.join(" · ")}</strong>
@@ -7777,20 +7830,18 @@ function AnalystApp({
                         <Btn
                           variant="outline"
                           onClick={() => setEditingProduct(product)}
+                          testId={`button-edit-brand-${product.sku}`}
                         >
                           <Pencil /> Editar
                         </Btn>
                         <Btn
                           variant="danger"
                           onClick={() =>
-                            deleteCatalogRecord(
-                              "products",
-                              product.sku,
-                              product.product,
-                            )
+                            deleteCatalogRecord("products", product.sku, product.product)
                           }
+                          testId={`button-delete-brand-${product.sku}`}
                         >
-                          <Trash2 /> Eliminar
+                          <Trash2 /> Retirar
                         </Btn>
                       </span>
                     </article>
@@ -7799,8 +7850,8 @@ function AnalystApp({
               </div>
             ) : (
               <Empty
-                title="No hay productos"
-                detail="Agrega el primer producto o limpia el buscador."
+                title="No hay productos configurados"
+                detail="Agrega el primer producto para utilizarlo en Ventas."
               />
             )}
           </div>
@@ -8514,6 +8565,16 @@ function AnalystApp({
           close={() => setEditingSale(null)}
         />
       )}
+      {(modal === "product" || editingProduct) && (
+        <CatalogProductModal
+          product={editingProduct || undefined}
+          onSave={saveCatalogProduct}
+          close={() => {
+            setModal(null);
+            setEditingProduct(null);
+          }}
+        />
+      )}
       {(modal === "category" || editingCategory) && (
         <CatalogCategoryModal
           category={editingCategory || undefined}
@@ -8747,7 +8808,37 @@ function PromoterApp({
       ),
     [productPrices],
   );
-  const unitProducts = UNIT_SALE_PRODUCTS;
+  const saleCatalogProducts = useMemo(() => {
+    const configured = availableProducts.map((product) => ({
+      sku: product.sku,
+      label: product.product,
+      brand: product.brand,
+      weightKg: Number(product.weightKg) || 0,
+      presentation: product.presentation || ("BOLSA" as const),
+      unitsPerPlancha: Math.max(
+        1,
+        Math.floor(Number(product.unitsPerPlancha) || PLANCHA_UNITS_BY_SKU[product.sku] || 6),
+      ),
+      saleModes: product.saleModes || (["UNIDADES"] as SaleMode[]),
+    }));
+    return configured.length
+      ? configured
+      : UNIT_SALE_PRODUCTS.map((product) => ({
+          ...product,
+          presentation: "BOLSA" as const,
+          unitsPerPlancha: PLANCHA_UNITS_BY_SKU[product.sku] || 6,
+          saleModes: ["UNIDADES", "PLANCHAS"] as SaleMode[],
+        }));
+  }, [availableProducts]);
+  const unitProducts = saleCatalogProducts.filter((product) =>
+    product.saleModes.includes("UNIDADES"),
+  );
+  const planchaProductsCatalog = saleCatalogProducts.filter((product) =>
+    product.saleModes.includes("PLANCHAS"),
+  );
+  const unitsPerPlanchaBySku = Object.fromEntries(
+    saleCatalogProducts.map((product) => [product.sku, product.unitsPerPlancha]),
+  );
   useEffect(() => {
     const price = priceBySku[sku]?.unitPrice;
     setUnitPriceSoles(price ? String(price) : "");
@@ -8756,6 +8847,20 @@ function PromoterApp({
     if (!unitProducts.some((product) => product.sku === sku) && unitProducts[0])
       setSku(unitProducts[0].sku);
   }, [productPrices, sku]);
+  useEffect(() => {
+    if (!planchaProductsCatalog.length) return;
+    setPlanchaLines((current) =>
+      current.map((line, index) =>
+        planchaProductsCatalog.some((product) => product.sku === line.sku)
+          ? line
+          : {
+              ...line,
+              sku: planchaProductsCatalog[Math.min(index, planchaProductsCatalog.length - 1)].sku,
+              units: "",
+            },
+      ),
+    );
+  }, [productPrices]);
   useEffect(() => {
     setClientId(selectedClientId);
     setMarkClientId(selectedClientId);
@@ -8769,10 +8874,10 @@ function PromoterApp({
   const selectedProduct =
     unitProducts.find((product) => product.sku === sku) ||
     unitProducts[0] ||
-    UNIT_SALE_PRODUCTS[0];
+    saleCatalogProducts[0];
   useEffect(() => {
     if (planchaType !== "FLAT" || !planchaLines[0]) return;
-    const expected = requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0].sku] || 6);
+    const expected = requestedFlatPlanchas * (unitsPerPlanchaBySku[planchaLines[0].sku] || 6);
     if (planchaLines[0].units !== String(expected)) {
       setPlanchaLines((current) =>
         current.map((line, index) => index === 0 ? { ...line, units: String(expected) } : line),
@@ -8780,7 +8885,7 @@ function PromoterApp({
     }
   }, [planchaType, requestedFlatPlanchas, planchaLines[0]?.sku]);
   const normalizedPlanchaLines = planchaLines.map((line) => {
-    const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
+    const product = saleCatalogProducts.find((item) => item.sku === line.sku) || saleCatalogProducts[0];
     return {
       ...line,
       product,
@@ -8791,7 +8896,7 @@ function PromoterApp({
   const totalMix = normalizedPlanchaLines.reduce((sum, line) => sum + line.units, 0);
   const planchaEquivalents = normalizedPlanchaLines.map((line) => ({
     ...line,
-    planchas: line.units / (PLANCHA_UNITS_BY_SKU[line.sku] || 6),
+    planchas: line.units / (unitsPerPlanchaBySku[line.sku] || 6),
   }));
   const calculatedPlanchas =
     planchaType === "FLAT"
@@ -8936,7 +9041,7 @@ function PromoterApp({
     (planchaType === "FLAT"
       ? normalizedPlanchaLines.length === 1 &&
         normalizedPlanchaLines[0].units ===
-          requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[normalizedPlanchaLines[0].sku] || 6)
+          requestedFlatPlanchas * (unitsPerPlanchaBySku[normalizedPlanchaLines[0].sku] || 6)
       : normalizedPlanchaLines.length >= 2 &&
         normalizedPlanchaLines.every((line) => line.units > 0) &&
         calculatedPlanchas >= 1 &&
@@ -9671,8 +9776,8 @@ function PromoterApp({
               </p>
             )}
             {planchaLines.map((line, index) => {
-              const product = UNIT_SALE_PRODUCTS.find((item) => item.sku === line.sku) || UNIT_SALE_PRODUCTS[0];
-              const unitsPerPlancha = PLANCHA_UNITS_BY_SKU[line.sku] || 6;
+              const product = saleCatalogProducts.find((item) => item.sku === line.sku) || saleCatalogProducts[0];
+              const unitsPerPlancha = unitsPerPlanchaBySku[line.sku] || 6;
               const expectedFlatUnits = requestedFlatPlanchas * unitsPerPlancha;
               return (
                 <div className="plancha-line" key={line.id}>
@@ -9690,7 +9795,7 @@ function PromoterApp({
                                   sku: nextSku,
                                   units:
                                     planchaType === "FLAT"
-                                      ? String(requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[nextSku] || 6))
+                                      ? String(requestedFlatPlanchas * (unitsPerPlanchaBySku[nextSku] || 6))
                                       : item.units,
                                 }
                               : item,
@@ -9698,7 +9803,7 @@ function PromoterApp({
                         );
                       }}
                     >
-                      {UNIT_SALE_PRODUCTS.map((item) => (
+                      {planchaProductsCatalog.map((item) => (
                         <option value={item.sku} key={item.sku}>{item.label}</option>
                       ))}
                     </select>
@@ -9779,7 +9884,7 @@ function PromoterApp({
               ) : (
                 <>
                   {planchaType === "FLAT"
-                    ? `Este producto requiere ${requestedFlatPlanchas * (PLANCHA_UNITS_BY_SKU[planchaLines[0]?.sku] || 6)} unidades para ${requestedFlatPlanchas} planchas.`
+                    ? `Este producto requiere ${requestedFlatPlanchas * (unitsPerPlanchaBySku[planchaLines[0]?.sku] || 6)} unidades para ${requestedFlatPlanchas} planchas.`
                     : "Agrega al menos 2 productos. La suma de sus equivalencias debe completar una cantidad entera de planchas."}
                 </>
               )}
