@@ -6159,6 +6159,28 @@ function AnalystApp({
   }, []);
   const resolveTradeApproval = async (approval: TradeApproval, decision: "APROBADA" | "RECHAZADA") => {
     try {
+      if (LOCAL_WAREHOUSE_DEMO) {
+        const now = new Date().toISOString();
+        const current = readStore<TradeApproval[]>("bt-demo-trade-approvals", []);
+        const next = current.map((item) =>
+          item.id === approval.id
+            ? { ...item, status: decision, resolvedAt: now, resolvedBy: user.id, resolvedByName: user.name }
+            : item,
+        );
+        writeStore("bt-demo-trade-approvals", next);
+        if (decision === "APROBADA") {
+          const localSales = readStore<Sale[]>("bt-sales", sales);
+          if (!localSales.some((item) => item.id === approval.sale.id)) {
+            const approvedSale = { ...approval.sale, status: "PENDIENTE" as const, tradeApprovalId: approval.id, tradeApprovedAt: now, tradeApprovedBy: user.id };
+            const nextSales = [approvedSale, ...localSales];
+            writeStore("bt-sales", nextSales);
+            setSales(nextSales);
+          }
+        }
+        setTradeApprovals(next);
+        notify(decision === "APROBADA" ? "Solicitud aprobada. La venta ya está visible en Ventas." : "Solicitud Trade rechazada.");
+        return;
+      }
       const response = await fetch(`/api/app-storage/trade-approvals/${approval.id}/resolve`, {
         method: "POST",
         headers: {
@@ -9367,6 +9389,32 @@ function PromoterApp({
     };
     if (requiresTradeApproval) {
       try {
+        if (LOCAL_WAREHOUSE_DEMO) {
+          const current = readStore<TradeApproval[]>("bt-demo-trade-approvals", []);
+          const approval: TradeApproval = {
+            id: `TRADE-${crypto.randomUUID()}`,
+            promoterId: user.id,
+            clientId: sale.clientId,
+            marketId: sale.marketId,
+            status: "PENDIENTE",
+            requestedAt: now,
+            sale,
+          };
+          writeStore("bt-demo-trade-approvals", [approval, ...current]);
+          setUnitPriceSoles(String(priceBySku[sku]?.unitPrice || ""));
+          setPlanchaLines([newPlanchaLine()]);
+          setPlanchaType("FLAT");
+          setRedemptionCount(1);
+          setPlanchaMultiplier(1);
+          setComment("");
+          setReceipt(null);
+          setExchange(null);
+          setReceiptUrl("");
+          setExchangeUrl("");
+          setView("LISTA");
+          notify("Solicitud enviada a Aprobaciones Trade.");
+          return;
+        }
         const response = await fetch("/api/app-storage/trade-approvals", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
