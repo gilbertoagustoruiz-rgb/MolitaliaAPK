@@ -1352,24 +1352,83 @@ function formatSoles(value: number | undefined) {
 function formatKilos(value: number | undefined) {
   return `${Number(value ?? 0).toLocaleString("es-PE", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`;
 }
-function saleExportBreakdown(sale: Sale) {
+function catalogProductForLegacyBrand(
+  brand: string,
+  productPrices: ProductPrice[] = [],
+) {
+  const normalizedBrand = normalizeCsvHeader(brand);
+  const preferredProductByBrand: Record<string, string> = {
+    costa: "paneton costa 800 gr",
+    todinno: "paneton todinno todinnito",
+    pasqualino: "pasqualino 800 gr",
+  };
+  const preferredName = preferredProductByBrand[normalizedBrand];
+  const catalog = normalizedProducts(productPrices);
+  const byPreferredName =
+    preferredName &&
+    catalog.find(
+      (item) =>
+        item.status === "ACTIVO" &&
+        normalizeCsvHeader(item.brand || "") === normalizedBrand &&
+        normalizeCsvHeader(item.product) === normalizeCsvHeader(preferredName),
+    );
+  if (byPreferredName) return byPreferredName;
+  return catalog.find(
+    (item) =>
+      item.status === "ACTIVO" &&
+      normalizeCsvHeader(item.brand || "") === normalizedBrand &&
+      item.saleModes?.includes("PLANCHAS"),
+  );
+}
+
+function saleExportBreakdown(
+  sale: Sale,
+  productPrices: ProductPrice[] = [],
+) {
   if (sale.mode === "PLANCHAS") {
+    if (sale.planchaLines?.length) {
+      return sale.planchaLines
+        .filter((line) => Number(line.units) > 0)
+        .map((line) => {
+          const catalogProduct = normalizedProducts(productPrices).find(
+            (item) => item.sku === line.sku,
+          );
+          return {
+            label: catalogProduct?.product || line.product || line.sku,
+            units: Number(line.units),
+            unitPrice: Number(line.unitPrice || sale.unitPrices?.[line.sku] || 0),
+          };
+        });
+    }
     return Object.entries(sale.mix || {})
       .filter(([, quantity]) => Number(quantity) > 0)
-      .map(([brand, quantity]) => ({
-        label:
-          planchaProducts[brand as keyof typeof planchaProducts]?.brand ||
-          brand,
-        units: Number(quantity),
-        unitPrice: Number(sale.unitPrices?.[brand] ?? 0),
-      }));
+      .map(([brand, quantity]) => {
+        const catalogProduct = catalogProductForLegacyBrand(brand, productPrices);
+        return {
+          label: catalogProduct?.product || brand,
+          units: Number(quantity),
+          unitPrice: Number(sale.unitPrices?.[brand] ?? 0),
+        };
+      });
   }
+
   const sku = Object.keys(sale.unitPrices || {})[0];
-  const product = products.find((item) => item.sku === sku);
-  const brand = product?.brand || Object.keys(sale.mix || {})[0] || "Producto";
+  const catalogProduct = normalizedProducts(productPrices).find(
+    (item) => item.sku === sku,
+  );
+  const legacyProduct = products.find((item) => item.sku === sku);
+  const brand =
+    catalogProduct?.brand ||
+    legacyProduct?.brand ||
+    Object.keys(sale.mix || {})[0] ||
+    "Producto";
   return [
     {
-      label: product ? `${product.brand} · ${product.name}` : brand,
+      label: catalogProduct
+        ? `${catalogProduct.brand} · ${catalogProduct.product}`
+        : legacyProduct
+          ? `${legacyProduct.brand} · ${legacyProduct.name}`
+          : brand,
       units: sale.units,
       unitPrice: Number(
         sale.unitPrices?.[sku] ??
@@ -6336,7 +6395,7 @@ function AnalystApp({
         "Link foto canje",
       ],
       sales.map((sale) => {
-        const breakdown = saleExportBreakdown(sale);
+        const breakdown = saleExportBreakdown(sale, productPrices);
         const promoter = users.find((user) => user.id === sale.promoterId);
         const stock = userRedemptionStock(
           promoter || {
@@ -7660,7 +7719,7 @@ function AnalystApp({
     const promoter = users.find((item) => item.id === sale.promoterId);
     const client = clients.find((item) => item.id === sale.clientId);
     const market = marketMap[sale.marketId];
-    const products = saleExportBreakdown(sale)
+    const products = saleExportBreakdown(sale, productPrices)
       .map((item) => item.label)
       .join(" ");
     return `${sale.id} ${client?.name || ""} ${market?.name || ""} ${promoter?.name || ""} ${promoter?.dni || ""} ${products} ${sale.mode} ${sale.bonus || ""}`
@@ -8370,7 +8429,7 @@ function AnalystApp({
                     const client = clients.find(
                       (item) => item.id === sale.clientId,
                     );
-                    const products = saleExportBreakdown(sale);
+                    const products = saleExportBreakdown(sale, productPrices);
                     return (
                       <article className="sales-dark-row" key={sale.id}>
                         <span className="sales-ticket">
