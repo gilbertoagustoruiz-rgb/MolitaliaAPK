@@ -5666,86 +5666,6 @@ function SalesDashboard({
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Resumen por Región</h2>
-              <p>Ventas agrupadas por la región de cada mercado.</p>
-            </div>
-          </div>
-          <div className="panel-body">
-            {regionRows.length ? (
-              <div className="summary-list">
-                {regionRows.map((row, index) => (
-                  <div className="summary-row" key={row.key}>
-                    <div className="summary-row-head">
-                      <strong>
-                        {index + 1}. {row.label}
-                      </strong>
-                      <b>{formatSoles(row.soles)}</b>
-                    </div>
-                    <div className="summary-track">
-                      <span
-                        style={{
-                          width: `${Math.max(4, (row.soles / maxRegionSoles) * 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <small>
-                      {row.units.toLocaleString("es-PE")} unidades ·{" "}
-                      {formatKilos(row.kilos)} · {row.salesCount} pedido
-                      {row.salesCount === 1 ? "" : "s"}
-                    </small>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Empty
-                title="Aún no hay ventas"
-                detail="El resumen por región se actualizará con el primer pedido."
-              />
-            )}
-          </div>
-        </section>
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Resumen por Mercados</h2>
-              <p>Resultado acumulado de cada mercado.</p>
-            </div>
-          </div>
-          <div className="panel-body summary-table-wrap">
-            {marketRows.length ? (
-              <div className="summary-table">
-                <div className="summary-table-row header">
-                  <span>Mercado</span>
-                  <span>Ventas (S/)</span>
-                  <span>Unidades</span>
-                  <span>Kilos</span>
-                </div>
-                {marketRows.map((row) => (
-                  <div className="summary-table-row" key={row.key}>
-                    <div>
-                      <strong>{row.label}</strong>
-                      <small>{row.subtitle}</small>
-                    </div>
-                    <b>{formatSoles(row.soles)}</b>
-                    <span>{row.units.toLocaleString("es-PE")}</span>
-                    <span>{formatKilos(row.kilos)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Empty
-                title="Sin mercados con ventas"
-                detail="Los mercados aparecerán aquí al registrar pedidos."
-              />
-            )}
-          </div>
-        </section>
-      </div>
-      <WarehouseStockSummary />
-      <div className="summary-sections">
-        <section className="panel">
-          <div className="panel-header">
-            <div>
               <h2>Mejores Promotores</h2>
               <p>Ordenados por venta total en soles.</p>
             </div>
@@ -5828,7 +5748,87 @@ function SalesDashboard({
             )}
           </div>
         </section>
+      </div>      <div className="summary-sections">
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Resumen por Región</h2>
+              <p>Ventas agrupadas por la región de cada mercado.</p>
+            </div>
+          </div>
+          <div className="panel-body">
+            {regionRows.length ? (
+              <div className="summary-list">
+                {regionRows.map((row, index) => (
+                  <div className="summary-row" key={row.key}>
+                    <div className="summary-row-head">
+                      <strong>
+                        {index + 1}. {row.label}
+                      </strong>
+                      <b>{formatSoles(row.soles)}</b>
+                    </div>
+                    <div className="summary-track">
+                      <span
+                        style={{
+                          width: `${Math.max(4, (row.soles / maxRegionSoles) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <small>
+                      {row.units.toLocaleString("es-PE")} unidades ·{" "}
+                      {formatKilos(row.kilos)} · {row.salesCount} pedido
+                      {row.salesCount === 1 ? "" : "s"}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="Aún no hay ventas"
+                detail="El resumen por región se actualizará con el primer pedido."
+              />
+            )}
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Resumen por Mercados</h2>
+              <p>Resultado acumulado de cada mercado.</p>
+            </div>
+          </div>
+          <div className="panel-body summary-table-wrap">
+            {marketRows.length ? (
+              <div className="summary-table">
+                <div className="summary-table-row header">
+                  <span>Mercado</span>
+                  <span>Ventas (S/)</span>
+                  <span>Unidades</span>
+                  <span>Kilos</span>
+                </div>
+                {marketRows.map((row) => (
+                  <div className="summary-table-row" key={row.key}>
+                    <div>
+                      <strong>{row.label}</strong>
+                      <small>{row.subtitle}</small>
+                    </div>
+                    <b>{formatSoles(row.soles)}</b>
+                    <span>{row.units.toLocaleString("es-PE")}</span>
+                    <span>{formatKilos(row.kilos)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty
+                title="Sin mercados con ventas"
+                detail="Los mercados aparecerán aquí al registrar pedidos."
+              />
+            )}
+          </div>
+        </section>
       </div>
+      <WarehouseStockSummary />
+
     </div>
   );
 }
