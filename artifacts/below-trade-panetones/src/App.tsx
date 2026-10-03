@@ -1977,7 +1977,10 @@ function aggregateSalesByBrand(
       ? breakdown
       : [
           {
+            sku: "",
+            product: "SIN MARCA",
             brand: "SIN MARCA",
+            label: "SIN MARCA",
             units: sale.units,
             unitPrice:
               sale.units > 0 ? Number(sale.amountSoles) / sale.units : 0,
