@@ -8783,6 +8783,12 @@ function PromoterApp({
   );
   useEffect(() => {
     let cancelled = false;
+    if (LOCAL_WAREHOUSE_DEMO) {
+      setWarehouses(readStore<Warehouse[]>("bt-demo-warehouses", []));
+      return () => {
+        cancelled = true;
+      };
+    }
     void fetch("/api/app-storage/warehouses")
       .then(async (response) => {
         if (!response.ok) throw new Error("No se pudo consultar almacenes");
