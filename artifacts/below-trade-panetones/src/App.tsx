@@ -244,6 +244,8 @@ type SessionClosure = {
   marketId: string;
   clientId?: string;
   tastingUsed: number;
+  tasting900g?: number;
+  tasting85g?: number;
   leads: number;
   automatic?: boolean;
   closureType?: "MANUAL" | "AUTOMATICO";
@@ -264,7 +266,7 @@ type CanjeProductId =
   | "CANJE_AVENA_144_SPAGHETTI_100_BATEA_4"
   | "CANJE_AVENA_30_SPAGHETTI_10"
   | "CANJE_AVENA_144_SPAGHETTI_100";
-type DegustacionProductId = "PANETON";
+type DegustacionProductId = "PANETON" | "PANETON_900G" | "PANETON_85G";
 type RedemptionStock = Record<RedemptionItemId, number>;
 type MarketInventory = {
   marketId: string;
@@ -4452,64 +4454,87 @@ function AdminDegustacionesModule({
 }
 
 function TastingExitModal({
-  available,
+  available900g,
+  available85g,
   onConfirm,
   close,
 }: {
-  available: number;
-  onConfirm: (tastingUsed: number) => void;
+  available900g: number;
+  available85g: number;
+  onConfirm: (usage: { paneton900g: number; paneton85g: number; contacts: number }) => void;
   close: () => void;
 }) {
-  const [quantity, setQuantity] = useState("0");
-  const parsedQuantity = quantity === "" ? NaN : Number(quantity);
-  const valid =
-    Number.isInteger(parsedQuantity) &&
-    parsedQuantity >= 0 &&
-    parsedQuantity <= available;
+  const [quantity900g, setQuantity900g] = useState("0");
+  const [quantity85g, setQuantity85g] = useState("0");
+  const paneton900g = quantity900g === "" ? NaN : Number(quantity900g);
+  const paneton85g = quantity85g === "" ? NaN : Number(quantity85g);
+  const contacts900g = Number.isFinite(paneton900g) ? paneton900g * 80 : 0;
+  const contacts85g = Number.isFinite(paneton85g) ? paneton85g * 10 : 0;
+  const contacts = contacts900g + contacts85g;
+  const valid900g =
+    Number.isInteger(paneton900g) && paneton900g >= 0 && paneton900g <= 2 && paneton900g <= available900g;
+  const valid85g =
+    Number.isInteger(paneton85g) && paneton85g >= 0 && paneton85g <= 8 && paneton85g <= available85g;
+  const valid = valid900g && valid85g;
   return (
     <Modal
       title="Registrar salida del cliente"
-      detail="Indica la degustación utilizada durante esta visita antes de confirmar la salida."
+      detail="Registra los panetones utilizados en degustación. El consumo se descontará del Almacén del Mercado."
       close={close}
     >
       <div className="logout-declaration">
         <div className="stock-callout">
           <PackageCheck />
           <div>
-            <strong>{available} disponibles</strong>
-            <small>Tu stock personal de degustación</small>
+            <strong>Stock de degustación del Almacén</strong>
+            <small>900 g: {available900g} disponibles · 85 g: {available85g} disponibles</small>
           </div>
         </div>
-        <Field label="Panetones utilizados en degustación *">
+        <Field label="Panetón 900 g utilizado *">
           <Input
             type="number"
-            value={quantity}
-            onChange={(value) => setQuantity(value.replace(/\D/g, ""))}
+            value={quantity900g}
+            onChange={(value) => setQuantity900g(value.replace(/\D/g, ""))}
             min={0}
-            max={available}
+            max={2}
             step={1}
             placeholder="0"
-            testId="input-tasting-usage"
+            testId="input-tasting-900g"
           />
         </Field>
-        {Number.isFinite(parsedQuantity) && parsedQuantity > available && (
-          <p className="modal-error">
-            La cantidad ingresada supera el stock disponible ({available}).
-          </p>
+        <p className="modal-hint">Máximo 2 · 80 contactos por cada Panetón 900 g.</p>
+        <Field label="Panetón 85 g utilizado *">
+          <Input
+            type="number"
+            value={quantity85g}
+            onChange={(value) => setQuantity85g(value.replace(/\D/g, ""))}
+            min={0}
+            max={8}
+            step={1}
+            placeholder="0"
+            testId="input-tasting-85g"
+          />
+        </Field>
+        <p className="modal-hint">Máximo 8 · 10 contactos por cada Panetón 85 g.</p>
+        <div className="stock-callout">
+          <Users />
+          <div>
+            <strong>{contacts} contactos calculados</strong>
+            <small>{contacts900g} por 900 g + {contacts85g} por 85 g</small>
+          </div>
+        </div>
+        {!valid900g && Number.isFinite(paneton900g) && (
+          <p className="modal-error">900 g: máximo 2 y no puede superar el stock disponible ({available900g}).</p>
         )}
-        <p className="modal-hint">
-          {available > 0
-            ? "Si no utilizaste degustación, registra 0. La cantidad indicada se descontará al confirmar la salida del cliente."
-            : "No tienes stock personal disponible. Registra 0 para confirmar la salida."}
-        </p>
+        {!valid85g && Number.isFinite(paneton85g) && (
+          <p className="modal-error">85 g: máximo 8 y no puede superar el stock disponible ({available85g}).</p>
+        )}
       </div>
       <div className="modal-actions">
-        <Btn variant="outline" onClick={close}>
-          Cancelar
-        </Btn>
+        <Btn variant="outline" onClick={close}>Cancelar</Btn>
         <Btn
           disabled={!valid}
-          onClick={() => onConfirm(parsedQuantity)}
+          onClick={() => onConfirm({ paneton900g, paneton85g, contacts })}
           testId="button-confirm-client-exit"
         >
           <CheckCircle2 /> Confirmar salida
@@ -9514,10 +9539,17 @@ function PromoterApp({
         : "Venta sin canje registrada",
     );
   };
-  const finalizeAttendance = (tastingUsed = 0) => {
-    const stock = userTastingStock(user);
-    if (tastingUsed > stock) {
-      notify(`Solo tienes ${stock} panetones de degustación disponibles`, true);
+  const finalizeAttendance = (usage = { paneton900g: 0, paneton85g: 0, contacts: 0 }) => {
+    const tasting900g = Math.max(0, Math.trunc(usage.paneton900g || 0));
+    const tasting85g = Math.max(0, Math.trunc(usage.paneton85g || 0));
+    const tastingUsed = tasting900g + tasting85g;
+    const contacts = tasting900g * 80 + tasting85g * 10;
+    if (tasting900g > 2 || tasting85g > 8) {
+      notify("La degustación supera el máximo permitido por presentación.", true);
+      return;
+    }
+    if (tasting900g > warehouseRedemptionStock.PANETON_900G || tasting85g > warehouseRedemptionStock.PANETON_85G) {
+      notify(`Stock insuficiente en ${selectedWarehouse?.name || "el Almacén del Mercado"} para la degustación indicada.`, true);
       return;
     }
     const now = new Date();
@@ -9540,24 +9572,71 @@ function PromoterApp({
     setAttendance(next);
     writeStore("bt-attendance", next);
     if (type === "SALIDA") {
-      const movement: InventoryMovement = {
-        id: `DEG-${id}`,
-        marketId: selectedMarketId,
-        kind: "DEGUSTACION",
-        quantity: tastingUsed,
-        actorId: user.id,
-        actorName: user.name,
+      const tastingMovements: InventoryMovement[] = [
+        ...(tasting900g > 0 ? [{
+          id: `DEG-${id}-900G`,
+          marketId: selectedMarketId,
+          kind: "DEGUSTACION" as const,
+          quantity: tasting900g,
+          actorId: user.id,
+          actorName: user.name,
+          promoterId: user.id,
+          degustacionProductId: "PANETON_900G" as const,
+          degustacionProductLabel: "Panetón 900 g",
+          date: now.toISOString(),
+          status: syncStatus(),
+        }] : []),
+        ...(tasting85g > 0 ? [{
+          id: `DEG-${id}-85G`,
+          marketId: selectedMarketId,
+          kind: "DEGUSTACION" as const,
+          quantity: tasting85g,
+          actorId: user.id,
+          actorName: user.name,
+          promoterId: user.id,
+          degustacionProductId: "PANETON_85G" as const,
+          degustacionProductLabel: "Panetón 85 g",
+          date: now.toISOString(),
+          status: syncStatus(),
+        }] : []),
+      ];
+      const nextMovements = [...tastingMovements, ...movements];
+      setMovements(nextMovements);
+      writeStore("bt-inventory-movements", nextMovements);
+      if (LOCAL_WAREHOUSE_DEMO && selectedWarehouse) {
+        const nextWarehouses = warehouses.map((warehouse) =>
+          warehouse.id === selectedWarehouse.id
+            ? {
+                ...warehouse,
+                stock: {
+                  ...warehouse.stock,
+                  PANETON_900G: Math.max(0, warehouse.stock.PANETON_900G - tasting900g),
+                  PANETON_85G: Math.max(0, warehouse.stock.PANETON_85G - tasting85g),
+                },
+                updatedAt: now.toISOString(),
+              }
+            : warehouse,
+        );
+        setWarehouses(nextWarehouses);
+        writeStore("bt-demo-warehouses", nextWarehouses);
+      }
+      const closure: SessionClosure = {
+        id: `CLOSE-${id}`,
         promoterId: user.id,
+        promoterRole: user.role,
+        promoterRoleLabel: user.roleLabel || user.role,
+        marketId: selectedMarketId,
+        clientId: markClientId,
+        tastingUsed,
+        tasting900g,
+        tasting85g,
+        leads: contacts,
+        closureType: "MANUAL",
         date: now.toISOString(),
         status: syncStatus(),
       };
-      const nextMovements =
-        tastingUsed > 0 ? [movement, ...movements] : movements;
-      onUpdateUser(
-        withUserStock(user, stock - tastingUsed, userRedemptionStock(user)),
-      );
-      setMovements(nextMovements);
-      writeStore("bt-inventory-movements", nextMovements);
+      const closures = readStore<SessionClosure[]>("bt-session-closures", []);
+      writeStore("bt-session-closures", [closure, ...closures]);
     }
     setMarkPhoto(null);
     setMarkPhotoUrl("");
@@ -10474,10 +10553,11 @@ function PromoterApp({
           {view === "NUEVA" && module === "VENTAS" && saleForm}
           {tastingExitPrompt && (
             <TastingExitModal
-              available={userTastingStock(user)}
-              onConfirm={(tastingUsed) => {
+              available900g={warehouseRedemptionStock.PANETON_900G}
+              available85g={warehouseRedemptionStock.PANETON_85G}
+              onConfirm={(usage) => {
                 setTastingExitPrompt(false);
-                finalizeAttendance(tastingUsed);
+                finalizeAttendance(usage);
               }}
               close={() => setTastingExitPrompt(false)}
             />
