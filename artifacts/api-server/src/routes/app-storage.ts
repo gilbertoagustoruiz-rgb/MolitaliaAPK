@@ -1031,6 +1031,25 @@ async function syncSnapshot(
           const saleId = saleIdFromCanjeMovement(record);
           if (saleId && deletedSaleIds.has(saleId)) continue;
         }
+        if (name === "movements" && record && typeof record === "object" && value(record, "kind") === "DEGUSTACION") {
+          const movementId = value(record, "id");
+          const existingMovement = await client.query("SELECT id FROM inventory_movements WHERE id=$1 LIMIT 1", [movementId]);
+          if (!existingMovement.rows.length) {
+            const productId = value(record, "degustacionProductId");
+            const quantity = Math.max(0, Math.trunc(Number(record.quantity) || 0));
+            const maxQuantity = productId === "PANETON_900G" ? 2 : productId === "PANETON_85G" ? 8 : 0;
+            if (!maxQuantity) throw new Error("La presentación de degustación no es válida.");
+            if (quantity < 1 || quantity > maxQuantity) throw new Error(`Cantidad inválida para ${productId}. Máximo permitido: ${maxQuantity}.`);
+            await applyWarehouseStockMovement(
+              client as unknown as QueryClient,
+              value(record, "marketId"),
+              { [productId]: quantity },
+              "DEGUSTACION",
+              value(record, "actorId") || value(record, "promoterId"),
+              `DEGUSTACION:${movementId}`,
+            );
+          }
+        }
         if (record && typeof record === "object")
           await upsertRecord(client as unknown as QueryClient, name, record);
       }
@@ -1201,7 +1220,7 @@ router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<vo
   if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede recargar almacenes." });
   const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
   const initial = req.body?.initial === true;
-  const allowed = ["PANETON","AVENA","BATEA","MANDIL","SPAGHETTI"];
+  const allowed = ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"];
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
