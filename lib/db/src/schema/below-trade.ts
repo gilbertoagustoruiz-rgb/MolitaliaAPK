@@ -14,7 +14,7 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
 
-const recordUpdatedAt = timestamp("record_updated_at", { withTimezone: true });
+const recordUpdatedAt = () => timestamp("record_updated_at", { withTimezone: true });
 
 export const appMetadataTable = pgTable("app_metadata", {
   key: text("key").primaryKey(),
@@ -62,7 +62,7 @@ export const marketsTable = pgTable("markets", {
     onDelete: "set null",
   }),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -76,7 +76,7 @@ export const usersTable = pgTable(
     status: text("status").notNull(),
     passwordHash: text("password_hash"),
     data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-    recordUpdatedAt,
+    recordUpdatedAt: recordUpdatedAt(),
     ...timestamps,
   },
   (table) => [uniqueIndex("users_dni_unique").on(table.dni)],
@@ -91,7 +91,7 @@ export const clientsTable = pgTable("clients", {
     .references(() => marketsTable.id, { onDelete: "restrict" }),
   status: text("status").notNull(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -102,7 +102,7 @@ export const productPricesTable = pgTable("product_prices", {
   unitPrice: numeric("unit_price", { precision: 14, scale: 2 }).notNull().default("0"),
   totalPrice: numeric("total_price", { precision: 14, scale: 2 }).notNull().default("0"),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -126,7 +126,7 @@ export const salesTable = pgTable("sales", {
   receiptPhoto: text("receipt_photo"),
   exchangePhoto: text("exchange_photo"),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -183,7 +183,7 @@ export const attendanceTable = pgTable("attendance", {
   status: text("status").notNull(),
   photo: text("photo"),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -206,7 +206,7 @@ export const inventoryTable = pgTable("inventory", {
   tastingStock: numeric("tasting_stock").notNull().default("0"),
   redemptionStock: jsonb("redemption_stock").$type<Record<string, number>>().notNull(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -220,7 +220,7 @@ export const inventoryMovementsTable = pgTable("inventory_movements", {
   movementDate: timestamp("movement_date", { withTimezone: true }).notNull(),
   status: text("status").notNull(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -230,7 +230,7 @@ export const assignmentsTable = pgTable("assignments", {
   marketIds: text("market_ids").array().notNull(),
   clientIds: text("client_ids").array().notNull(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -248,7 +248,7 @@ export const sessionClosuresTable = pgTable("session_closures", {
   closureDate: timestamp("closure_date", { withTimezone: true }).notNull(),
   status: text("status").notNull(),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
 
@@ -257,6 +257,6 @@ export const clientCategoriesTable = pgTable("client_categories", {
   name: text("name").notNull().unique(),
   status: text("status").notNull().default("ACTIVO"),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
-  recordUpdatedAt,
+  recordUpdatedAt: recordUpdatedAt(),
   ...timestamps,
 });
