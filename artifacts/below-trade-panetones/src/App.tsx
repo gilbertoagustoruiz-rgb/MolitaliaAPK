@@ -176,6 +176,8 @@ type Sale = {
   bonus?: string;
   redemptionCount?: number;
   redemptionItems?: Partial<RedemptionStock>;
+  planchaAccessory?: "MANDIL" | "BATEA" | "NINGUNO";
+  planchaMultiplier?: number;
   comment?: string;
   receiptPhoto: string;
   exchangePhoto?: string;
@@ -3860,12 +3862,14 @@ function SaleEditModal({
   sale,
   clients,
   promoter,
+  warehouses,
   onSave,
   close,
 }: {
   sale: Sale;
   clients: Client[];
   promoter?: AppUser;
+  warehouses: Warehouse[];
   onSave: (
     sale: Sale,
     photos: { receipt: File | null; exchange: File | null },
@@ -3898,19 +3902,20 @@ function SaleEditModal({
         parseBonusItems(sale.bonus),
         originalCount,
       );
-  const currentStock = userRedemptionStock(
-    promoter || {
-      id: "",
-      dni: "",
-      name: "",
-      role: "PROMOTOR",
-      status: "ACTIVO",
-    },
+  const saleWarehouse = warehouses.find((warehouse) =>
+    warehouse.marketIds?.includes(sale.marketId),
+  );
+  const warehouseStock = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]: Math.max(0, Number(saleWarehouse?.stock?.[item.id]) || 0),
+    }),
+    {} as RedemptionStock,
   );
   const restoredStock = redemptionItems.reduce(
     (result, item) => ({
       ...result,
-      [item.id]: currentStock[item.id] + (originalRequirements[item.id] || 0),
+      [item.id]: warehouseStock[item.id] + (originalRequirements[item.id] || 0),
     }),
     {} as RedemptionStock,
   );
@@ -3924,6 +3929,41 @@ function SaleEditModal({
     availableCanjes.find((product) => product.label === sale.bonus)?.id || "",
   );
   const [redemptionCount, setRedemptionCount] = useState(originalCount || 1);
+  const initialAccessory: "MANDIL" | "BATEA" | "NINGUNO" =
+    sale.planchaAccessory ||
+    ((sale.redemptionItems?.MANDIL || 0) > 0
+      ? "MANDIL"
+      : (sale.redemptionItems?.BATEA || 0) > 0
+        ? "BATEA"
+        : "NINGUNO");
+  const inferredBaseRequirements =
+    sale.mode === "PLANCHAS"
+      ? planchaCanjeRequirements(
+          sale.planchas || 0,
+          new Date(sale.date),
+          initialAccessory,
+          1,
+        )
+      : {};
+  const inferredMultiplier =
+    sale.mode === "PLANCHAS" && (sale.planchas || 0) >= 80
+      ? Math.max(
+          1,
+          Math.min(
+            4,
+            Math.round(
+              (Number(sale.redemptionItems?.AVENA) || 0) /
+                Math.max(1, Number(inferredBaseRequirements.AVENA) || 1),
+            ) || 1,
+          ),
+        )
+      : 1;
+  const [planchaAccessory, setPlanchaAccessory] = useState<
+    "MANDIL" | "BATEA" | "NINGUNO"
+  >(initialAccessory);
+  const [planchaMultiplier, setPlanchaMultiplier] = useState(
+    Math.max(1, Math.min(4, Number(sale.planchaMultiplier) || inferredMultiplier)),
+  );
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -3937,24 +3977,36 @@ function SaleEditModal({
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
-  const newRequirements = selectedCanje
-    ? multiplyRedemptionRequirements(
-        parseBonusItems(selectedCanje.label),
-        redemptionCount,
-      )
-    : emptyRedemptionStock();
+  const newRequirements =
+    sale.mode === "PLANCHAS"
+      ? planchaCanjeRequirements(
+          sale.planchas || 0,
+          parsedDate,
+          planchaAccessory,
+          planchaMultiplier,
+        )
+      : selectedCanje
+        ? multiplyRedemptionRequirements(
+            parseBonusItems(selectedCanje.label),
+            redemptionCount,
+          )
+        : emptyRedemptionStock();
+  const editedBonus =
+    sale.mode === "PLANCHAS"
+      ? canjeRequirementsLabel(newRequirements) || undefined
+      : selectedCanje?.label;
   const missingStock = requiredRedemptionEntries(newRequirements).find(
     ([itemId, quantity]) => restoredStock[itemId] < quantity,
   );
   const exchangeEvidenceRequired = Boolean(
-    selectedCanje || sale.mode === "PLANCHAS",
+    editedBonus || sale.mode === "PLANCHAS",
   );
   const exchangeEvidenceReady =
     !exchangeEvidenceRequired || Boolean(exchange || sale.exchangePhoto);
   const save = async () => {
     if (
       !clientId ||
-      (selectedCanje && !finalClientName.trim()) ||
+      (editedBonus && !finalClientName.trim()) ||
       !Number.isFinite(parsedAmount) ||
       parsedAmount <= 0 ||
       Number.isNaN(parsedDate.getTime()) ||
@@ -3969,19 +4021,30 @@ function SaleEditModal({
         {
           ...sale,
           clientId,
-          finalClientName: selectedCanje
+          finalClientName: editedBonus
             ? finalClientName.trim()
             : undefined,
           amountSoles: parsedAmount,
           date: parsedDate.toISOString(),
           comment: comment.trim() || undefined,
-          bonus: selectedCanje?.label,
-          redemptionCount: selectedCanje ? redemptionCount : 0,
-          redemptionItems: selectedCanje ? newRequirements : undefined,
+          bonus: editedBonus,
+          redemptionCount:
+            sale.mode === "PLANCHAS"
+              ? editedBonus
+                ? 1
+                : 0
+              : selectedCanje
+                ? redemptionCount
+                : 0,
+          redemptionItems: editedBonus ? newRequirements : undefined,
+          planchaAccessory:
+            sale.mode === "PLANCHAS" ? planchaAccessory : undefined,
+          planchaMultiplier:
+            sale.mode === "PLANCHAS" ? planchaMultiplier : undefined,
           receiptPhoto: receipt ? `BOLETA - ${sale.id}.jpg` : sale.receiptPhoto,
           exchangePhoto: exchangeEvidenceRequired
             ? exchange
-              ? `${selectedCanje?.label || "CLIENTE"} - CLIENTE - ${sale.id}.jpg`
+              ? `${editedBonus || "CLIENTE"} - CLIENTE - ${sale.id}.jpg`
               : sale.exchangePhoto
             : undefined,
         },
@@ -4008,7 +4071,7 @@ function SaleEditModal({
             label: `${client.code} · ${client.name}`,
           }))}
         />
-        {selectedCanje && (
+        {editedBonus && (
           <Field label="Nombre Cliente Final *">
             <Input
               value={finalClientName}
@@ -4037,19 +4100,70 @@ function SaleEditModal({
             testId="input-edit-sale-date"
           />
         </Field>
-        <SelectField
-          label="Canje"
-          value={canjeProductId}
-          onChange={(value) => setCanjeProductId(value as CanjeProductId | "")}
-          items={[
-            { value: "", label: "Sin canje" },
-            ...availableCanjes.map((product) => ({
-              value: product.id,
-              label: product.label,
-            })),
-          ]}
-        />
-        {selectedCanje && (
+        {sale.mode === "UNIDADES" ? (
+          <SelectField
+            label="Canje"
+            value={canjeProductId}
+            onChange={(value) => setCanjeProductId(value as CanjeProductId | "")}
+            items={[
+              { value: "", label: "Sin canje" },
+              ...availableCanjes.map((product) => ({
+                value: product.id,
+                label: product.label,
+              })),
+            ]}
+          />
+        ) : (
+          <>
+            {(sale.planchas || 0) >= 10 && (
+              <SelectField
+                label="Dinámica de canje"
+                value={planchaAccessory}
+                onChange={(value) =>
+                  setPlanchaAccessory(
+                    value as "MANDIL" | "BATEA" | "NINGUNO",
+                  )
+                }
+                items={[
+                  { value: "NINGUNO", label: "Sin Mandil / Batea" },
+                  { value: "MANDIL", label: "Con Mandil" },
+                  { value: "BATEA", label: "Con Batea" },
+                ]}
+              />
+            )}
+            {(sale.planchas || 0) >= 80 && (
+              <Field label="Multiplicador de canje *">
+                <select
+                  className="select"
+                  value={planchaMultiplier}
+                  onChange={(event) =>
+                    setPlanchaMultiplier(
+                      Math.max(1, Math.min(4, Number(event.target.value) || 1)),
+                    )
+                  }
+                  data-testid="select-edit-plancha-multiplier"
+                >
+                  <option value={1}>x1</option>
+                  <option value={2}>x2</option>
+                  <option value={3}>x3</option>
+                  <option value={4}>x4</option>
+                </select>
+              </Field>
+            )}
+            <Field label="Canje recalculado" className="full-field">
+              <div className="stock-callout">
+                <Gift />
+                <div>
+                  <strong>{editedBonus || "Sin canje"}</strong>
+                  <small>
+                    Se recalcula contra el stock del Almacén y reemplaza el canje anterior al guardar.
+                  </small>
+                </div>
+              </div>
+            </Field>
+          </>
+        )}
+        {sale.mode === "UNIDADES" && selectedCanje && (
           <Field label="Número de canjes *">
             <select
               className="select"
@@ -4111,8 +4225,8 @@ function SaleEditModal({
         </div>
       </div>
       <p className="modal-hint">
-        Los productos y cantidades vendidas se conservan. El inventario personal
-        del promotor se recalcula al guardar.
+        Los productos y cantidades vendidas se conservan. El canje anterior se
+        restaura y el nuevo consumo se recalcula contra el Almacén al guardar.
       </p>
       <div className="modal-actions">
         <Btn variant="outline" onClick={close}>
@@ -4121,7 +4235,7 @@ function SaleEditModal({
         <Btn
           disabled={
             !clientId ||
-            (selectedCanje && !finalClientName.trim()) ||
+            (editedBonus && !finalClientName.trim()) ||
             !Number.isFinite(parsedAmount) ||
             parsedAmount <= 0 ||
             Number.isNaN(parsedDate.getTime()) ||
@@ -9089,6 +9203,7 @@ function AnalystApp({
           sale={editingSale}
           clients={clients}
           promoter={users.find((item) => item.id === editingSale.promoterId)}
+          warehouses={marketWarehouses}
           onSave={saveSaleEdit}
           close={() => setEditingSale(null)}
         />
@@ -9895,6 +10010,10 @@ function PromoterApp({
       bonus,
       redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
       redemptionItems: bonus ? requiredRedemptions : undefined,
+      planchaAccessory:
+        mode === "PLANCHAS" ? effectivePlanchaAccessory : undefined,
+      planchaMultiplier:
+        mode === "PLANCHAS" ? planchaMultiplier : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
