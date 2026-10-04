@@ -2309,59 +2309,46 @@ router.delete(
       return;
     }
     try {
+      const updatedAt = new Date().toISOString();
       if (kind === "categories") {
-        const used = await pool.query(
-          "SELECT 1 FROM clients WHERE data->>'category'=$1 LIMIT 1",
+        const current = await pool.query(
+          "SELECT data FROM client_categories WHERE id=$1",
           [id],
         );
-        if (used.rows.length) {
-          const current = await pool.query(
-            "SELECT data FROM client_categories WHERE id=$1",
-            [id],
-          );
-          const record = {
-            ...(current.rows[0]?.data || {}),
-            id,
-            status: "INACTIVO",
-            updatedAt: new Date().toISOString(),
-          };
-          await upsertRecord(
-            pool as unknown as QueryClient,
-            "categories",
-            record,
-          );
-        } else
-          await pool.query("DELETE FROM client_categories WHERE id=$1", [id]);
+        if (!current.rows.length) {
+          res.status(404).json({ message: "La categoría no existe." });
+          return;
+        }
+        const record = {
+          ...(isRecord(current.rows[0].data) ? current.rows[0].data : {}),
+          id,
+          status: "INACTIVO",
+          updatedAt,
+        };
+        await upsertRecord(pool as unknown as QueryClient, "categories", record);
       } else {
-        const used = await pool.query(
-          "SELECT 1 FROM sales WHERE data->'unitPrices' ? $1 LIMIT 1",
+        const current = await pool.query(
+          "SELECT data FROM product_prices WHERE sku=$1",
           [id],
         );
-        if (used.rows.length) {
-          const current = await pool.query(
-            "SELECT data FROM product_prices WHERE sku=$1",
-            [id],
-          );
-          const record = {
-            ...(current.rows[0]?.data || {}),
-            sku: id,
-            status: "INACTIVO",
-            updatedAt: new Date().toISOString(),
-          };
-          await upsertRecord(
-            pool as unknown as QueryClient,
-            "productPrices",
-            record,
-          );
-        } else
-          await pool.query("DELETE FROM product_prices WHERE sku=$1", [id]);
+        if (!current.rows.length) {
+          res.status(404).json({ message: "El producto no existe." });
+          return;
+        }
+        const record = {
+          ...(isRecord(current.rows[0].data) ? current.rows[0].data : {}),
+          sku: id,
+          status: "INACTIVO",
+          updatedAt,
+        };
+        await upsertRecord(pool as unknown as QueryClient, "productPrices", record);
       }
       res.json({ snapshot: await readSnapshot() });
     } catch (error) {
-      req.log.error({ err: error }, "Unable to delete catalog record");
+      req.log.error({ err: error }, "Unable to deactivate catalog record");
       res
         .status(500)
-        .json({ message: "No se pudo retirar el registro del catálogo." });
+        .json({ message: "No se pudo inactivar el registro del catálogo." });
     }
   },
 );
@@ -2869,64 +2856,6 @@ router.delete(
           data: StoredRecord;
         }>;
       };
-      const movementsByMarket = new Map<string, typeof movementResult.rows>();
-      for (const movement of movementResult.rows) {
-        const current = movementsByMarket.get(movement.market_id) || [];
-        current.push(movement);
-        movementsByMarket.set(movement.market_id, current);
-      }
-      for (const [marketId, saleMovements] of movementsByMarket) {
-        const legacySaleMovements = saleMovements.filter(
-          (movement) =>
-            !value(isRecord(movement.data) ? movement.data : {}, "promoterId"),
-        );
-        if (!legacySaleMovements.length) continue;
-        const inventoryResult = (await client.query(
-          "SELECT redemption_stock,data FROM inventory WHERE market_id=$1 FOR UPDATE",
-          [marketId],
-        )) as unknown as {
-          rows: Array<{
-            redemption_stock: Record<string, number>;
-            data: StoredRecord;
-          }>;
-        };
-        const current = inventoryResult.rows[0];
-        if (!current) continue;
-        const redemptionStock = { ...(current.redemption_stock || {}) };
-        for (const movement of legacySaleMovements) {
-          const source = isRecord(movement.data) ? movement.data : {};
-          const components = isRecord(source.canjeComponents)
-            ? source.canjeComponents
-            : null;
-          if (components) {
-            for (const [itemId, componentQuantity] of Object.entries(
-              components,
-            )) {
-              redemptionStock[itemId] =
-                Math.max(0, Number(redemptionStock[itemId]) || 0) +
-                Math.max(0, Number(componentQuantity) || 0) *
-                  Math.max(0, Number(movement.quantity) || 0);
-            }
-          } else {
-            const itemId = movement.item_id || value(source, "itemId");
-            if (itemId) {
-              redemptionStock[itemId] =
-                Math.max(0, Number(redemptionStock[itemId]) || 0) +
-                Math.max(0, Number(movement.quantity) || 0);
-            }
-          }
-        }
-        const updatedAt = new Date().toISOString();
-        const inventoryData = {
-          ...(current.data || {}),
-          redemptionStock,
-          updatedAt,
-        };
-        await client.query(
-          "UPDATE inventory SET redemption_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
-          [marketId, redemptionStock, inventoryData, updatedAt],
-        );
-      }
       await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
       await client.query(
         "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
@@ -2977,186 +2906,69 @@ router.delete(
   async (req, res): Promise<void> => {
     const source = String(req.params.source || "");
     const id = String(req.params.id || "").trim();
-    const table =
-      source === "movement"
-        ? "inventory_movements"
-        : source === "sale"
-          ? "sales"
-          : null;
-    if (!table || !id) {
+    if (!id) {
+      res.status(400).json({ message: "El canje es obligatorio." });
+      return;
+    }
+    if (source === "movement") {
+      res.status(409).json({
+        message:
+          "Los movimientos históricos de Canje se conservan para auditoría. Si corresponde a una venta, corrige o elimina la Venta.",
+      });
+      return;
+    }
+    if (source !== "sale") {
       res.status(400).json({ message: "El origen del canje no es válido." });
       return;
     }
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      if (source === "sale") {
-        const revisionIsCurrent = await lockAndValidateCatalogRevision(
+      if (
+        !(await lockAndValidateCatalogRevision(
           client as unknown as QueryClient,
           req.get("x-catalog-revision") || null,
+        ))
+      )
+        throw new Error(
+          "La información cambió. Actualiza la aplicación antes de eliminar nuevamente.",
         );
-        if (!revisionIsCurrent) {
-          await client.query("ROLLBACK");
-          res.status(409).json({
-            message:
-              "La información cambió. Actualiza la aplicación antes de eliminar nuevamente.",
-          });
-          return;
-        }
-        await client.query(
-          "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-          [`sale:${id}`],
-        );
-      }
-      await lockInventoryLedger(client as unknown as QueryClient);
-      if (source === "sale") {
-        await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
-      }
-      if (source === "movement") {
-        const result = (await client.query(
-          "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
-          [id],
-        )) as unknown as {
-          rows: Array<{
-            market_id: string;
-            quantity: number;
-            data: StoredRecord;
-          }>;
-        };
-        const movement = result.rows[0];
-        const productId = movement?.data?.canjeProductId;
-        const promoterId = value(movement?.data || {}, "promoterId");
-        const personalItemId = value(movement?.data || {}, "itemId");
-        const components = isRecord(movement?.data?.canjeComponents)
-          ? movement.data.canjeComponents
-          : {};
-        if (
-          movement &&
-          value(movement.data, "kind") === "AJUSTE_DEGUSTACION" &&
-          promoterId
-        ) {
-          const userResult = (await client.query(
-            "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-            [promoterId],
-          )) as unknown as { rows: Array<{ data: StoredRecord }> };
-          const currentUser = userResult.rows[0];
-          if (currentUser) {
-            const tastingStock =
-              Math.max(0, Number(currentUser.data.tastingStock) || 0) -
-              Math.max(0, Number(movement.quantity) || 0);
-            const updatedAt = new Date().toISOString();
-            await client.query(
-              "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-              [
-                promoterId,
-                { ...currentUser.data, tastingStock, updatedAt },
-                updatedAt,
-              ],
-            );
-          }
-        } else if (
-          movement &&
-          value(movement.data, "kind") === "AJUSTE_CANJES" &&
-          promoterId &&
-          personalItemId
-        ) {
-          const userResult = (await client.query(
-            "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-            [promoterId],
-          )) as unknown as { rows: Array<{ data: StoredRecord }> };
-          const currentUser = userResult.rows[0];
-          if (currentUser) {
-            const currentStock = isRecord(currentUser.data.redemptionStock)
-              ? currentUser.data.redemptionStock
-              : {};
-            const redemptionStock = {
-              AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
-              BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
-              MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
-              SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
-            };
-            const itemId = personalItemId as keyof typeof redemptionStock;
-            if (itemId in redemptionStock)
-              redemptionStock[itemId] = Math.max(
-                0,
-                redemptionStock[itemId] -
-                  Math.max(0, Number(movement.quantity) || 0),
-              );
-            const updatedAt = new Date().toISOString();
-            await client.query(
-              "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-              [
-                promoterId,
-                { ...currentUser.data, redemptionStock, updatedAt },
-                updatedAt,
-              ],
-            );
-          }
-        } else if (
-          movement &&
-          value(movement.data, "kind") === "AJUSTE_CANJES" &&
-          productId
-        ) {
-          const inventoryResult = (await client.query(
-            "SELECT redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
-            [movement.market_id],
-          )) as unknown as {
-            rows: Array<{
-              redemption_stock: Record<string, number>;
-              data: StoredRecord;
-            }>;
-          };
-          const current = inventoryResult.rows[0];
-          const redemptionStock = {
-            AVENA: Math.max(0, Number(current?.redemption_stock?.AVENA) || 0),
-            BATEA: Math.max(0, Number(current?.redemption_stock?.BATEA) || 0),
-            MANDIL: Math.max(0, Number(current?.redemption_stock?.MANDIL) || 0),
-            SPAGHETTI: Math.max(
-              0,
-              Number(current?.redemption_stock?.SPAGHETTI) || 0,
-            ),
-          };
-          for (const itemId of Object.keys(redemptionStock)) {
-            redemptionStock[itemId as keyof typeof redemptionStock] = Math.max(
-              0,
-              redemptionStock[itemId as keyof typeof redemptionStock] -
-                Math.max(0, Number(components[itemId]) || 0) *
-                  Math.max(0, Number(movement.quantity) || 0),
-            );
-          }
-          if (current) {
-            const inventoryRecord = {
-              ...(current.data || {}),
-              redemptionStock,
-              updatedAt: new Date().toISOString(),
-            };
-            await client.query(
-              "UPDATE inventory SET redemption_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
-              [
-                movement.market_id,
-                redemptionStock,
-                inventoryRecord,
-                inventoryRecord.updatedAt,
-              ],
-            );
-          }
-        }
-      }
-      if (source === "sale") {
-        await client.query(
-          `INSERT INTO app_storage_tombstones (collection,record_id,deleted_at)
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+        [`sale:${id}`],
+      );
+      const found = await client.query(
+        "SELECT id FROM sales WHERE id=$1 FOR UPDATE",
+        [id],
+      );
+      if (!found.rows.length) throw new Error("La venta ya no existe.");
+      await restoreWarehouseStockMovements(
+        client as unknown as QueryClient,
+        `SALE:${id}`,
+        "ADMIN",
+      );
+      const movementPrefix = `CAN-${id}-`;
+      await client.query(
+        "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
+        [movementPrefix],
+      );
+      await client.query(
+        `INSERT INTO app_storage_tombstones (collection,record_id,deleted_at)
          VALUES ('sales',$1,now())
-         ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now(),updated_at=now()`,
-          [id],
-        );
-      }
-      await client.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
+         ON CONFLICT (collection,record_id)
+         DO UPDATE SET deleted_at=now(),updated_at=now()`,
+        [id],
+      );
+      await client.query("DELETE FROM sales WHERE id=$1", [id]);
       await client.query("COMMIT");
       res.json({ deleted: id, source, snapshot: await readSnapshot() });
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       req.log.error({ err: error }, "Unable to delete canje");
-      res.status(500).json({ message: "No se pudo eliminar el canje." });
+      res.status(409).json({
+        message:
+          error instanceof Error ? error.message : "No se pudo eliminar el canje.",
+      });
     } finally {
       client.release();
     }
