@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   jsonb,
@@ -34,6 +35,7 @@ export const appStorageTombstonesTable = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    ...timestamps,
   },
   (table) => [
     primaryKey({
@@ -162,7 +164,9 @@ export const warehousesTable = pgTable(
     data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
     ...timestamps,
   },
-  (table) => [uniqueIndex("idx_warehouses_name").on(table.name)],
+  (table) => [
+    uniqueIndex("idx_warehouses_name").on(sql`upper(${table.name})`),
+  ],
 );
 
 export const warehouseMovementsTable = pgTable(
