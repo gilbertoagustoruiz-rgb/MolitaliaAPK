@@ -2375,6 +2375,7 @@ function Input({
   maxLength,
   autoComplete,
   readOnly = false,
+  disabled = false,
   testId,
 }: {
   value: string | number;
@@ -2387,6 +2388,7 @@ function Input({
   maxLength?: number;
   autoComplete?: string;
   readOnly?: boolean;
+  disabled?: boolean;
   testId?: string;
 }) {
   return (
@@ -2402,6 +2404,7 @@ function Input({
       maxLength={maxLength}
       autoComplete={autoComplete}
       readOnly={readOnly}
+      disabled={disabled}
       data-testid={testId}
     />
   );
