@@ -2754,9 +2754,12 @@ select:focus-visible,
   color: #a4b4c5;
 }
 .bonus-box.active {
-  border-color: #b7794d;
-  color: #ffd0a8;
-  background: #49372f;
+  border-color: #9fb7d2;
+  color: #0a1f3f;
+  background: #f8fbff;
+}
+.bonus-box.active svg {
+  color: #0a1f3f;
 }
 .bonus-box svg {
   width: 21px;
@@ -2766,13 +2769,21 @@ select:focus-visible,
   display: block;
 }
 .bonus-box small {
-  font: 10px var(--font-mono);
-  letter-spacing: 0.1em;
+  font: 11px var(--font-mono);
+  letter-spacing: 0.08em;
+}
+.bonus-box.active small {
+  color: #24496f;
 }
 .bonus-box strong {
-  margin-top: 3px;
+  margin-top: 4px;
   color: #f4f0e8;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+.bonus-box.active strong {
+  color: #0a1f3f;
+  font-size: 15px;
 }
 .sale-form-note {
   grid-column: 1/-1;
