@@ -80,7 +80,7 @@ try {
   await request("/app-storage/warehouses/ALM-E2E/recharge", {
     method: "POST",
     headers: adminHeaders,
-    body: JSON.stringify({ initial: true, quantities: { PANETON_900G: 10, PANETON_85G: 10, AVENA: 20, BATEA: 5, MANDIL: 5, SPAGHETTI: 20 } }),
+    body: JSON.stringify({ initial: true, quantities: { PANETON_900G: 10, PANETON_85G: 10, AVENA: 1000, BATEA: 20, MANDIL: 20, SPAGHETTI: 1000 } }),
   });
 
   const now = new Date().toISOString();
@@ -136,6 +136,40 @@ try {
 
   const itemRows = await pool.query("SELECT sale_id,sku,quantity FROM sale_items WHERE sale_id LIKE 'VTA-E2E-%' ORDER BY sale_id,line_no");
   if (itemRows.rows.length !== 3) throw new Error(`Expected 3 normalized sale_items rows, found ${itemRows.rows.length}.`);
+
+  const legacySale = {
+    id: "VTA-E2E-LEGACY", promoterId: promoter.id, clientId: client.id, marketId: market.id,
+    mode: "PLANCHAS", planchas: 80, units: 480, amountSoles: 5760,
+    mix: { "PANETON LEGACY": 480 },
+    bonus: "144 Avena + 100 Spaghetti",
+    redemptionCount: 1,
+    redemptionItems: { AVENA: 144, BATEA: 0, MANDIL: 0, SPAGHETTI: 100 },
+    receiptPhoto: "/api/e2e-legacy.jpg", exchangePhoto: "/api/e2e-legacy-canje.jpg",
+    date: now, updatedAt: now, status: "SINCRONIZADA",
+  };
+  await pool.query(
+    `INSERT INTO sales(id,promoter_id,client_id,market_id,mode,units,amount_soles,sale_date,status,receipt_photo,exchange_photo,data,record_updated_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [legacySale.id, legacySale.promoterId, legacySale.clientId, legacySale.marketId, legacySale.mode, legacySale.units,
+     legacySale.amountSoles, legacySale.date, legacySale.status, legacySale.receiptPhoto, legacySale.exchangePhoto,
+     legacySale, legacySale.updatedAt],
+  );
+  await request("/app-storage/admin/sales/VTA-E2E-LEGACY", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      sale: {
+        ...legacySale,
+        bonus: "288 Avena + 200 Spaghetti",
+        redemptionItems: { AVENA: 288, BATEA: 0, MANDIL: 0, SPAGHETTI: 200 },
+        planchaAccessory: "NINGUNO",
+        planchaMultiplier: 2,
+      },
+    }),
+  });
+  const legacyAfter = await pool.query("SELECT data FROM sales WHERE id='VTA-E2E-LEGACY'");
+  if (Number(legacyAfter.rows[0]?.data?.planchaMultiplier) !== 2)
+    throw new Error("Legacy sale edit did not persist multiplier x2.");
 
   const beforeDelete = await pool.query("SELECT stock FROM warehouses WHERE id='ALM-E2E'");
   const beforeAvena = Number(beforeDelete.rows[0].stock.AVENA);
