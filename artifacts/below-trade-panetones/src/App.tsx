@@ -1378,14 +1378,12 @@ function catalogProductForLegacyBrand(
     preferredName &&
     catalog.find(
       (item) =>
-        item.status === "ACTIVO" &&
         normalizeCsvHeader(item.brand || "") === normalizedBrand &&
         normalizeCsvHeader(item.product) === normalizeCsvHeader(preferredName),
     );
   if (byPreferredName) return byPreferredName;
   return catalog.find(
     (item) =>
-      item.status === "ACTIVO" &&
       normalizeCsvHeader(item.brand || "") === normalizedBrand &&
       item.saleModes?.includes("PLANCHAS"),
   );
@@ -1395,9 +1393,8 @@ function catalogProductForSaleKey(
   key: string,
   productPrices: ProductPrice[] = [],
 ) {
-  const catalog = normalizedProducts(productPrices).filter(
-    (item) => item.status === "ACTIVO",
-  );
+  // Historical sales must keep resolving even if a product was later inactivated.
+  const catalog = normalizedProducts(productPrices);
   const normalizedKey = normalizeCsvHeader(key);
   if (!normalizedKey) return undefined;
 
