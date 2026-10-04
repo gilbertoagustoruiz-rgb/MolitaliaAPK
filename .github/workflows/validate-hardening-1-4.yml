@@ -22,4 +22,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
+      - name: Typecheck completo
+        run: pnpm run typecheck
+      - name: Build de producción DigitalOcean
+        run: PORT=8080 BASE_PATH=/ pnpm run build:render
