@@ -270,6 +270,21 @@ export async function ensureDatabaseSchema() {
       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_markets_warehouse') THEN
         ALTER TABLE markets ADD CONSTRAINT fk_markets_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE SET NULL NOT VALID;
       END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_assignments_promoter') THEN
+        ALTER TABLE assignments ADD CONSTRAINT fk_assignments_promoter FOREIGN KEY (promoter_id) REFERENCES users(id) ON DELETE RESTRICT NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_closures_client') THEN
+        ALTER TABLE session_closures ADD CONSTRAINT fk_closures_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_promoter') THEN
+        ALTER TABLE trade_approvals ADD CONSTRAINT fk_trade_promoter FOREIGN KEY (promoter_id) REFERENCES users(id) ON DELETE RESTRICT NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_client') THEN
+        ALTER TABLE trade_approvals ADD CONSTRAINT fk_trade_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_market') THEN
+        ALTER TABLE trade_approvals ADD CONSTRAINT fk_trade_market FOREIGN KEY (market_id) REFERENCES markets(id) ON DELETE RESTRICT NOT VALID;
+      END IF;
     END $$;
 
     DO $$ BEGIN
@@ -308,6 +323,21 @@ export async function ensureDatabaseSchema() {
       END IF;
       IF NOT EXISTS (SELECT 1 FROM markets m LEFT JOIN warehouses w ON w.id=m.warehouse_id WHERE m.warehouse_id IS NOT NULL AND w.id IS NULL) THEN
         ALTER TABLE markets VALIDATE CONSTRAINT fk_markets_warehouse;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM assignments a LEFT JOIN users u ON u.id=a.promoter_id WHERE u.id IS NULL) THEN
+        ALTER TABLE assignments VALIDATE CONSTRAINT fk_assignments_promoter;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM session_closures s LEFT JOIN clients c ON c.id=s.client_id WHERE s.client_id IS NOT NULL AND c.id IS NULL) THEN
+        ALTER TABLE session_closures VALIDATE CONSTRAINT fk_closures_client;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM trade_approvals t LEFT JOIN users u ON u.id=t.promoter_id WHERE u.id IS NULL) THEN
+        ALTER TABLE trade_approvals VALIDATE CONSTRAINT fk_trade_promoter;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM trade_approvals t LEFT JOIN clients c ON c.id=t.client_id WHERE c.id IS NULL) THEN
+        ALTER TABLE trade_approvals VALIDATE CONSTRAINT fk_trade_client;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM trade_approvals t LEFT JOIN markets m ON m.id=t.market_id WHERE m.id IS NULL) THEN
+        ALTER TABLE trade_approvals VALIDATE CONSTRAINT fk_trade_market;
       END IF;
     END $$;
   `);
