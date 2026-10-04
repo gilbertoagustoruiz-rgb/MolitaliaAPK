@@ -747,11 +747,11 @@ async function upsertRecord(
 
   if (name === "markets") {
     await client.query(
-      `INSERT INTO markets (id,name,region,department,province,district,status,data,record_updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO markets (id,name,region,department,province,district,status,warehouse_id,data,record_updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,region=EXCLUDED.region,department=EXCLUDED.department,
-       province=EXCLUDED.province,district=EXCLUDED.district,status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       province=EXCLUDED.province,district=EXCLUDED.district,status=EXCLUDED.status,warehouse_id=EXCLUDED.warehouse_id,
+       data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
       [
         key,
         value(source, "name"),
@@ -760,6 +760,7 @@ async function upsertRecord(
         value(source, "province") || null,
         value(source, "district") || null,
         value(source, "status") || "ACTIVO",
+        value(source, "warehouseId") || null,
         normalized,
         updated,
       ],
@@ -1172,7 +1173,7 @@ router.get("/app-storage/integrity-audit", async (req, res): Promise<void> => {
       ["closures_without_promoter", "SELECT count(*)::int AS count FROM session_closures s LEFT JOIN users u ON u.id=s.promoter_id WHERE u.id IS NULL"],
       ["closures_without_market", "SELECT count(*)::int AS count FROM session_closures s LEFT JOIN markets m ON m.id=s.market_id WHERE m.id IS NULL"],
       ["warehouse_movements_without_warehouse", "SELECT count(*)::int AS count FROM warehouse_movements wm LEFT JOIN warehouses w ON w.id=wm.warehouse_id WHERE w.id IS NULL"],
-      ["markets_without_valid_warehouse", "SELECT count(*)::int AS count FROM markets m WHERE COALESCE(m.data->>'warehouseId','')<>'' AND NOT EXISTS (SELECT 1 FROM warehouses w WHERE w.id=m.data->>'warehouseId')"],
+      ["markets_without_valid_warehouse", "SELECT count(*)::int AS count FROM markets m WHERE COALESCE(m.warehouse_id,m.data->>'warehouseId','')<>'' AND NOT EXISTS (SELECT 1 FROM warehouses w WHERE w.id=COALESCE(m.warehouse_id,m.data->>'warehouseId'))"],
       ["sale_items_unmapped", "SELECT count(*)::int AS count FROM sale_items WHERE product_sku IS NULL"],
       ["sales_without_sale_items", "SELECT count(*)::int AS count FROM sales s WHERE NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)"]
     ] as const;
@@ -1197,9 +1198,11 @@ router.get("/app-storage/integrity-audit", async (req, res): Promise<void> => {
 });
 
 async function warehouseForMarket(db: QueryClient, marketId: string) {
-  const marketResult = await db.query("SELECT data FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1", [marketId]);
+  const marketResult = await db.query("SELECT warehouse_id,data FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1", [marketId]);
   const marketData = isRecord(marketResult.rows[0]?.data) ? marketResult.rows[0].data : {};
-  const directWarehouseId = value(marketData, "warehouseId");
+  const directWarehouseId =
+    String(marketResult.rows[0]?.warehouse_id || "").trim() ||
+    value(marketData, "warehouseId");
   if (directWarehouseId) {
     const direct = await db.query("SELECT id,name,stock,data FROM warehouses WHERE id=$1 AND status='ACTIVO' LIMIT 1", [directWarehouseId]);
     if (!direct.rows.length) throw new Error("El almacén asignado al mercado no está activo o no existe.");
