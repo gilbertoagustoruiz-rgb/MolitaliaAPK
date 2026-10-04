@@ -3861,6 +3861,7 @@ function EditClientModal({
 function SaleEditModal({
   sale,
   clients,
+  markets,
   promoter,
   warehouses,
   onSave,
@@ -3868,6 +3869,7 @@ function SaleEditModal({
 }: {
   sale: Sale;
   clients: Client[];
+  markets: Market[];
   promoter?: AppUser;
   warehouses: Warehouse[];
   onSave: (
@@ -3902,9 +3904,10 @@ function SaleEditModal({
         parseBonusItems(sale.bonus),
         originalCount,
       );
-  const saleWarehouse = warehouses.find((warehouse) =>
-    warehouse.marketIds?.includes(sale.marketId),
-  );
+  const saleMarket = markets.find((market) => market.id === sale.marketId);
+  const saleWarehouse =
+    warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
+    warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
   const warehouseStock = redemptionItems.reduce(
     (result, item) => ({
       ...result,
@@ -9202,6 +9205,7 @@ function AnalystApp({
         <SaleEditModal
           sale={editingSale}
           clients={clients}
+          markets={markets}
           promoter={users.find((item) => item.id === editingSale.promoterId)}
           warehouses={marketWarehouses}
           onSave={saveSaleEdit}
