@@ -234,55 +234,72 @@ export async function ensureDatabaseSchema() {
     CREATE INDEX IF NOT EXISTS idx_closures_date ON session_closures(closure_date DESC);
 
     DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_clients_market') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_clients_market')
+         AND NOT EXISTS (SELECT 1 FROM clients c LEFT JOIN markets m ON m.id=c.market_id WHERE m.id IS NULL) THEN
         ALTER TABLE clients ADD CONSTRAINT fk_clients_market FOREIGN KEY (market_id) REFERENCES markets(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sales_promoter') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sales_promoter')
+         AND NOT EXISTS (SELECT 1 FROM sales s LEFT JOIN users u ON u.id=s.promoter_id WHERE u.id IS NULL) THEN
         ALTER TABLE sales ADD CONSTRAINT fk_sales_promoter FOREIGN KEY (promoter_id) REFERENCES users(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sales_client') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sales_client')
+         AND NOT EXISTS (SELECT 1 FROM sales s LEFT JOIN clients c ON c.id=s.client_id WHERE c.id IS NULL) THEN
         ALTER TABLE sales ADD CONSTRAINT fk_sales_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sales_market') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sales_market')
+         AND NOT EXISTS (SELECT 1 FROM sales s LEFT JOIN markets m ON m.id=s.market_id WHERE m.id IS NULL) THEN
         ALTER TABLE sales ADD CONSTRAINT fk_sales_market FOREIGN KEY (market_id) REFERENCES markets(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sale_items_sale') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sale_items_sale')
+         AND NOT EXISTS (SELECT 1 FROM sale_items si LEFT JOIN sales s ON s.id=si.sale_id WHERE s.id IS NULL) THEN
         ALTER TABLE sale_items ADD CONSTRAINT fk_sale_items_sale FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sale_items_product') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_sale_items_product')
+         AND NOT EXISTS (SELECT 1 FROM sale_items si LEFT JOIN product_prices p ON p.sku=si.product_sku WHERE si.product_sku IS NOT NULL AND p.sku IS NULL) THEN
         ALTER TABLE sale_items ADD CONSTRAINT fk_sale_items_product FOREIGN KEY (product_sku) REFERENCES product_prices(sku) ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_attendance_promoter') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_attendance_promoter')
+         AND NOT EXISTS (SELECT 1 FROM attendance a LEFT JOIN users u ON u.id=a.promoter_id WHERE u.id IS NULL) THEN
         ALTER TABLE attendance ADD CONSTRAINT fk_attendance_promoter FOREIGN KEY (promoter_id) REFERENCES users(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_attendance_client') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_attendance_client')
+         AND NOT EXISTS (SELECT 1 FROM attendance a LEFT JOIN clients c ON c.id=a.client_id WHERE c.id IS NULL) THEN
         ALTER TABLE attendance ADD CONSTRAINT fk_attendance_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_attendance_market') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_attendance_market')
+         AND NOT EXISTS (SELECT 1 FROM attendance a LEFT JOIN markets m ON m.id=a.market_id WHERE m.id IS NULL) THEN
         ALTER TABLE attendance ADD CONSTRAINT fk_attendance_market FOREIGN KEY (market_id) REFERENCES markets(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_closures_promoter') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_closures_promoter')
+         AND NOT EXISTS (SELECT 1 FROM session_closures s LEFT JOIN users u ON u.id=s.promoter_id WHERE u.id IS NULL) THEN
         ALTER TABLE session_closures ADD CONSTRAINT fk_closures_promoter FOREIGN KEY (promoter_id) REFERENCES users(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_closures_market') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_closures_market')
+         AND NOT EXISTS (SELECT 1 FROM session_closures s LEFT JOIN markets m ON m.id=s.market_id WHERE m.id IS NULL) THEN
         ALTER TABLE session_closures ADD CONSTRAINT fk_closures_market FOREIGN KEY (market_id) REFERENCES markets(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_markets_warehouse') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_markets_warehouse')
+         AND NOT EXISTS (SELECT 1 FROM markets m LEFT JOIN warehouses w ON w.id=m.warehouse_id WHERE m.warehouse_id IS NOT NULL AND w.id IS NULL) THEN
         ALTER TABLE markets ADD CONSTRAINT fk_markets_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE SET NULL NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_assignments_promoter') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_assignments_promoter')
+         AND NOT EXISTS (SELECT 1 FROM assignments a LEFT JOIN users u ON u.id=a.promoter_id WHERE u.id IS NULL) THEN
         ALTER TABLE assignments ADD CONSTRAINT fk_assignments_promoter FOREIGN KEY (promoter_id) REFERENCES users(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_closures_client') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_closures_client')
+         AND NOT EXISTS (SELECT 1 FROM session_closures s LEFT JOIN clients c ON c.id=s.client_id WHERE s.client_id IS NOT NULL AND c.id IS NULL) THEN
         ALTER TABLE session_closures ADD CONSTRAINT fk_closures_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_promoter') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_promoter')
+         AND NOT EXISTS (SELECT 1 FROM trade_approvals t LEFT JOIN users u ON u.id=t.promoter_id WHERE u.id IS NULL) THEN
         ALTER TABLE trade_approvals ADD CONSTRAINT fk_trade_promoter FOREIGN KEY (promoter_id) REFERENCES users(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_client') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_client')
+         AND NOT EXISTS (SELECT 1 FROM trade_approvals t LEFT JOIN clients c ON c.id=t.client_id WHERE c.id IS NULL) THEN
         ALTER TABLE trade_approvals ADD CONSTRAINT fk_trade_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT NOT VALID;
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_market') THEN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_trade_market')
+         AND NOT EXISTS (SELECT 1 FROM trade_approvals t LEFT JOIN markets m ON m.id=t.market_id WHERE m.id IS NULL) THEN
         ALTER TABLE trade_approvals ADD CONSTRAINT fk_trade_market FOREIGN KEY (market_id) REFERENCES markets(id) ON DELETE RESTRICT NOT VALID;
       END IF;
     END $$;
