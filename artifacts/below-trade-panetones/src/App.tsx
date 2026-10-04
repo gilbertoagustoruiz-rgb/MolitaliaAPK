@@ -8445,12 +8445,17 @@ function AnalystApp({
       )}
       {tab === "degustacion" && (
         <AdminDegustacionesModule
-          onEdit={(record) => editRecord("movements", record)}
+          onEdit={() =>
+            notify(
+              "La degustación operativa se corrige eliminándola y registrando nuevamente el cierre para conservar el kardex de Almacén.",
+              true,
+            )
+          }
           consumos={tastingConsumptions}
           users={users}
           marketMap={marketMap}
           closures={closures}
-          onDeleteConsumo={(record) => deleteRecord("movements", record)}
+          onDeleteConsumo={(record) => void deleteTastingConsumption(record)}
         />
       )}
       {tab === "asignaciones" && (
