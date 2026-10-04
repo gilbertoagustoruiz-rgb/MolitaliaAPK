@@ -141,9 +141,11 @@ async function replaceSaleItems(
   client: QueryClient,
   saleId: string,
   source: StoredRecord,
+  options: { allowLegacyWithoutSku?: boolean } = {},
 ) {
   const drafts = saleItemDrafts(source);
   if (!drafts.length) {
+    if (options.allowLegacyWithoutSku) return;
     throw new Error(
       "La venta no contiene un SKU válido. Actualiza Marcas antes de registrar la venta.",
     );
@@ -158,6 +160,7 @@ async function replaceSaleItems(
   );
   const missing = skuList.filter((sku) => !catalogBySku.has(sku));
   if (missing.length) {
+    if (options.allowLegacyWithoutSku) return;
     throw new Error(
       `SKU no encontrado en Marcas: ${missing.join(", ")}. No se modificó la venta.`,
     );
@@ -2587,7 +2590,9 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         updatedAt,
       ],
     );
-    await replaceSaleItems(client as unknown as QueryClient, id, sale);
+    await replaceSaleItems(client as unknown as QueryClient, id, sale, {
+      allowLegacyWithoutSku: true,
+    });
     await client.query(
       "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
       [movementPrefix],
@@ -2626,7 +2631,12 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to update sale");
-    res.status(500).json({ message: "No se pudo editar la venta." });
+    res.status(500).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "No se pudo editar la venta.",
+    });
   } finally {
     client.release();
   }
