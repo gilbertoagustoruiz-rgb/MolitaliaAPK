@@ -6015,7 +6015,6 @@ function CoordinatorApp({
     ["clientes", "Clientes"],
     ["usuarios", "Usuarios"],
     ["ventas", "Ventas"],
-    ["inventario", "Inventario"],
   ];
   const exportSales = () => {
     downloadCsv(
@@ -6284,71 +6283,7 @@ function CoordinatorApp({
           </div>
         </section>
       )}
-      {tab === "inventario" && (
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Stock de promotores</h2>
-              <p>
-                Consulta las existencias personales de los promotores de tus
-                zonas.
-              </p>
-            </div>
-          </div>
-          <div className="panel-body">
-            {allowedUsers.filter((current) => isPromoterRole(current.role))
-              .length ? (
-              <div className="stock-reconciliation-table inventory-stock-table">
-                <div className="stock-reconciliation-row header">
-                  <span>Promotor</span>
-                  <span>Degustación personal</span>
-                  {redemptionItems.map((item) => (
-                    <span key={item.id}>{item.label}</span>
-                  ))}
-                </div>
-                {allowedUsers
-                  .filter((current) => isPromoterRole(current.role))
-                  .map((current) => {
-                    const stock = calculatedPromoterStock(
-                      current.id,
-                      sales,
-                      movements,
-                    );
-                    return (
-                      <div
-                        className="stock-reconciliation-row"
-                        key={current.id}
-                      >
-                        <div>
-                          <strong>{current.name}</strong>
-                          <small>
-                            DNI {current.dni} ·{" "}
-                            {current.roleLabel || current.role}
-                          </small>
-                        </div>
-                        <b>
-                          {stock.tastingStock}
-                          <small>panetones</small>
-                        </b>
-                        {redemptionItems.map((item) => (
-                          <span key={item.id}>
-                            {stock.redemptionStock[item.id]}
-                            <small>unidades</small>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-              </div>
-            ) : (
-              <Empty
-                title="Sin promotores asignados"
-                detail="No hay promotores vinculados a tus zonas."
-              />
-            )}
-          </div>
-        </section>
-      )}
+
     </main>
   );
 }
@@ -7782,7 +7717,7 @@ function AnalystApp({
   const deleteTastingConsumption = async (consumo: InventoryMovement) => {
     if (
       !window.confirm(
-        `¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? "" : "es"}? La cantidad volverá a su stock personal.`,
+        `¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? "" : "es"}? La cantidad volverá al Almacén correspondiente.`,
       )
     )
       return;
@@ -7791,7 +7726,7 @@ function AnalystApp({
         `/degustaciones/movement/${encodeURIComponent(consumo.id)}`,
         { method: "DELETE" },
       );
-      notify("Degustación eliminada y stock personal restaurado");
+      notify("Degustación eliminada y stock de Almacén restaurado");
     } catch (error) {
       notify(
         error instanceof Error
@@ -7802,30 +7737,10 @@ function AnalystApp({
     }
   };
   const cleanupCatalogs = async () => {
-    if (
-      !window.confirm(
-        "Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones, cierres y usuarios que no sean ANALISTA. Los precios y el usuario ANALISTA se conservarán. ¿Empezar desde cero?",
-      )
-    )
-      return;
-    try {
-      await adminRequest("/cleanup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          confirmation: "LIMPIAR_MERCADOS_CLIENTES_CANJES",
-        }),
-      });
-      localStorage.removeItem(DEFAULT_STOCK_SEED_KEY);
-      notify("Marcaciones, inventario y demás datos operativos eliminados.");
-    } catch (error) {
-      notify(
-        error instanceof Error
-          ? error.message
-          : "No se pudo limpiar la información",
-        true,
-      );
-    }
+    notify(
+      "La limpieza masiva está deshabilitada para proteger la información histórica.",
+      true,
+    );
   };
   const filteredClients = clients.filter((client) =>
     matchesTableSearch(query, [
@@ -8521,7 +8436,7 @@ function AnalystApp({
             } else await deleteRecord("movements", record);
           }}
           onCleanup={cleanupCatalogs}
-          canCleanup={user.role === "ADMIN"}
+          canCleanup={false}
           notify={notify}
         />
       )}
@@ -9473,11 +9388,13 @@ function PromoterApp({
       ? unitPrice > 0
       : normalizedPlanchaLines.length > 0 &&
         normalizedPlanchaLines.every((line) => line.units > 0 && line.unitPrice > 0);
-  const promoterStock = administrative
-    ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
-    : userRedemptionStock(user);
-  const selectedWarehouse = warehouses.find((warehouse) =>
-    warehouse.marketIds?.includes(selectedMarketId),
+  const selectedMarketWarehouseId = markets.find(
+    (market) => market.id === selectedMarketId,
+  )?.warehouseId;
+  const selectedWarehouse = warehouses.find(
+    (warehouse) =>
+      warehouse.id === selectedMarketWarehouseId ||
+      warehouse.marketIds?.includes(selectedMarketId),
   );
   const warehouseRedemptionStock = redemptionItems.reduce(
     (result, item) => ({
@@ -9490,14 +9407,12 @@ function PromoterApp({
     PANETON_900G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_900G) || 0),
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
-  const redemptionTotal = sumRedemptionStock(
-    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock,
-  );
+  const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
   const bonusProducts = bonusProductsFor(
     mode,
     total,
     planchas,
-    promoterStock,
+    warehouseRedemptionStock,
     administrative ? new Date(administrative.date + "-05:00") : new Date(),
   );
   const selectedBonusProduct =
@@ -9567,8 +9482,7 @@ function PromoterApp({
     mode === "PLANCHAS" && planchas >= 1
       ? canjeRequirementsLabel(requiredRedemptions)
       : selectedBonusProduct?.label;
-  const stockForCanje =
-    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock;
+  const stockForCanje = warehouseRedemptionStock;
   const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
     ([itemId, quantity]) => stockForCanje[itemId] < quantity,
   );
@@ -9956,18 +9870,6 @@ function PromoterApp({
     setSales(next);
     writeStore("bt-sales", next);
     if (bonus && mode === "UNIDADES") {
-      const nextPromoterStock = requiredRedemptionEntries(
-        requiredRedemptions,
-      ).reduce(
-        (nextStock, [itemId, quantity]) => ({
-          ...nextStock,
-          [itemId]: nextStock[itemId] - quantity,
-        }),
-        { ...promoterStock },
-      );
-      onUpdateUser(
-        withUserStock(user, userTastingStock(user), nextPromoterStock),
-      );
       const currentMovements = readStore<InventoryMovement[]>(
         "bt-inventory-movements",
         [],
