@@ -12,6 +12,7 @@ const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
+const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"] as const;
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -3135,7 +3136,8 @@ router.delete(
       if (movement && movementKind === "DEGUSTACION") {
         const promoterId =
           value(movement.data, "promoterId") || value(movement.data, "actorId") || "ADMIN";
-        await restoreWarehouseStockMovements(client as unknown as QueryClient, `DEG:${id}`, promoterId);
+        const updatedAt = new Date().toISOString();
+        await restoreWarehouseStockMovements(client as unknown as QueryClient, `DEGUSTACION:${id}`, promoterId);
         const movementDate = value(movement.data, "date");
         if (movementDate) {
           const closureResult = (await client.query(
