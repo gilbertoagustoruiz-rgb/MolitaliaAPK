@@ -151,7 +151,7 @@ export async function ensureDatabaseSchema() {
 
     CREATE TABLE IF NOT EXISTS warehouse_movements (
       id text PRIMARY KEY,
-      warehouse_id text NOT NULL REFERENCES warehouses(id) ON DELETE CASCADE,
+      warehouse_id text NOT NULL REFERENCES warehouses(id) ON DELETE RESTRICT,
       kind text NOT NULL DEFAULT 'RECARGA',
       item_id text NOT NULL,
       quantity numeric NOT NULL DEFAULT 0,
@@ -161,6 +161,21 @@ export async function ensureDatabaseSchema() {
       created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_warehouse_movements_warehouse_date ON warehouse_movements(warehouse_id,movement_date DESC);
+    DO $ BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid='warehouse_movements'::regclass
+          AND contype='f'
+          AND conname='warehouse_movements_warehouse_id_fkey'
+          AND confdeltype='c'
+      ) THEN
+        ALTER TABLE warehouse_movements DROP CONSTRAINT warehouse_movements_warehouse_id_fkey;
+        ALTER TABLE warehouse_movements
+          ADD CONSTRAINT warehouse_movements_warehouse_id_fkey
+          FOREIGN KEY (warehouse_id) REFERENCES warehouses(id) ON DELETE RESTRICT;
+      END IF;
+    END $;
 
     CREATE TABLE IF NOT EXISTS inventory (
       market_id text PRIMARY KEY,
