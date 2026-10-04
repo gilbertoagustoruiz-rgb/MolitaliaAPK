@@ -155,9 +155,15 @@ export const saleItemsTable = pgTable(
 
 export const tradeApprovalsTable = pgTable("trade_approvals", {
   id: text("id").primaryKey(),
-  promoterId: text("promoter_id").notNull(),
-  clientId: text("client_id").notNull(),
-  marketId: text("market_id").notNull(),
+  promoterId: text("promoter_id")
+    .notNull()
+    .references(() => usersTable.id, { onDelete: "restrict" }),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => clientsTable.id, { onDelete: "restrict" }),
+  marketId: text("market_id")
+    .notNull()
+    .references(() => marketsTable.id, { onDelete: "restrict" }),
   status: text("status").notNull().default("PENDIENTE"),
   requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
@@ -225,7 +231,9 @@ export const inventoryMovementsTable = pgTable("inventory_movements", {
 });
 
 export const assignmentsTable = pgTable("assignments", {
-  promoterId: text("promoter_id").primaryKey(),
+  promoterId: text("promoter_id")
+    .primaryKey()
+    .references(() => usersTable.id, { onDelete: "restrict" }),
   promoterDni: text("promoter_dni"),
   marketIds: text("market_ids").array().notNull(),
   clientIds: text("client_ids").array().notNull(),
@@ -242,7 +250,9 @@ export const sessionClosuresTable = pgTable("session_closures", {
   marketId: text("market_id")
     .notNull()
     .references(() => marketsTable.id, { onDelete: "restrict" }),
-  clientId: text("client_id"),
+  clientId: text("client_id").references(() => clientsTable.id, {
+    onDelete: "restrict",
+  }),
   tastingUsed: numeric("tasting_used").notNull().default("0"),
   leads: numeric("leads").notNull().default("0"),
   closureDate: timestamp("closure_date", { withTimezone: true }).notNull(),
