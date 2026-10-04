@@ -7,24 +7,9 @@ import {
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
 import { Router, type IRouter, type Request } from "express";
-import { backupSnapshot } from "./google-sheets-storage";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
-const googleSheetsBackupEnabled =
-  process.env.GOOGLE_SHEETS_BACKUP_ENABLED === "true";
-const googleSheetsBackupPendingKey = "google_sheets_backup_pending";
-const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
-const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
-const promoterStockBaselineKey = "promoter_stock_baseline_v3";
-const promoterRoles = ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"];
-const promoterStockBaseline = {
-  tastingStock: 50,
-  redemptionStock: { AVENA: 120, BATEA: 50, MANDIL: 50, SPAGHETTI: 100 },
-};
-const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
-let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
-let googleSheetsBackupRunning = false;
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
 
@@ -195,156 +180,8 @@ async function readCatalogRevision(
   return value(result.rows[0] || {}, "value") || null;
 }
 
-async function ensurePromoterStockBaseline() {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended('promoter_stock_baseline',0))",
-    );
-    const updatedAt = new Date().toISOString();
-    const stockDeltaByPromoter = new Map<
-      string,
-      { tastingStock: number; redemptionStock: Record<string, number> }
-    >();
-    const stockDeltaFor = (promoterId: string) => {
-      const current = stockDeltaByPromoter.get(promoterId) || {
-        tastingStock: 0,
-        redemptionStock: Object.fromEntries(
-          redemptionItemIds.map((itemId) => [itemId, 0]),
-        ),
-      };
-      stockDeltaByPromoter.set(promoterId, current);
-      return current;
-    };
-    const addRedemptionDelta = (
-      promoterId: string,
-      itemId: string,
-      quantity: number,
-    ) => {
-      if (!promoterId || !redemptionItemIds.includes(itemId)) return;
-      const current = stockDeltaFor(promoterId);
-      current.redemptionStock[itemId] =
-        (Number(current.redemptionStock[itemId]) || 0) + quantity;
-    };
-    const addRequirementDelta = (
-      promoterId: string,
-      requirements: unknown,
-      multiplier = 1,
-    ) => {
-      if (!promoterId || !isRecord(requirements)) return;
-      for (const itemId of redemptionItemIds) {
-        addRedemptionDelta(
-          promoterId,
-          itemId,
-          Math.max(0, Number(requirements[itemId]) || 0) * multiplier,
-        );
-      }
-    };
-    const movementResult = await client.query(
-      `SELECT id,promoter_id,kind,item_id,quantity,data
-       FROM inventory_movements
-       WHERE promoter_id IS NOT NULL
-         AND kind IN ('CANJE','DEGUSTACION')`,
-    );
-    const saleIdsWithCanjeMovement = new Set<string>();
-    for (const row of movementResult.rows) {
-      const promoterId = String(row.promoter_id || "");
-      const source = isRecord(row.data) ? row.data : {};
-      const quantity = Math.max(0, Number(row.quantity) || 0);
-      const kind = String(row.kind);
-      if (kind === "DEGUSTACION") {
-        stockDeltaFor(promoterId).tastingStock -= quantity;
-        continue;
-      }
-      const movementId = String(row.id || "");
-      const saleMatch = movementId.match(
-        /^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/,
-      );
-      if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
-      const components = isRecord(source.canjeComponents)
-        ? source.canjeComponents
-        : null;
-      if (components) addRequirementDelta(promoterId, components, -quantity);
-      else
-        addRedemptionDelta(
-          promoterId,
-          String(row.item_id || value(source, "itemId")),
-          -quantity,
-        );
-    }
-    const saleResult = await client.query(
-      `SELECT id,promoter_id,data
-       FROM sales
-       WHERE promoter_id IS NOT NULL
-         AND data ? 'bonus'`,
-    );
-    for (const row of saleResult.rows) {
-      const saleId = String(row.id || "");
-      if (saleIdsWithCanjeMovement.has(saleId)) continue;
-      const source = isRecord(row.data) ? row.data : {};
-      addRequirementDelta(
-        String(row.promoter_id || ""),
-        source.redemptionItems,
-        -1,
-      );
-    }
-    const result = await client.query(
-      `SELECT id,data FROM users
-       WHERE status='ACTIVO'
-         AND data->>'role' = ANY($1::text[])
-       FOR UPDATE`,
-      [promoterRoles],
-    );
-    for (const row of result.rows) {
-      const current = isRecord(row.data) ? row.data : {};
-      const delta = stockDeltaByPromoter.get(String(row.id)) || {
-        tastingStock: 0,
-        redemptionStock: Object.fromEntries(
-          redemptionItemIds.map((itemId) => [itemId, 0]),
-        ),
-      };
-      const redemptionStock = Object.fromEntries(
-        redemptionItemIds.map((itemId) => [
-          itemId,
-          Math.max(
-            0,
-            Number(
-              promoterStockBaseline.redemptionStock[
-                itemId as keyof typeof promoterStockBaseline.redemptionStock
-              ],
-            ) + (Number(delta.redemptionStock[itemId]) || 0),
-          ),
-        ]),
-      );
-      const next = {
-        ...current,
-        tastingStock: Math.max(
-          0,
-          promoterStockBaseline.tastingStock + delta.tastingStock,
-        ),
-        redemptionStock,
-        updatedAt,
-      };
-      await client.query(
-        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-        [row.id, next, updatedAt],
-      );
-    }
-    await client.query(
-      `INSERT INTO app_metadata (key,value)
-       VALUES ($1,'applied')
-       ON CONFLICT (key) DO UPDATE SET value='applied',updated_at=now()`,
-      [promoterStockBaselineKey],
-    );
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
+// El stock personal/promotor se conserva solo como dato histórico dentro de users.data.
+// El saldo operativo se administra exclusivamente en warehouses.stock.
 
 function canjeSnapshot(snapshot: StorageSnapshot) {
   return [
@@ -386,42 +223,6 @@ async function readSnapshot(
     );
   }
   return snapshot;
-}
-
-async function setBackupMetadata(key: string, valueToStore: string | null) {
-  if (valueToStore === null) {
-    await pool.query("DELETE FROM app_metadata WHERE key=$1", [key]);
-    return;
-  }
-  await pool.query(
-    `INSERT INTO app_metadata (key,value)
-     VALUES ($1,$2)
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
-    [key, valueToStore],
-  );
-}
-
-function scheduleGoogleSheetsBackup(delayMs = 250) {
-  if (googleSheetsBackupTimer) return;
-  googleSheetsBackupTimer = setTimeout(() => {
-    googleSheetsBackupTimer = null;
-    void runGoogleSheetsBackup();
-  }, delayMs);
-  googleSheetsBackupTimer.unref();
-}
-
-async function requestGoogleSheetsBackup(reason: string) {
-  if (!googleSheetsBackupEnabled) return;
-  try {
-    await setBackupMetadata(
-      googleSheetsBackupPendingKey,
-      JSON.stringify({ requestedAt: new Date().toISOString(), reason }),
-    );
-    scheduleGoogleSheetsBackup();
-  } catch (error) {
-    console.error("Unable to queue Google Sheets backup", error);
-    scheduleGoogleSheetsBackup(10_000);
-  }
 }
 
 async function createAutomaticClosuresForDay(day: string) {
@@ -487,9 +288,6 @@ async function createAutomaticClosuresForDay(day: string) {
   } finally {
     client.release();
   }
-  if (created) {
-    void requestGoogleSheetsBackup(`cierres automáticos del ${day}`);
-  }
   return created;
 }
 
@@ -507,67 +305,6 @@ const automaticClosureTimer = setInterval(() => {
 automaticClosureTimer.unref();
 setTimeout(() => void runAutomaticClosureSweep(), 1_000).unref();
 
-async function runGoogleSheetsBackup() {
-  if (!googleSheetsBackupEnabled) return;
-  if (googleSheetsBackupRunning) return;
-  googleSheetsBackupRunning = true;
-  const client = await pool.connect();
-  let locked = false;
-  try {
-    const lockResult = await client.query(
-      "SELECT pg_try_advisory_lock(hashtextextended('google_sheets_backup',0)) AS locked",
-    );
-    locked = Boolean(lockResult.rows[0]?.locked);
-    if (!locked) return;
-
-    const pending = await client.query(
-      "SELECT value FROM app_metadata WHERE key=$1 LIMIT 1",
-      [googleSheetsBackupPendingKey],
-    );
-    if (!pending.rows[0]) return;
-
-    const snapshot = await readSnapshot(client as unknown as QueryClient);
-    await backupSnapshot(snapshot);
-    await setBackupMetadata(
-      googleSheetsBackupLastSuccessKey,
-      new Date().toISOString(),
-    );
-    await setBackupMetadata(googleSheetsBackupLastErrorKey, null);
-    await setBackupMetadata(googleSheetsBackupPendingKey, null);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Error desconocido";
-    console.error("Google Sheets backup failed", error);
-    await setBackupMetadata(
-      googleSheetsBackupLastErrorKey,
-      JSON.stringify({ failedAt: new Date().toISOString(), message }),
-    ).catch((metadataError) =>
-      console.error("Unable to record backup failure", metadataError),
-    );
-    scheduleGoogleSheetsBackup(60_000);
-  } finally {
-    if (locked) {
-      await client
-        .query(
-          "SELECT pg_advisory_unlock(hashtextextended('google_sheets_backup',0))",
-        )
-        .catch(() => undefined);
-    }
-    client.release();
-    googleSheetsBackupRunning = false;
-  }
-}
-
-router.use((req, res, next) => {
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
-    res.on("finish", () => {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        void requestGoogleSheetsBackup(`${req.method} ${req.path}`);
-      }
-    });
-  }
-  next();
-});
 
 function saleIdFromCanjeMovement(record: StoredRecord) {
   const id = value(record, "id");
@@ -748,16 +485,21 @@ async function upsertRecord(
       ? (existingByDni.rows[0].data as StoredRecord)
       : {};
     const remainsArchived =
-      existingUserData.sheetArchived === true && source.sheetArchived !== false;
+      (existingUserData.catalogArchived === true ||
+        existingUserData.sheetArchived === true) &&
+      source.catalogArchived !== false &&
+      source.sheetArchived !== false;
     const userData = remainsArchived
       ? {
           ...normalized,
           id: userId,
           status: "INACTIVO",
-          sheetArchived: true,
-          sheetArchivedAt: existingUserData.sheetArchivedAt,
+          catalogArchived: true,
+          catalogArchivedAt:
+            existingUserData.catalogArchivedAt ||
+            existingUserData.sheetArchivedAt,
         }
-      : { ...normalized, id: userId };
+      : { ...normalized, id: userId, catalogArchived: false };
     await client.query(
       `INSERT INTO users (id,dni,name,role,status,password_hash,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -1001,6 +743,7 @@ async function syncSnapshot(
       tombstones.rows.map((row) => `${row.collection}:${row.record_id}`),
     );
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
+      // inventory es histórico: nunca se acepta como fuente de saldo operativo.
       if (name === "inventory") continue;
       const records = Array.isArray(guardedIncoming[name])
         ? guardedIncoming[name]
@@ -1090,14 +833,6 @@ async function syncSnapshot(
     client.release();
   }
   return readSnapshot();
-}
-
-if (googleSheetsBackupEnabled) {
-  void requestGoogleSheetsBackup("inicio del servidor");
-  const googleSheetsBackupInterval = setInterval(() => {
-    void runGoogleSheetsBackup();
-  }, 60_000);
-  googleSheetsBackupInterval.unref();
 }
 
 async function authorizedTradeActor(req: Request) {
@@ -1593,14 +1328,9 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    await ensurePromoterStockBaseline().catch((error) => {
-      req.log.error(
-        { err: error },
-        "Unable to refresh promoter stock baseline",
-      );
-    });
     res.json({
-      storage: "replit-postgresql",
+      storage: "digitalocean-postgresql",
+      stockSource: "warehouses",
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
     });
@@ -1626,7 +1356,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       incomingRevision,
     );
     res.json({
-      storage: "replit-postgresql",
+      storage: "digitalocean-postgresql",
       syncedAt: new Date().toISOString(),
       catalogRevision: await readCatalogRevision(),
       snapshot,
@@ -1640,7 +1370,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
     const { assignments } = await readSnapshot();
-    res.json({ storage: "replit-postgresql", assignments });
+    res.json({ storage: "digitalocean-postgresql", assignments });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read assignments");
     res.status(500).json({ message: "No se pudieron leer las asignaciones." });
@@ -1663,7 +1393,7 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
       await readCatalogRevision(),
     );
     const { assignments } = await readSnapshot();
-    res.json({ storage: "replit-postgresql", assignment, assignments });
+    res.json({ storage: "digitalocean-postgresql", assignment, assignments });
   } catch (error) {
     req.log.error({ err: error }, "Unable to save assignment");
     res.status(500).json({ message: "No se pudo guardar la asignación." });
@@ -1682,7 +1412,7 @@ router.post(
       )
     ) {
       res.status(400).json({
-        message: "La hoja debe contener usuarios válidos con DNI de 8 dígitos.",
+        message: "El archivo debe contener usuarios válidos con DNI de 8 dígitos.",
       });
       return;
     }
@@ -1690,7 +1420,7 @@ router.post(
     if (new Set(dnis).size !== dnis.length) {
       res.status(400).json({
         message:
-          "La hoja contiene DNI repetidos. No se actualizó ningún usuario.",
+          "El archivo contiene DNI repetidos. No se actualizó ningún usuario.",
       });
       return;
     }
@@ -1704,28 +1434,28 @@ router.post(
       if (!revisionIsCurrent) {
         await client.query("ROLLBACK");
         res.status(409).json({
-          message: "La información cambió. Vuelve a pulsar Actualizar hoja.",
+          message: "La información cambió. Vuelve a cargar el archivo.",
         });
         return;
       }
       for (const user of users) {
         await upsertRecord(client as unknown as QueryClient, "users", {
           ...user,
-          sheetArchived: false,
+          catalogArchived: false,
         });
       }
       const archivedAt = new Date().toISOString();
       await client.query(
         `UPDATE users
        SET status='INACTIVO',
-           data=data || jsonb_build_object('status','INACTIVO','sheetArchived',true,'sheetArchivedAt',$2::text),
+           data=(data - 'sheetArchived' - 'sheetArchivedAt') ||
+                jsonb_build_object('status','INACTIVO','catalogArchived',true,'catalogArchivedAt',$2::text),
            record_updated_at=$2,
            updated_at=now()
        WHERE NOT (dni = ANY($1::text[]))`,
         [dnis, archivedAt],
       );
       await client.query("COMMIT");
-      void requestGoogleSheetsBackup("sincronización autoritativa de usuarios");
       res.json({ synced: dnis.length, snapshot: await readSnapshot() });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -1735,7 +1465,7 @@ router.post(
       );
       res
         .status(500)
-        .json({ message: "No se pudo sincronizar la hoja de Promotores." });
+        .json({ message: "No se pudo sincronizar el archivo de Promotores." });
     } finally {
       client.release();
     }
@@ -3625,12 +3355,6 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
     return;
   }
   try {
-    await ensurePromoterStockBaseline().catch((error) => {
-      req.log.error(
-        { err: error },
-        "Unable to refresh promoter stock baseline before login",
-      );
-    });
     const result = await pool.query(
       "SELECT data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
       [dni],
