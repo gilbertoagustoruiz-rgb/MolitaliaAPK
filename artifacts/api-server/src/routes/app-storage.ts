@@ -7,26 +7,12 @@ import {
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
 import { Router, type IRouter, type Request } from "express";
-import { backupSnapshot } from "./google-sheets-storage";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
-const googleSheetsBackupEnabled =
-  process.env.GOOGLE_SHEETS_BACKUP_ENABLED === "true";
-const googleSheetsBackupPendingKey = "google_sheets_backup_pending";
-const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
-const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
-const promoterStockBaselineKey = "promoter_stock_baseline_v3";
-const promoterRoles = ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"];
-const promoterStockBaseline = {
-  tastingStock: 50,
-  redemptionStock: { AVENA: 120, BATEA: 50, MANDIL: 50, SPAGHETTI: 100 },
-};
-const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
-let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
-let googleSheetsBackupRunning = false;
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
+const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -195,156 +181,8 @@ async function readCatalogRevision(
   return value(result.rows[0] || {}, "value") || null;
 }
 
-async function ensurePromoterStockBaseline() {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended('promoter_stock_baseline',0))",
-    );
-    const updatedAt = new Date().toISOString();
-    const stockDeltaByPromoter = new Map<
-      string,
-      { tastingStock: number; redemptionStock: Record<string, number> }
-    >();
-    const stockDeltaFor = (promoterId: string) => {
-      const current = stockDeltaByPromoter.get(promoterId) || {
-        tastingStock: 0,
-        redemptionStock: Object.fromEntries(
-          redemptionItemIds.map((itemId) => [itemId, 0]),
-        ),
-      };
-      stockDeltaByPromoter.set(promoterId, current);
-      return current;
-    };
-    const addRedemptionDelta = (
-      promoterId: string,
-      itemId: string,
-      quantity: number,
-    ) => {
-      if (!promoterId || !redemptionItemIds.includes(itemId)) return;
-      const current = stockDeltaFor(promoterId);
-      current.redemptionStock[itemId] =
-        (Number(current.redemptionStock[itemId]) || 0) + quantity;
-    };
-    const addRequirementDelta = (
-      promoterId: string,
-      requirements: unknown,
-      multiplier = 1,
-    ) => {
-      if (!promoterId || !isRecord(requirements)) return;
-      for (const itemId of redemptionItemIds) {
-        addRedemptionDelta(
-          promoterId,
-          itemId,
-          Math.max(0, Number(requirements[itemId]) || 0) * multiplier,
-        );
-      }
-    };
-    const movementResult = await client.query(
-      `SELECT id,promoter_id,kind,item_id,quantity,data
-       FROM inventory_movements
-       WHERE promoter_id IS NOT NULL
-         AND kind IN ('CANJE','DEGUSTACION')`,
-    );
-    const saleIdsWithCanjeMovement = new Set<string>();
-    for (const row of movementResult.rows) {
-      const promoterId = String(row.promoter_id || "");
-      const source = isRecord(row.data) ? row.data : {};
-      const quantity = Math.max(0, Number(row.quantity) || 0);
-      const kind = String(row.kind);
-      if (kind === "DEGUSTACION") {
-        stockDeltaFor(promoterId).tastingStock -= quantity;
-        continue;
-      }
-      const movementId = String(row.id || "");
-      const saleMatch = movementId.match(
-        /^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/,
-      );
-      if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
-      const components = isRecord(source.canjeComponents)
-        ? source.canjeComponents
-        : null;
-      if (components) addRequirementDelta(promoterId, components, -quantity);
-      else
-        addRedemptionDelta(
-          promoterId,
-          String(row.item_id || value(source, "itemId")),
-          -quantity,
-        );
-    }
-    const saleResult = await client.query(
-      `SELECT id,promoter_id,data
-       FROM sales
-       WHERE promoter_id IS NOT NULL
-         AND data ? 'bonus'`,
-    );
-    for (const row of saleResult.rows) {
-      const saleId = String(row.id || "");
-      if (saleIdsWithCanjeMovement.has(saleId)) continue;
-      const source = isRecord(row.data) ? row.data : {};
-      addRequirementDelta(
-        String(row.promoter_id || ""),
-        source.redemptionItems,
-        -1,
-      );
-    }
-    const result = await client.query(
-      `SELECT id,data FROM users
-       WHERE status='ACTIVO'
-         AND data->>'role' = ANY($1::text[])
-       FOR UPDATE`,
-      [promoterRoles],
-    );
-    for (const row of result.rows) {
-      const current = isRecord(row.data) ? row.data : {};
-      const delta = stockDeltaByPromoter.get(String(row.id)) || {
-        tastingStock: 0,
-        redemptionStock: Object.fromEntries(
-          redemptionItemIds.map((itemId) => [itemId, 0]),
-        ),
-      };
-      const redemptionStock = Object.fromEntries(
-        redemptionItemIds.map((itemId) => [
-          itemId,
-          Math.max(
-            0,
-            Number(
-              promoterStockBaseline.redemptionStock[
-                itemId as keyof typeof promoterStockBaseline.redemptionStock
-              ],
-            ) + (Number(delta.redemptionStock[itemId]) || 0),
-          ),
-        ]),
-      );
-      const next = {
-        ...current,
-        tastingStock: Math.max(
-          0,
-          promoterStockBaseline.tastingStock + delta.tastingStock,
-        ),
-        redemptionStock,
-        updatedAt,
-      };
-      await client.query(
-        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-        [row.id, next, updatedAt],
-      );
-    }
-    await client.query(
-      `INSERT INTO app_metadata (key,value)
-       VALUES ($1,'applied')
-       ON CONFLICT (key) DO UPDATE SET value='applied',updated_at=now()`,
-      [promoterStockBaselineKey],
-    );
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
+// El stock personal/promotor se conserva solo como dato histórico dentro de users.data.
+// El saldo operativo se administra exclusivamente en warehouses.stock.
 
 function canjeSnapshot(snapshot: StorageSnapshot) {
   return [
@@ -386,42 +224,6 @@ async function readSnapshot(
     );
   }
   return snapshot;
-}
-
-async function setBackupMetadata(key: string, valueToStore: string | null) {
-  if (valueToStore === null) {
-    await pool.query("DELETE FROM app_metadata WHERE key=$1", [key]);
-    return;
-  }
-  await pool.query(
-    `INSERT INTO app_metadata (key,value)
-     VALUES ($1,$2)
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
-    [key, valueToStore],
-  );
-}
-
-function scheduleGoogleSheetsBackup(delayMs = 250) {
-  if (googleSheetsBackupTimer) return;
-  googleSheetsBackupTimer = setTimeout(() => {
-    googleSheetsBackupTimer = null;
-    void runGoogleSheetsBackup();
-  }, delayMs);
-  googleSheetsBackupTimer.unref();
-}
-
-async function requestGoogleSheetsBackup(reason: string) {
-  if (!googleSheetsBackupEnabled) return;
-  try {
-    await setBackupMetadata(
-      googleSheetsBackupPendingKey,
-      JSON.stringify({ requestedAt: new Date().toISOString(), reason }),
-    );
-    scheduleGoogleSheetsBackup();
-  } catch (error) {
-    console.error("Unable to queue Google Sheets backup", error);
-    scheduleGoogleSheetsBackup(10_000);
-  }
 }
 
 async function createAutomaticClosuresForDay(day: string) {
@@ -487,9 +289,6 @@ async function createAutomaticClosuresForDay(day: string) {
   } finally {
     client.release();
   }
-  if (created) {
-    void requestGoogleSheetsBackup(`cierres automáticos del ${day}`);
-  }
   return created;
 }
 
@@ -507,67 +306,6 @@ const automaticClosureTimer = setInterval(() => {
 automaticClosureTimer.unref();
 setTimeout(() => void runAutomaticClosureSweep(), 1_000).unref();
 
-async function runGoogleSheetsBackup() {
-  if (!googleSheetsBackupEnabled) return;
-  if (googleSheetsBackupRunning) return;
-  googleSheetsBackupRunning = true;
-  const client = await pool.connect();
-  let locked = false;
-  try {
-    const lockResult = await client.query(
-      "SELECT pg_try_advisory_lock(hashtextextended('google_sheets_backup',0)) AS locked",
-    );
-    locked = Boolean(lockResult.rows[0]?.locked);
-    if (!locked) return;
-
-    const pending = await client.query(
-      "SELECT value FROM app_metadata WHERE key=$1 LIMIT 1",
-      [googleSheetsBackupPendingKey],
-    );
-    if (!pending.rows[0]) return;
-
-    const snapshot = await readSnapshot(client as unknown as QueryClient);
-    await backupSnapshot(snapshot);
-    await setBackupMetadata(
-      googleSheetsBackupLastSuccessKey,
-      new Date().toISOString(),
-    );
-    await setBackupMetadata(googleSheetsBackupLastErrorKey, null);
-    await setBackupMetadata(googleSheetsBackupPendingKey, null);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Error desconocido";
-    console.error("Google Sheets backup failed", error);
-    await setBackupMetadata(
-      googleSheetsBackupLastErrorKey,
-      JSON.stringify({ failedAt: new Date().toISOString(), message }),
-    ).catch((metadataError) =>
-      console.error("Unable to record backup failure", metadataError),
-    );
-    scheduleGoogleSheetsBackup(60_000);
-  } finally {
-    if (locked) {
-      await client
-        .query(
-          "SELECT pg_advisory_unlock(hashtextextended('google_sheets_backup',0))",
-        )
-        .catch(() => undefined);
-    }
-    client.release();
-    googleSheetsBackupRunning = false;
-  }
-}
-
-router.use((req, res, next) => {
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
-    res.on("finish", () => {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        void requestGoogleSheetsBackup(`${req.method} ${req.path}`);
-      }
-    });
-  }
-  next();
-});
 
 function saleIdFromCanjeMovement(record: StoredRecord) {
   const id = value(record, "id");
@@ -593,106 +331,8 @@ function movementItemQuantity(record: StoredRecord, itemId: string) {
   return value(record, "itemId") === itemId ? quantity : 0;
 }
 
-async function reconcileInventoryFromMovements(client: QueryClient) {
-  const movementResult = await client.query(
-    `SELECT market_id,kind,item_id,quantity,data
-     FROM inventory_movements
-     WHERE kind IN ('AJUSTE_DEGUSTACION','DEGUSTACION','AJUSTE_CANJES','CANJE')
-     ORDER BY created_at`,
-  );
-  const inventoryResult = await client.query(
-    "SELECT market_id,tasting_stock,redemption_stock,data FROM inventory",
-  );
-  const inventoryByMarket = new Map(
-    inventoryResult.rows.map((row) => [String(row.market_id), row]),
-  );
-  const movementsByMarket = new Map<string, StoredRecord[]>();
-  for (const row of movementResult.rows) {
-    const marketId = String(row.market_id);
-    const source = isRecord(row.data) ? row.data : {};
-    // Promoter-owned stock is deducted from the user JSON record. These
-    // movements retain marketId for location history but must not mutate the
-    // legacy market inventory balance.
-    if (value(source, "promoterId")) continue;
-    const movement = {
-      ...source,
-      marketId,
-      kind: String(row.kind),
-      itemId:
-        row.item_id == null ? value(source, "itemId") : String(row.item_id),
-      quantity: Number(row.quantity) || 0,
-    };
-    const current = movementsByMarket.get(marketId) || [];
-    current.push(movement);
-    movementsByMarket.set(marketId, current);
-  }
-  const itemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
-  for (const [marketId, movements] of movementsByMarket) {
-    const current = inventoryByMarket.get(marketId);
-    const currentData = isRecord(current?.data) ? current.data : {};
-    const currentRedemption = isRecord(current?.redemption_stock)
-      ? current.redemption_stock
-      : {};
-    const tastingMovements = movements.filter(
-      (movement) =>
-        value(movement, "kind") === "AJUSTE_DEGUSTACION" ||
-        value(movement, "kind") === "DEGUSTACION",
-    );
-    const tastingStock = tastingMovements.length
-      ? Math.max(
-          0,
-          tastingMovements.reduce(
-            (total, movement) =>
-              total +
-              (value(movement, "kind") === "AJUSTE_DEGUSTACION"
-                ? numeric(movement, "quantity")
-                : -Math.max(0, numeric(movement, "quantity"))),
-            0,
-          ),
-        )
-      : Math.max(0, Number(current?.tasting_stock) || 0);
-    const redemptionStock = Object.fromEntries(
-      itemIds.map((itemId) => {
-        const itemMovements = movements.filter(
-          (movement) =>
-            (value(movement, "kind") === "AJUSTE_CANJES" ||
-              value(movement, "kind") === "CANJE") &&
-            movementItemQuantity(movement, itemId) !== 0,
-        );
-        const quantity = itemMovements.length
-          ? Math.max(
-              0,
-              itemMovements.reduce(
-                (total, movement) =>
-                  total +
-                  (value(movement, "kind") === "AJUSTE_CANJES"
-                    ? movementItemQuantity(movement, itemId)
-                    : -Math.max(0, movementItemQuantity(movement, itemId))),
-                0,
-              ),
-            )
-          : Math.max(0, Number(currentRedemption[itemId]) || 0);
-        return [itemId, quantity];
-      }),
-    );
-    const updatedAt = new Date().toISOString();
-    const inventoryData = {
-      ...currentData,
-      marketId,
-      tastingStock,
-      redemptionStock,
-      updatedAt,
-    };
-    await client.query(
-      `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (market_id) DO UPDATE SET tasting_stock=EXCLUDED.tasting_stock,
-       redemption_stock=EXCLUDED.redemption_stock,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
-      [marketId, tastingStock, redemptionStock, inventoryData, updatedAt],
-    );
-  }
-}
+// inventory e inventory_movements se conservan para trazabilidad histórica.
+// Ninguna reconciliación de saldo operativo se ejecuta contra esas tablas.
 
 async function upsertRecord(
   client: QueryClient,
@@ -748,16 +388,21 @@ async function upsertRecord(
       ? (existingByDni.rows[0].data as StoredRecord)
       : {};
     const remainsArchived =
-      existingUserData.sheetArchived === true && source.sheetArchived !== false;
+      (existingUserData.catalogArchived === true ||
+        existingUserData.sheetArchived === true) &&
+      source.catalogArchived !== false &&
+      source.sheetArchived !== false;
     const userData = remainsArchived
       ? {
           ...normalized,
           id: userId,
           status: "INACTIVO",
-          sheetArchived: true,
-          sheetArchivedAt: existingUserData.sheetArchivedAt,
+          catalogArchived: true,
+          catalogArchivedAt:
+            existingUserData.catalogArchivedAt ||
+            existingUserData.sheetArchivedAt,
         }
-      : { ...normalized, id: userId };
+      : { ...normalized, id: userId, catalogArchived: false };
     await client.query(
       `INSERT INTO users (id,dni,name,role,status,password_hash,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -1001,6 +646,7 @@ async function syncSnapshot(
       tombstones.rows.map((row) => `${row.collection}:${row.record_id}`),
     );
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
+      // inventory es histórico: nunca se acepta como fuente de saldo operativo.
       if (name === "inventory") continue;
       const records = Array.isArray(guardedIncoming[name])
         ? guardedIncoming[name]
@@ -1090,14 +736,6 @@ async function syncSnapshot(
     client.release();
   }
   return readSnapshot();
-}
-
-if (googleSheetsBackupEnabled) {
-  void requestGoogleSheetsBackup("inicio del servidor");
-  const googleSheetsBackupInterval = setInterval(() => {
-    void runGoogleSheetsBackup();
-  }, 60_000);
-  googleSheetsBackupInterval.unref();
 }
 
 async function authorizedTradeActor(req: Request) {
@@ -1593,14 +1231,9 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    await ensurePromoterStockBaseline().catch((error) => {
-      req.log.error(
-        { err: error },
-        "Unable to refresh promoter stock baseline",
-      );
-    });
     res.json({
-      storage: "replit-postgresql",
+      storage: "digitalocean-postgresql",
+      stockSource: "warehouses",
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
     });
@@ -1626,7 +1259,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       incomingRevision,
     );
     res.json({
-      storage: "replit-postgresql",
+      storage: "digitalocean-postgresql",
       syncedAt: new Date().toISOString(),
       catalogRevision: await readCatalogRevision(),
       snapshot,
@@ -1640,7 +1273,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
     const { assignments } = await readSnapshot();
-    res.json({ storage: "replit-postgresql", assignments });
+    res.json({ storage: "digitalocean-postgresql", assignments });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read assignments");
     res.status(500).json({ message: "No se pudieron leer las asignaciones." });
@@ -1663,7 +1296,7 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
       await readCatalogRevision(),
     );
     const { assignments } = await readSnapshot();
-    res.json({ storage: "replit-postgresql", assignment, assignments });
+    res.json({ storage: "digitalocean-postgresql", assignment, assignments });
   } catch (error) {
     req.log.error({ err: error }, "Unable to save assignment");
     res.status(500).json({ message: "No se pudo guardar la asignación." });
@@ -1682,7 +1315,7 @@ router.post(
       )
     ) {
       res.status(400).json({
-        message: "La hoja debe contener usuarios válidos con DNI de 8 dígitos.",
+        message: "El archivo debe contener usuarios válidos con DNI de 8 dígitos.",
       });
       return;
     }
@@ -1690,7 +1323,7 @@ router.post(
     if (new Set(dnis).size !== dnis.length) {
       res.status(400).json({
         message:
-          "La hoja contiene DNI repetidos. No se actualizó ningún usuario.",
+          "El archivo contiene DNI repetidos. No se actualizó ningún usuario.",
       });
       return;
     }
@@ -1704,28 +1337,28 @@ router.post(
       if (!revisionIsCurrent) {
         await client.query("ROLLBACK");
         res.status(409).json({
-          message: "La información cambió. Vuelve a pulsar Actualizar hoja.",
+          message: "La información cambió. Vuelve a cargar el archivo.",
         });
         return;
       }
       for (const user of users) {
         await upsertRecord(client as unknown as QueryClient, "users", {
           ...user,
-          sheetArchived: false,
+          catalogArchived: false,
         });
       }
       const archivedAt = new Date().toISOString();
       await client.query(
         `UPDATE users
        SET status='INACTIVO',
-           data=data || jsonb_build_object('status','INACTIVO','sheetArchived',true,'sheetArchivedAt',$2::text),
+           data=(data - 'sheetArchived' - 'sheetArchivedAt') ||
+                jsonb_build_object('status','INACTIVO','catalogArchived',true,'catalogArchivedAt',$2::text),
            record_updated_at=$2,
            updated_at=now()
        WHERE NOT (dni = ANY($1::text[]))`,
         [dnis, archivedAt],
       );
       await client.query("COMMIT");
-      void requestGoogleSheetsBackup("sincronización autoritativa de usuarios");
       res.json({ synced: dnis.length, snapshot: await readSnapshot() });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -1735,14 +1368,14 @@ router.post(
       );
       res
         .status(500)
-        .json({ message: "No se pudo sincronizar la hoja de Promotores." });
+        .json({ message: "No se pudo sincronizar el archivo de Promotores." });
     } finally {
       client.release();
     }
   },
 );
 
-// Administrative record corrections keep stable IDs and reconcile personal stock.
+// Administrative record corrections keep stable IDs. Legacy movement edits never mutate operational stock.
 router.all(
   "/app-storage/admin/records/:collection/:id",
   async (req, res): Promise<void> => {
@@ -1973,55 +1606,11 @@ router.all(
         const saleId = saleIdFromCanjeMovement(old);
         if (saleId)
           throw new Error(
-            "Este canje está asociado a una venta. Edítalo desde Ventas para mantener sus evidencias e inventario.",
+            "Este canje está asociado a una venta. Edítalo desde Ventas para mantener evidencias y stock de Almacén.",
           );
-        for (const [record, direction] of [
-          [old, -1],
-          ...(deleting ? [] : [[next, 1]]),
-        ] as [StoredRecord, number][]) {
-          const owner = value(record, "promoterId") || value(record, "actorId");
-          const found = await db.query(
-            "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-            [owner],
-          );
-          if (!found.rows.length)
-            throw new Error("No se encontró al propietario del stock.");
-          const person = found.rows[0].data;
-          const kind = value(record, "kind");
-          const sign = kind.startsWith("AJUSTE_") ? direction : -direction;
-          if (kind.includes("DEGUSTACION"))
-            person.tastingStock =
-              Number(person.tastingStock || 0) + sign * Number(record.quantity);
-          else {
-            const stock = { ...(person.redemptionStock || {}) };
-            for (const item of ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"])
-              stock[item] =
-                Number(stock[item] || 0) +
-                sign * movementItemQuantity(record, item);
-            person.redemptionStock = stock;
-          }
-          // Intermediate reversal may be negative; validate final balances below.
-          await db.query(
-            "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-            [owner, { ...person, updatedAt: next.updatedAt }, next.updatedAt],
-          );
-        }
-        for (const owner of new Set([
-          value(old, "promoterId") || value(old, "actorId"),
-          value(next, "promoterId") || value(next, "actorId"),
-        ])) {
-          const data = (
-            await db.query("SELECT data FROM users WHERE id=$1", [owner])
-          ).rows[0]?.data;
-          if (
-            data &&
-            (Number(data.tastingStock) < 0 ||
-              Object.values(data.redemptionStock || {}).some(
-                (x) => Number(x) < 0,
-              ))
-          )
-            throw new Error("Stock insuficiente para aplicar esta corrección.");
-        }
+        // inventory_movements es histórico/eventos. El saldo operativo no se
+        // recalcula aquí: cualquier consumo/restauración real ocurre en
+        // warehouse_movements mediante la venta o cierre de sesión.
       }
       if (deleting) {
         await db.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
@@ -2965,65 +2554,8 @@ router.delete(
           data: StoredRecord;
         }>;
       };
-      const movementsByMarket = new Map<string, typeof movementResult.rows>();
-      for (const movement of movementResult.rows) {
-        const current = movementsByMarket.get(movement.market_id) || [];
-        current.push(movement);
-        movementsByMarket.set(movement.market_id, current);
-      }
-      for (const [marketId, saleMovements] of movementsByMarket) {
-        const legacySaleMovements = saleMovements.filter(
-          (movement) =>
-            !value(isRecord(movement.data) ? movement.data : {}, "promoterId"),
-        );
-        if (!legacySaleMovements.length) continue;
-        const inventoryResult = (await client.query(
-          "SELECT redemption_stock,data FROM inventory WHERE market_id=$1 FOR UPDATE",
-          [marketId],
-        )) as unknown as {
-          rows: Array<{
-            redemption_stock: Record<string, number>;
-            data: StoredRecord;
-          }>;
-        };
-        const current = inventoryResult.rows[0];
-        if (!current) continue;
-        const redemptionStock = { ...(current.redemption_stock || {}) };
-        for (const movement of legacySaleMovements) {
-          const source = isRecord(movement.data) ? movement.data : {};
-          const components = isRecord(source.canjeComponents)
-            ? source.canjeComponents
-            : null;
-          if (components) {
-            for (const [itemId, componentQuantity] of Object.entries(
-              components,
-            )) {
-              redemptionStock[itemId] =
-                Math.max(0, Number(redemptionStock[itemId]) || 0) +
-                Math.max(0, Number(componentQuantity) || 0) *
-                  Math.max(0, Number(movement.quantity) || 0);
-            }
-          } else {
-            const itemId = movement.item_id || value(source, "itemId");
-            if (itemId) {
-              redemptionStock[itemId] =
-                Math.max(0, Number(redemptionStock[itemId]) || 0) +
-                Math.max(0, Number(movement.quantity) || 0);
-            }
-          }
-        }
-        const updatedAt = new Date().toISOString();
-        const inventoryData = {
-          ...(current.data || {}),
-          redemptionStock,
-          updatedAt,
-        };
-        await client.query(
-          "UPDATE inventory SET redemption_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
-          [marketId, redemptionStock, inventoryData, updatedAt],
-        );
-      }
-      await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
+      // inventory es histórico: no se recalcula ni restaura saldo legacy al borrar una venta.
+            await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
       await client.query(
         "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
         [movementPrefix],
@@ -3061,247 +2593,11 @@ router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
-  if (Array.isArray(req.body?.canjes)) {
-    return void res.status(409).json({ message: "El stock ya no se asigna al promotor. Realiza la recarga desde el módulo Almacén del mercado correspondiente." });
-    const inputs: StoredRecord[] = (req.body.canjes as unknown[]).filter(
-      (input): input is StoredRecord => isRecord(input),
-    );
-    const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
-    const promoterId = inputs.length ? value(inputs[0], "promoterId") : "";
-    if (
-      !inputs.length ||
-      inputs.length !== req.body.canjes.length ||
-      !promoterId ||
-      inputs.some((input) => {
-        const kind = value(input, "kind");
-        const validKind =
-          kind === "AJUSTE_CANJES"
-            ? validItemIds.has(value(input, "itemId"))
-            : kind === "AJUSTE_DEGUSTACION" &&
-              value(input, "degustacionProductId") === "PANETON";
-        return (
-          value(input, "promoterId") !== promoterId ||
-          !validKind ||
-          numeric(input, "quantity") <= 0
-        );
-      })
-    ) {
-      res.status(400).json({
-        message:
-          "El abastecimiento requiere un promotor y cantidades válidas para los artículos.",
-      });
-      return;
-    }
-    const canjes: StoredRecord[] = inputs.map((input) => ({
-      id:
-        value(input, "id") ||
-        `CANJE-${Date.now()}-${value(input, "itemId")}-${randomUUID().slice(0, 8)}`,
-      marketId: value(input, "marketId") || `PERSONAL:${promoterId}`,
-      kind: value(input, "kind") || "AJUSTE_CANJES",
-      itemId: value(input, "itemId") || undefined,
-      degustacionProductId: value(input, "degustacionProductId") || undefined,
-      degustacionProductLabel:
-        value(input, "degustacionProductLabel") || undefined,
-      promoterId,
-      quantity: Math.floor(numeric(input, "quantity")),
-      actorId: value(input, "actorId") || "ADMIN",
-      actorName: value(input, "actorName") || "Analista",
-      date: value(input, "date") || new Date().toISOString(),
-      status: "PENDIENTE",
-    }));
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      await lockInventoryLedger(client as unknown as QueryClient);
-      const userResult = (await client.query(
-        "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-        [promoterId],
-      )) as unknown as { rows: Array<{ data: StoredRecord }> };
-      const current = userResult.rows[0];
-      if (!current) {
-        await client.query("ROLLBACK");
-        res
-          .status(404)
-          .json({ message: "El promotor seleccionado no existe." });
-        return;
-      }
-      const currentStock = isRecord(current.data.redemptionStock)
-        ? current.data.redemptionStock
-        : {};
-      const redemptionStock = {
-        AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
-        BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
-        MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
-        SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
-      };
-      let tastingStock = Math.max(0, Number(current.data.tastingStock) || 0);
-      for (const canje of canjes) {
-        if (value(canje, "kind") === "AJUSTE_DEGUSTACION") {
-          tastingStock += Math.floor(numeric(canje, "quantity"));
-        } else {
-          const itemId = value(canje, "itemId") as keyof typeof redemptionStock;
-          redemptionStock[itemId] += Math.floor(numeric(canje, "quantity"));
-        }
-        await upsertRecord(
-          client as unknown as QueryClient,
-          "movements",
-          canje,
-        );
-      }
-      const updatedAt = canjes[canjes.length - 1].date;
-      await client.query(
-        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-        [
-          promoterId,
-          { ...current.data, tastingStock, redemptionStock, updatedAt },
-          updatedAt,
-        ],
-      );
-      await client.query("COMMIT");
-      res.status(201).json({ canjes, snapshot: await readSnapshot() });
-      return;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      req.log.error({ err: error }, "Unable to create grouped canjes");
-      res.status(500).json({ message: "No se pudo cargar el stock agrupado." });
-    } finally {
-      client.release();
-    }
-    return;
-  }
-  const input = req.body?.canje;
-  const personalStock = isRecord(input) && Boolean(value(input, "promoterId"));
-  if (personalStock) {
-    return void res.status(409).json({ message: "El stock ya no se asigna al promotor. Realiza la recarga desde el módulo Almacén del mercado correspondiente." });
-  }
-  const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
-  if (
-    !isRecord(input) ||
-    numeric(input, "quantity") <= 0 ||
-    (personalStock
-      ? !validItemIds.has(value(input, "itemId"))
-      : !value(input, "marketId") ||
-        (!value(input, "itemId") && !value(input, "canjeProductId")))
-  ) {
-    res.status(400).json({
-      message:
-        "El abastecimiento requiere promotor, artículo y cantidad mayor a cero.",
-    });
-    return;
-  }
-  const canje: StoredRecord = {
-    id: value(input, "id") || `CANJE-${Date.now()}-${randomUUID().slice(0, 8)}`,
-    marketId:
-      value(input, "marketId") || `PERSONAL:${value(input, "promoterId")}`,
-    kind: "AJUSTE_CANJES",
-    itemId: value(input, "itemId") || undefined,
-    promoterId: value(input, "promoterId") || undefined,
-    canjeProductId: value(input, "canjeProductId") || undefined,
-    canjeProductLabel: value(input, "canjeProductLabel") || undefined,
-    canjeComponents: isRecord(input.canjeComponents)
-      ? input.canjeComponents
-      : undefined,
-    quantity: Math.floor(numeric(input, "quantity")),
-    actorId: value(input, "actorId") || "ADMIN",
-    actorName: value(input, "actorName") || "Analista",
-    date: value(input, "date") || new Date().toISOString(),
-    status: "PENDIENTE",
-  };
-  const components = isRecord(canje.canjeComponents)
-    ? canje.canjeComponents
-    : {};
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await lockInventoryLedger(client as unknown as QueryClient);
-    if (personalStock) {
-      const userResult = (await client.query(
-        "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-        [canje.promoterId],
-      )) as unknown as { rows: Array<{ data: StoredRecord }> };
-      const current = userResult.rows[0];
-      if (!current) {
-        await client.query("ROLLBACK");
-        res
-          .status(404)
-          .json({ message: "El promotor seleccionado no existe." });
-        return;
-      }
-      const currentStock = isRecord(current.data.redemptionStock)
-        ? current.data.redemptionStock
-        : {};
-      const redemptionStock = {
-        AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
-        BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
-        MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
-        SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
-      };
-      const itemId = value(canje, "itemId") as keyof typeof redemptionStock;
-      redemptionStock[itemId] += Math.floor(numeric(canje, "quantity"));
-      const updatedAt = value(canje, "date");
-      const userData = { ...current.data, redemptionStock, updatedAt };
-      await upsertRecord(client as unknown as QueryClient, "movements", canje);
-      await client.query(
-        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-        [canje.promoterId, userData, updatedAt],
-      );
-      await client.query("COMMIT");
-      res.status(201).json({ canje, snapshot: await readSnapshot() });
-      return;
-    }
-    await upsertRecord(client as unknown as QueryClient, "movements", canje);
-    const inventoryResult = (await client.query(
-      "SELECT tasting_stock, redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
-      [canje.marketId],
-    )) as unknown as {
-      rows: Array<{
-        tasting_stock: number;
-        redemption_stock: Record<string, number>;
-        data: StoredRecord;
-      }>;
-    };
-    const current = inventoryResult.rows[0];
-    const redemptionStock = {
-      AVENA: Math.max(0, Number(current?.redemption_stock?.AVENA) || 0),
-      BATEA: Math.max(0, Number(current?.redemption_stock?.BATEA) || 0),
-      MANDIL: Math.max(0, Number(current?.redemption_stock?.MANDIL) || 0),
-      SPAGHETTI: Math.max(0, Number(current?.redemption_stock?.SPAGHETTI) || 0),
-    };
-    for (const itemId of Object.keys(redemptionStock)) {
-      redemptionStock[itemId as keyof typeof redemptionStock] +=
-        Math.max(0, Number(components[itemId]) || 0) *
-        Math.floor(numeric(canje, "quantity"));
-    }
-    const inventoryRecord: StoredRecord = {
-      ...(current?.data || {}),
-      marketId: canje.marketId,
-      tastingStock: Math.max(0, Number(current?.tasting_stock) || 0),
-      redemptionStock,
-      updatedAt: canje.date,
-    };
-    await client.query(
-      `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (market_id) DO UPDATE SET redemption_stock=EXCLUDED.redemption_stock,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
-      [
-        canje.marketId,
-        inventoryRecord.tastingStock,
-        redemptionStock,
-        inventoryRecord,
-        canje.date,
-      ],
-    );
-    await client.query("COMMIT");
-    res.status(201).json({ canje, snapshot: await readSnapshot() });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    req.log.error({ err: error }, "Unable to create canje");
-    res.status(500).json({ message: "No se pudo crear el canje." });
-  } finally {
-    client.release();
-  }
+router.post("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
+  res.status(409).json({
+    message:
+      "El stock ya no se asigna a promotores. Recarga el stock desde Almacén; los canjes se generan únicamente desde Ventas.",
+  });
 });
 
 router.delete(
@@ -3344,136 +2640,8 @@ router.delete(
       if (source === "sale") {
         await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
       }
-      if (source === "movement") {
-        const result = (await client.query(
-          "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
-          [id],
-        )) as unknown as {
-          rows: Array<{
-            market_id: string;
-            quantity: number;
-            data: StoredRecord;
-          }>;
-        };
-        const movement = result.rows[0];
-        const productId = movement?.data?.canjeProductId;
-        const promoterId = value(movement?.data || {}, "promoterId");
-        const personalItemId = value(movement?.data || {}, "itemId");
-        const components = isRecord(movement?.data?.canjeComponents)
-          ? movement.data.canjeComponents
-          : {};
-        if (
-          movement &&
-          value(movement.data, "kind") === "AJUSTE_DEGUSTACION" &&
-          promoterId
-        ) {
-          const userResult = (await client.query(
-            "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-            [promoterId],
-          )) as unknown as { rows: Array<{ data: StoredRecord }> };
-          const currentUser = userResult.rows[0];
-          if (currentUser) {
-            const tastingStock =
-              Math.max(0, Number(currentUser.data.tastingStock) || 0) -
-              Math.max(0, Number(movement.quantity) || 0);
-            const updatedAt = new Date().toISOString();
-            await client.query(
-              "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-              [
-                promoterId,
-                { ...currentUser.data, tastingStock, updatedAt },
-                updatedAt,
-              ],
-            );
-          }
-        } else if (
-          movement &&
-          value(movement.data, "kind") === "AJUSTE_CANJES" &&
-          promoterId &&
-          personalItemId
-        ) {
-          const userResult = (await client.query(
-            "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-            [promoterId],
-          )) as unknown as { rows: Array<{ data: StoredRecord }> };
-          const currentUser = userResult.rows[0];
-          if (currentUser) {
-            const currentStock = isRecord(currentUser.data.redemptionStock)
-              ? currentUser.data.redemptionStock
-              : {};
-            const redemptionStock = {
-              AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
-              BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
-              MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
-              SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
-            };
-            const itemId = personalItemId as keyof typeof redemptionStock;
-            if (itemId in redemptionStock)
-              redemptionStock[itemId] = Math.max(
-                0,
-                redemptionStock[itemId] -
-                  Math.max(0, Number(movement.quantity) || 0),
-              );
-            const updatedAt = new Date().toISOString();
-            await client.query(
-              "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-              [
-                promoterId,
-                { ...currentUser.data, redemptionStock, updatedAt },
-                updatedAt,
-              ],
-            );
-          }
-        } else if (
-          movement &&
-          value(movement.data, "kind") === "AJUSTE_CANJES" &&
-          productId
-        ) {
-          const inventoryResult = (await client.query(
-            "SELECT redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
-            [movement.market_id],
-          )) as unknown as {
-            rows: Array<{
-              redemption_stock: Record<string, number>;
-              data: StoredRecord;
-            }>;
-          };
-          const current = inventoryResult.rows[0];
-          const redemptionStock = {
-            AVENA: Math.max(0, Number(current?.redemption_stock?.AVENA) || 0),
-            BATEA: Math.max(0, Number(current?.redemption_stock?.BATEA) || 0),
-            MANDIL: Math.max(0, Number(current?.redemption_stock?.MANDIL) || 0),
-            SPAGHETTI: Math.max(
-              0,
-              Number(current?.redemption_stock?.SPAGHETTI) || 0,
-            ),
-          };
-          for (const itemId of Object.keys(redemptionStock)) {
-            redemptionStock[itemId as keyof typeof redemptionStock] = Math.max(
-              0,
-              redemptionStock[itemId as keyof typeof redemptionStock] -
-                Math.max(0, Number(components[itemId]) || 0) *
-                  Math.max(0, Number(movement.quantity) || 0),
-            );
-          }
-          if (current) {
-            const inventoryRecord = {
-              ...(current.data || {}),
-              redemptionStock,
-              updatedAt: new Date().toISOString(),
-            };
-            await client.query(
-              "UPDATE inventory SET redemption_stock=$2,data=$3,record_updated_at=$4,updated_at=now() WHERE market_id=$1",
-              [
-                movement.market_id,
-                redemptionStock,
-                inventoryRecord,
-                inventoryRecord.updatedAt,
-              ],
-            );
-          }
-        }
-      }
+      // Si el origen es movement, se elimina únicamente el evento histórico.
+      // El saldo operativo jamás se calcula desde users.data ni inventory.
       if (source === "sale") {
         await client.query(
           `INSERT INTO app_storage_tombstones (collection,record_id,deleted_at)
@@ -3530,6 +2698,7 @@ router.delete(
         return;
       }
       if (movement && movementKind === "DEGUSTACION") {
+        const updatedAt = new Date().toISOString();
         const promoterId =
           value(movement.data, "promoterId") || value(movement.data, "actorId") || "ADMIN";
         await restoreWarehouseStockMovements(client as unknown as QueryClient, `DEG:${id}`, promoterId);
@@ -3564,57 +2733,11 @@ router.delete(
   },
 );
 
-router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
-  if (req.body?.confirmation !== "LIMPIAR_MERCADOS_CLIENTES_CANJES") {
-    res.status(400).json({ message: "Confirmación inválida." });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended('catalog_revision',0))",
-    );
-    await lockInventoryLedger(client as unknown as QueryClient);
-    await client.query("DELETE FROM sales");
-    await client.query("DELETE FROM app_storage_tombstones");
-    await client.query("DELETE FROM attendance");
-    await client.query("DELETE FROM session_closures");
-    await client.query("DELETE FROM inventory_movements");
-    await client.query("DELETE FROM clients");
-    await client.query("DELETE FROM inventory");
-    await client.query("DELETE FROM markets");
-    await client.query("DELETE FROM assignments");
-    await client.query("DELETE FROM users WHERE role <> 'ANALISTA'");
-    const catalogRevision = randomUUID();
-    await client.query(
-      `INSERT INTO app_metadata (key,value) VALUES ($1,$2)
-       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
-      ["catalog_revision", catalogRevision],
-    );
-    await client.query("COMMIT");
-    res.json({
-      deleted: [
-        "markets",
-        "clients",
-        "sales",
-        "attendance",
-        "session_closures",
-        "inventory",
-        "inventory_movements",
-        "assignments",
-        "non_analyst_users",
-      ],
-      catalogRevision,
-      snapshot: await readSnapshot(),
-    });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    req.log.error({ err: error }, "Unable to clean catalogs");
-    res.status(500).json({ message: "No se pudo limpiar la información." });
-  } finally {
-    client.release();
-  }
+router.post("/app-storage/admin/cleanup", async (_req, res): Promise<void> => {
+  res.status(409).json({
+    message:
+      "Limpieza masiva deshabilitada para proteger la información de producción. Usa edición/eliminación individual con validación de relaciones.",
+  });
 });
 
 router.post("/app-storage/login", async (req, res): Promise<void> => {
@@ -3625,12 +2748,6 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
     return;
   }
   try {
-    await ensurePromoterStockBaseline().catch((error) => {
-      req.log.error(
-        { err: error },
-        "Unable to refresh promoter stock baseline before login",
-      );
-    });
     const result = await pool.query(
       "SELECT data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
       [dni],
