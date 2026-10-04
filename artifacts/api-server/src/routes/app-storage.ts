@@ -7,24 +7,9 @@ import {
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
 import { Router, type IRouter, type Request } from "express";
-import { backupSnapshot } from "./google-sheets-storage";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
-const googleSheetsBackupEnabled =
-  process.env.GOOGLE_SHEETS_BACKUP_ENABLED === "true";
-const googleSheetsBackupPendingKey = "google_sheets_backup_pending";
-const googleSheetsBackupLastSuccessKey = "google_sheets_backup_last_success";
-const googleSheetsBackupLastErrorKey = "google_sheets_backup_last_error";
-const promoterStockBaselineKey = "promoter_stock_baseline_v3";
-const promoterRoles = ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"];
-const promoterStockBaseline = {
-  tastingStock: 50,
-  redemptionStock: { AVENA: 120, BATEA: 50, MANDIL: 50, SPAGHETTI: 100 },
-};
-const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
-let googleSheetsBackupTimer: NodeJS.Timeout | null = null;
-let googleSheetsBackupRunning = false;
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
 
@@ -388,42 +373,6 @@ async function readSnapshot(
   return snapshot;
 }
 
-async function setBackupMetadata(key: string, valueToStore: string | null) {
-  if (valueToStore === null) {
-    await pool.query("DELETE FROM app_metadata WHERE key=$1", [key]);
-    return;
-  }
-  await pool.query(
-    `INSERT INTO app_metadata (key,value)
-     VALUES ($1,$2)
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
-    [key, valueToStore],
-  );
-}
-
-function scheduleGoogleSheetsBackup(delayMs = 250) {
-  if (googleSheetsBackupTimer) return;
-  googleSheetsBackupTimer = setTimeout(() => {
-    googleSheetsBackupTimer = null;
-    void runGoogleSheetsBackup();
-  }, delayMs);
-  googleSheetsBackupTimer.unref();
-}
-
-async function requestGoogleSheetsBackup(reason: string) {
-  if (!googleSheetsBackupEnabled) return;
-  try {
-    await setBackupMetadata(
-      googleSheetsBackupPendingKey,
-      JSON.stringify({ requestedAt: new Date().toISOString(), reason }),
-    );
-    scheduleGoogleSheetsBackup();
-  } catch (error) {
-    console.error("Unable to queue Google Sheets backup", error);
-    scheduleGoogleSheetsBackup(10_000);
-  }
-}
-
 async function createAutomaticClosuresForDay(day: string) {
   const bounds = campaignDayBounds(day);
   const client = await pool.connect();
@@ -487,9 +436,6 @@ async function createAutomaticClosuresForDay(day: string) {
   } finally {
     client.release();
   }
-  if (created) {
-    void requestGoogleSheetsBackup(`cierres automáticos del ${day}`);
-  }
   return created;
 }
 
@@ -506,68 +452,6 @@ const automaticClosureTimer = setInterval(() => {
 }, automaticClosureIntervalMs);
 automaticClosureTimer.unref();
 setTimeout(() => void runAutomaticClosureSweep(), 1_000).unref();
-
-async function runGoogleSheetsBackup() {
-  if (!googleSheetsBackupEnabled) return;
-  if (googleSheetsBackupRunning) return;
-  googleSheetsBackupRunning = true;
-  const client = await pool.connect();
-  let locked = false;
-  try {
-    const lockResult = await client.query(
-      "SELECT pg_try_advisory_lock(hashtextextended('google_sheets_backup',0)) AS locked",
-    );
-    locked = Boolean(lockResult.rows[0]?.locked);
-    if (!locked) return;
-
-    const pending = await client.query(
-      "SELECT value FROM app_metadata WHERE key=$1 LIMIT 1",
-      [googleSheetsBackupPendingKey],
-    );
-    if (!pending.rows[0]) return;
-
-    const snapshot = await readSnapshot(client as unknown as QueryClient);
-    await backupSnapshot(snapshot);
-    await setBackupMetadata(
-      googleSheetsBackupLastSuccessKey,
-      new Date().toISOString(),
-    );
-    await setBackupMetadata(googleSheetsBackupLastErrorKey, null);
-    await setBackupMetadata(googleSheetsBackupPendingKey, null);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Error desconocido";
-    console.error("Google Sheets backup failed", error);
-    await setBackupMetadata(
-      googleSheetsBackupLastErrorKey,
-      JSON.stringify({ failedAt: new Date().toISOString(), message }),
-    ).catch((metadataError) =>
-      console.error("Unable to record backup failure", metadataError),
-    );
-    scheduleGoogleSheetsBackup(60_000);
-  } finally {
-    if (locked) {
-      await client
-        .query(
-          "SELECT pg_advisory_unlock(hashtextextended('google_sheets_backup',0))",
-        )
-        .catch(() => undefined);
-    }
-    client.release();
-    googleSheetsBackupRunning = false;
-  }
-}
-
-router.use((req, res, next) => {
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
-    res.on("finish", () => {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        void requestGoogleSheetsBackup(`${req.method} ${req.path}`);
-      }
-    });
-  }
-  next();
-});
 
 function saleIdFromCanjeMovement(record: StoredRecord) {
   const id = value(record, "id");
@@ -694,6 +578,159 @@ async function reconcileInventoryFromMovements(client: QueryClient) {
   }
 }
 
+
+function normalizeCatalogText(input: unknown) {
+  return String(input ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+async function resolveCatalogProduct(
+  client: QueryClient,
+  key: string,
+  fallbackProduct?: string,
+) {
+  const wanted = normalizeCatalogText(fallbackProduct || key);
+  const brandKey = normalizeCatalogText(key);
+  const preferredByBrand: Record<string, string> = {
+    costa: "paneton costa 800 gr",
+    todinno: "paneton todinno todinnito",
+    pasqualino: "pasqualino 800 gr",
+  };
+  const result = await client.query(
+    "SELECT sku,product,data FROM product_prices WHERE sku=$1 OR lower(product)=lower($2) OR lower(COALESCE(data->>'brand',''))=lower($3)",
+    [key, fallbackProduct || key, key],
+  );
+  const rows = result.rows;
+  if (!rows.length) return null;
+  return (
+    rows.find((row) => String(row.sku) === key) ||
+    rows.find((row) => normalizeCatalogText(row.product) === wanted) ||
+    rows.find(
+      (row) =>
+        preferredByBrand[brandKey] &&
+        normalizeCatalogText(row.product) === preferredByBrand[brandKey],
+    ) ||
+    rows[0]
+  );
+}
+
+async function syncSaleItems(client: QueryClient, saleId: string) {
+  const result = await client.query(
+    "SELECT id,mode,units,amount_soles,data FROM sales WHERE id=$1 LIMIT 1",
+    [saleId],
+  );
+  const row = result.rows[0];
+  if (!row) return;
+  const source = isRecord(row.data) ? row.data : {};
+  const lines: Array<{ key: string; product?: string; units: number; unitPrice: number; presentation?: string }> = [];
+  const planchaLines = Array.isArray(source.planchaLines) ? source.planchaLines : [];
+  if (planchaLines.length) {
+    for (const raw of planchaLines) {
+      if (!isRecord(raw)) continue;
+      const units = Math.max(0, Number(raw.units) || 0);
+      if (!units) continue;
+      lines.push({
+        key: value(raw, "sku") || value(raw, "product"),
+        product: value(raw, "product") || undefined,
+        units,
+        unitPrice: Math.max(0, Number(raw.unitPrice) || 0),
+        presentation: value(raw, "presentation") || undefined,
+      });
+    }
+  } else if (String(row.mode) === "PLANCHAS" && isRecord(source.mix)) {
+    for (const [key, rawUnits] of Object.entries(source.mix)) {
+      const units = Math.max(0, Number(rawUnits) || 0);
+      if (!units) continue;
+      const prices = isRecord(source.unitPrices) ? source.unitPrices : {};
+      lines.push({ key, units, unitPrice: Math.max(0, Number(prices[key]) || 0) });
+    }
+  } else {
+    const prices = isRecord(source.unitPrices) ? source.unitPrices : {};
+    const key = Object.keys(prices)[0] || Object.keys(isRecord(source.mix) ? source.mix : {})[0] || "";
+    if (key) {
+      const units = Math.max(0, Number(row.units) || 0);
+      lines.push({
+        key,
+        units,
+        unitPrice: Math.max(0, Number(prices[key]) || (units ? Number(row.amount_soles) / units : 0)),
+        presentation: value(source, "presentation") || undefined,
+      });
+    }
+  }
+  await client.query("DELETE FROM sale_items WHERE sale_id=$1", [saleId]);
+  let lineNo = 0;
+  const totalUnits = Math.max(0, Number(row.units) || 0);
+  for (const line of lines) {
+    const catalog = await resolveCatalogProduct(client, line.key, line.product);
+    const catalogData = isRecord(catalog?.data) ? catalog.data : {};
+    const productSku = catalog ? String(catalog.sku) : null;
+    const productName = catalog ? String(catalog.product) : line.product || line.key;
+    const brand = catalog ? value(catalogData, "brand") : line.key;
+    const presentation =
+      line.presentation || value(catalogData, "presentation") || value(source, "presentation") || null;
+    const amount =
+      line.unitPrice > 0
+        ? line.units * line.unitPrice
+        : totalUnits > 0
+          ? Number(row.amount_soles) * (line.units / totalUnits)
+          : 0;
+    lineNo += 1;
+    const itemData = {
+      saleId,
+      lineNo,
+      sourceKey: line.key,
+      productSku,
+      productName,
+      brand,
+      presentation,
+      units: line.units,
+      unitPrice: line.unitPrice,
+      amountSoles: amount,
+    };
+    await client.query(
+      `INSERT INTO sale_items
+        (sale_id,line_no,product_sku,product_name,brand,presentation,units,unit_price,amount_soles,data)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       ON CONFLICT (sale_id,line_no) DO UPDATE SET
+         product_sku=EXCLUDED.product_sku,product_name=EXCLUDED.product_name,
+         brand=EXCLUDED.brand,presentation=EXCLUDED.presentation,units=EXCLUDED.units,
+         unit_price=EXCLUDED.unit_price,amount_soles=EXCLUDED.amount_soles,data=EXCLUDED.data,
+         updated_at=now()`,
+      [saleId,lineNo,productSku,productName,brand,presentation,line.units,line.unitPrice,amount,itemData],
+    );
+  }
+}
+
+let saleItemsBackfillPromise: Promise<void> | null = null;
+function ensureSaleItemsBackfill() {
+  if (saleItemsBackfillPromise) return saleItemsBackfillPromise;
+  saleItemsBackfillPromise = (async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('sale_items_backfill',0))");
+      const missing = await client.query(
+        `SELECT s.id FROM sales s
+         WHERE NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)
+         ORDER BY s.created_at`,
+      );
+      for (const row of missing.rows) await syncSaleItems(client as unknown as QueryClient, String(row.id));
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      saleItemsBackfillPromise = null;
+      throw error;
+    } finally {
+      client.release();
+    }
+  })();
+  return saleItemsBackfillPromise;
+}
+
 async function upsertRecord(
   client: QueryClient,
   name: CollectionName,
@@ -814,6 +851,7 @@ async function upsertRecord(
         updated,
       ],
     );
+    await syncSaleItems(client, key);
   } else if (name === "attendance") {
     await client.query(
       `INSERT INTO attendance (id,promoter_id,client_id,market_id,event_type,event_date,status,photo,data,record_updated_at)
@@ -1092,13 +1130,6 @@ async function syncSnapshot(
   return readSnapshot();
 }
 
-if (googleSheetsBackupEnabled) {
-  void requestGoogleSheetsBackup("inicio del servidor");
-  const googleSheetsBackupInterval = setInterval(() => {
-    void runGoogleSheetsBackup();
-  }, 60_000);
-  googleSheetsBackupInterval.unref();
-}
 
 async function authorizedTradeActor(req: Request) {
   const dni = req.get("x-admin-dni") || "";
@@ -1122,6 +1153,48 @@ async function authorizedTradeActor(req: Request) {
 async function authorizedWarehouseActor(req: Request) {
   return authorizedTradeActor(req);
 }
+
+router.get("/app-storage/integrity-audit", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) {
+    res.status(403).json({ message: "Solo Admin o Analista puede ejecutar la auditoría." });
+    return;
+  }
+  try {
+    const checks = [
+      ["sales_without_promoter", "SELECT count(*)::int AS count FROM sales s LEFT JOIN users u ON u.id=s.promoter_id WHERE u.id IS NULL"],
+      ["sales_without_client", "SELECT count(*)::int AS count FROM sales s LEFT JOIN clients c ON c.id=s.client_id WHERE c.id IS NULL"],
+      ["sales_without_market", "SELECT count(*)::int AS count FROM sales s LEFT JOIN markets m ON m.id=s.market_id WHERE m.id IS NULL"],
+      ["clients_without_market", "SELECT count(*)::int AS count FROM clients c LEFT JOIN markets m ON m.id=c.market_id WHERE m.id IS NULL"],
+      ["attendance_without_promoter", "SELECT count(*)::int AS count FROM attendance a LEFT JOIN users u ON u.id=a.promoter_id WHERE u.id IS NULL"],
+      ["attendance_without_client", "SELECT count(*)::int AS count FROM attendance a LEFT JOIN clients c ON c.id=a.client_id WHERE c.id IS NULL"],
+      ["attendance_without_market", "SELECT count(*)::int AS count FROM attendance a LEFT JOIN markets m ON m.id=a.market_id WHERE m.id IS NULL"],
+      ["closures_without_promoter", "SELECT count(*)::int AS count FROM session_closures s LEFT JOIN users u ON u.id=s.promoter_id WHERE u.id IS NULL"],
+      ["closures_without_market", "SELECT count(*)::int AS count FROM session_closures s LEFT JOIN markets m ON m.id=s.market_id WHERE m.id IS NULL"],
+      ["warehouse_movements_without_warehouse", "SELECT count(*)::int AS count FROM warehouse_movements wm LEFT JOIN warehouses w ON w.id=wm.warehouse_id WHERE w.id IS NULL"],
+      ["markets_without_valid_warehouse", "SELECT count(*)::int AS count FROM markets m WHERE COALESCE(m.data->>'warehouseId','')<>'' AND NOT EXISTS (SELECT 1 FROM warehouses w WHERE w.id=m.data->>'warehouseId')"],
+      ["sale_items_unmapped", "SELECT count(*)::int AS count FROM sale_items WHERE product_sku IS NULL"],
+      ["sales_without_sale_items", "SELECT count(*)::int AS count FROM sales s WHERE NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)"]
+    ] as const;
+    const results: Record<string, number> = {};
+    for (const [name, sql] of checks) {
+      const result = await pool.query(sql);
+      results[name] = Number(result.rows[0]?.count || 0);
+    }
+    const totalIssues = Object.values(results).reduce((sum, count) => sum + count, 0);
+    res.json({
+      status: totalIssues === 0 ? "OK" : "REVISAR",
+      totalIssues,
+      checks: results,
+      auditedAt: new Date().toISOString(),
+      stockSource: "warehouses",
+      legacyInventoryOperational: false,
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Integrity audit failed");
+    res.status(500).json({ message: "No se pudo ejecutar la auditoría de integridad." });
+  }
+});
 
 async function warehouseForMarket(db: QueryClient, marketId: string) {
   const marketResult = await db.query("SELECT data FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1", [marketId]);
@@ -1593,14 +1666,9 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    await ensurePromoterStockBaseline().catch((error) => {
-      req.log.error(
-        { err: error },
-        "Unable to refresh promoter stock baseline",
-      );
-    });
+    await ensureSaleItemsBackfill();
     res.json({
-      storage: "replit-postgresql",
+      storage: "digitalocean-postgresql",
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
     });
@@ -1626,7 +1694,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       incomingRevision,
     );
     res.json({
-      storage: "replit-postgresql",
+      storage: "digitalocean-postgresql",
       syncedAt: new Date().toISOString(),
       catalogRevision: await readCatalogRevision(),
       snapshot,
@@ -1640,7 +1708,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
     const { assignments } = await readSnapshot();
-    res.json({ storage: "replit-postgresql", assignments });
+    res.json({ storage: "digitalocean-postgresql", assignments });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read assignments");
     res.status(500).json({ message: "No se pudieron leer las asignaciones." });
@@ -1663,7 +1731,7 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
       await readCatalogRevision(),
     );
     const { assignments } = await readSnapshot();
-    res.json({ storage: "replit-postgresql", assignment, assignments });
+    res.json({ storage: "digitalocean-postgresql", assignment, assignments });
   } catch (error) {
     req.log.error({ err: error }, "Unable to save assignment");
     res.status(500).json({ message: "No se pudo guardar la asignación." });
@@ -1725,7 +1793,6 @@ router.post(
         [dnis, archivedAt],
       );
       await client.query("COMMIT");
-      void requestGoogleSheetsBackup("sincronización autoritativa de usuarios");
       res.json({ synced: dnis.length, snapshot: await readSnapshot() });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
@@ -3564,57 +3631,11 @@ router.delete(
   },
 );
 
-router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
-  if (req.body?.confirmation !== "LIMPIAR_MERCADOS_CLIENTES_CANJES") {
-    res.status(400).json({ message: "Confirmación inválida." });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended('catalog_revision',0))",
-    );
-    await lockInventoryLedger(client as unknown as QueryClient);
-    await client.query("DELETE FROM sales");
-    await client.query("DELETE FROM app_storage_tombstones");
-    await client.query("DELETE FROM attendance");
-    await client.query("DELETE FROM session_closures");
-    await client.query("DELETE FROM inventory_movements");
-    await client.query("DELETE FROM clients");
-    await client.query("DELETE FROM inventory");
-    await client.query("DELETE FROM markets");
-    await client.query("DELETE FROM assignments");
-    await client.query("DELETE FROM users WHERE role <> 'ANALISTA'");
-    const catalogRevision = randomUUID();
-    await client.query(
-      `INSERT INTO app_metadata (key,value) VALUES ($1,$2)
-       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
-      ["catalog_revision", catalogRevision],
-    );
-    await client.query("COMMIT");
-    res.json({
-      deleted: [
-        "markets",
-        "clients",
-        "sales",
-        "attendance",
-        "session_closures",
-        "inventory",
-        "inventory_movements",
-        "assignments",
-        "non_analyst_users",
-      ],
-      catalogRevision,
-      snapshot: await readSnapshot(),
-    });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    req.log.error({ err: error }, "Unable to clean catalogs");
-    res.status(500).json({ message: "No se pudo limpiar la información." });
-  } finally {
-    client.release();
-  }
+router.post("/app-storage/admin/cleanup", async (_req, res): Promise<void> => {
+  res.status(410).json({
+    message:
+      "La limpieza masiva fue deshabilitada para proteger la información histórica. Usa las acciones individuales de edición/inactivación.",
+  });
 });
 
 router.post("/app-storage/login", async (req, res): Promise<void> => {
@@ -3625,12 +3646,6 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
     return;
   }
   try {
-    await ensurePromoterStockBaseline().catch((error) => {
-      req.log.error(
-        { err: error },
-        "Unable to refresh promoter stock baseline before login",
-      );
-    });
     const result = await pool.query(
       "SELECT data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
       [dni],
