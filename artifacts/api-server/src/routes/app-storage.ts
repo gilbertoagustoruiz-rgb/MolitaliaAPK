@@ -2494,6 +2494,38 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       return;
     }
     const currentSale = existing.rows[0];
+    const saleMode = value(currentSale.data, "mode");
+    const salePlanchas = Math.max(0, Math.floor(numeric(currentSale.data, "planchas")));
+    const requestedAccessoryRaw = value(input, "planchaAccessory");
+    const requestedAccessory =
+      requestedAccessoryRaw === "MANDIL" ||
+      requestedAccessoryRaw === "BATEA" ||
+      requestedAccessoryRaw === "NINGUNO"
+        ? requestedAccessoryRaw
+        : saleMode === "PLANCHAS"
+          ? value(currentSale.data, "planchaAccessory") || "NINGUNO"
+          : "";
+    const requestedMultiplier =
+      saleMode === "PLANCHAS"
+        ? Math.max(
+            1,
+            Math.min(
+              4,
+              Math.floor(
+                numeric(input, "planchaMultiplier") ||
+                  numeric(currentSale.data, "planchaMultiplier") ||
+                  1,
+              ),
+            ),
+          )
+        : 1;
+    if (saleMode === "PLANCHAS" && salePlanchas < 80 && requestedMultiplier !== 1) {
+      await client.query("ROLLBACK");
+      res.status(400).json({
+        message: "El multiplicador solo puede ser mayor a x1 desde 80 planchas.",
+      });
+      return;
+    }
     const movementPrefix = `CAN-${id}-`;
     const itemIds = ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"];
     const requestedSource = isRecord(input.redemptionItems)
@@ -2529,6 +2561,10 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         ? Math.max(1, Math.floor(numeric(input, "redemptionCount")))
         : 0,
       redemptionItems: value(input, "bonus") ? requested : undefined,
+      planchaAccessory:
+        saleMode === "PLANCHAS" ? requestedAccessory : undefined,
+      planchaMultiplier:
+        saleMode === "PLANCHAS" ? requestedMultiplier : undefined,
       receiptPhoto: value(input, "receiptPhoto"),
       exchangePhoto: value(input, "bonus")
         ? value(input, "exchangePhoto") || undefined
