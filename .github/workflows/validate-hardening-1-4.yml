@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - hardening/puntos-1-4-20261003
+  pull_request:
+    branches:
+      - main
 
 jobs:
   validate:
