@@ -180,157 +180,6 @@ async function readCatalogRevision(
   return value(result.rows[0] || {}, "value") || null;
 }
 
-async function ensurePromoterStockBaseline() {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended('promoter_stock_baseline',0))",
-    );
-    const updatedAt = new Date().toISOString();
-    const stockDeltaByPromoter = new Map<
-      string,
-      { tastingStock: number; redemptionStock: Record<string, number> }
-    >();
-    const stockDeltaFor = (promoterId: string) => {
-      const current = stockDeltaByPromoter.get(promoterId) || {
-        tastingStock: 0,
-        redemptionStock: Object.fromEntries(
-          redemptionItemIds.map((itemId) => [itemId, 0]),
-        ),
-      };
-      stockDeltaByPromoter.set(promoterId, current);
-      return current;
-    };
-    const addRedemptionDelta = (
-      promoterId: string,
-      itemId: string,
-      quantity: number,
-    ) => {
-      if (!promoterId || !redemptionItemIds.includes(itemId)) return;
-      const current = stockDeltaFor(promoterId);
-      current.redemptionStock[itemId] =
-        (Number(current.redemptionStock[itemId]) || 0) + quantity;
-    };
-    const addRequirementDelta = (
-      promoterId: string,
-      requirements: unknown,
-      multiplier = 1,
-    ) => {
-      if (!promoterId || !isRecord(requirements)) return;
-      for (const itemId of redemptionItemIds) {
-        addRedemptionDelta(
-          promoterId,
-          itemId,
-          Math.max(0, Number(requirements[itemId]) || 0) * multiplier,
-        );
-      }
-    };
-    const movementResult = await client.query(
-      `SELECT id,promoter_id,kind,item_id,quantity,data
-       FROM inventory_movements
-       WHERE promoter_id IS NOT NULL
-         AND kind IN ('CANJE','DEGUSTACION')`,
-    );
-    const saleIdsWithCanjeMovement = new Set<string>();
-    for (const row of movementResult.rows) {
-      const promoterId = String(row.promoter_id || "");
-      const source = isRecord(row.data) ? row.data : {};
-      const quantity = Math.max(0, Number(row.quantity) || 0);
-      const kind = String(row.kind);
-      if (kind === "DEGUSTACION") {
-        stockDeltaFor(promoterId).tastingStock -= quantity;
-        continue;
-      }
-      const movementId = String(row.id || "");
-      const saleMatch = movementId.match(
-        /^CAN-(.+)-(AVENA|BATEA|MANDIL|SPAGHETTI)$/,
-      );
-      if (saleMatch) saleIdsWithCanjeMovement.add(saleMatch[1]);
-      const components = isRecord(source.canjeComponents)
-        ? source.canjeComponents
-        : null;
-      if (components) addRequirementDelta(promoterId, components, -quantity);
-      else
-        addRedemptionDelta(
-          promoterId,
-          String(row.item_id || value(source, "itemId")),
-          -quantity,
-        );
-    }
-    const saleResult = await client.query(
-      `SELECT id,promoter_id,data
-       FROM sales
-       WHERE promoter_id IS NOT NULL
-         AND data ? 'bonus'`,
-    );
-    for (const row of saleResult.rows) {
-      const saleId = String(row.id || "");
-      if (saleIdsWithCanjeMovement.has(saleId)) continue;
-      const source = isRecord(row.data) ? row.data : {};
-      addRequirementDelta(
-        String(row.promoter_id || ""),
-        source.redemptionItems,
-        -1,
-      );
-    }
-    const result = await client.query(
-      `SELECT id,data FROM users
-       WHERE status='ACTIVO'
-         AND data->>'role' = ANY($1::text[])
-       FOR UPDATE`,
-      [promoterRoles],
-    );
-    for (const row of result.rows) {
-      const current = isRecord(row.data) ? row.data : {};
-      const delta = stockDeltaByPromoter.get(String(row.id)) || {
-        tastingStock: 0,
-        redemptionStock: Object.fromEntries(
-          redemptionItemIds.map((itemId) => [itemId, 0]),
-        ),
-      };
-      const redemptionStock = Object.fromEntries(
-        redemptionItemIds.map((itemId) => [
-          itemId,
-          Math.max(
-            0,
-            Number(
-              promoterStockBaseline.redemptionStock[
-                itemId as keyof typeof promoterStockBaseline.redemptionStock
-              ],
-            ) + (Number(delta.redemptionStock[itemId]) || 0),
-          ),
-        ]),
-      );
-      const next = {
-        ...current,
-        tastingStock: Math.max(
-          0,
-          promoterStockBaseline.tastingStock + delta.tastingStock,
-        ),
-        redemptionStock,
-        updatedAt,
-      };
-      await client.query(
-        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-        [row.id, next, updatedAt],
-      );
-    }
-    await client.query(
-      `INSERT INTO app_metadata (key,value)
-       VALUES ($1,'applied')
-       ON CONFLICT (key) DO UPDATE SET value='applied',updated_at=now()`,
-      [promoterStockBaselineKey],
-    );
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 function canjeSnapshot(snapshot: StorageSnapshot) {
   return [
     ...snapshot.movements
@@ -476,108 +325,6 @@ function movementItemQuantity(record: StoredRecord, itemId: string) {
   if (components) return (Number(components[itemId]) || 0) * quantity;
   return value(record, "itemId") === itemId ? quantity : 0;
 }
-
-async function reconcileInventoryFromMovements(client: QueryClient) {
-  const movementResult = await client.query(
-    `SELECT market_id,kind,item_id,quantity,data
-     FROM inventory_movements
-     WHERE kind IN ('AJUSTE_DEGUSTACION','DEGUSTACION','AJUSTE_CANJES','CANJE')
-     ORDER BY created_at`,
-  );
-  const inventoryResult = await client.query(
-    "SELECT market_id,tasting_stock,redemption_stock,data FROM inventory",
-  );
-  const inventoryByMarket = new Map(
-    inventoryResult.rows.map((row) => [String(row.market_id), row]),
-  );
-  const movementsByMarket = new Map<string, StoredRecord[]>();
-  for (const row of movementResult.rows) {
-    const marketId = String(row.market_id);
-    const source = isRecord(row.data) ? row.data : {};
-    // Promoter-owned stock is deducted from the user JSON record. These
-    // movements retain marketId for location history but must not mutate the
-    // legacy market inventory balance.
-    if (value(source, "promoterId")) continue;
-    const movement = {
-      ...source,
-      marketId,
-      kind: String(row.kind),
-      itemId:
-        row.item_id == null ? value(source, "itemId") : String(row.item_id),
-      quantity: Number(row.quantity) || 0,
-    };
-    const current = movementsByMarket.get(marketId) || [];
-    current.push(movement);
-    movementsByMarket.set(marketId, current);
-  }
-  const itemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
-  for (const [marketId, movements] of movementsByMarket) {
-    const current = inventoryByMarket.get(marketId);
-    const currentData = isRecord(current?.data) ? current.data : {};
-    const currentRedemption = isRecord(current?.redemption_stock)
-      ? current.redemption_stock
-      : {};
-    const tastingMovements = movements.filter(
-      (movement) =>
-        value(movement, "kind") === "AJUSTE_DEGUSTACION" ||
-        value(movement, "kind") === "DEGUSTACION",
-    );
-    const tastingStock = tastingMovements.length
-      ? Math.max(
-          0,
-          tastingMovements.reduce(
-            (total, movement) =>
-              total +
-              (value(movement, "kind") === "AJUSTE_DEGUSTACION"
-                ? numeric(movement, "quantity")
-                : -Math.max(0, numeric(movement, "quantity"))),
-            0,
-          ),
-        )
-      : Math.max(0, Number(current?.tasting_stock) || 0);
-    const redemptionStock = Object.fromEntries(
-      itemIds.map((itemId) => {
-        const itemMovements = movements.filter(
-          (movement) =>
-            (value(movement, "kind") === "AJUSTE_CANJES" ||
-              value(movement, "kind") === "CANJE") &&
-            movementItemQuantity(movement, itemId) !== 0,
-        );
-        const quantity = itemMovements.length
-          ? Math.max(
-              0,
-              itemMovements.reduce(
-                (total, movement) =>
-                  total +
-                  (value(movement, "kind") === "AJUSTE_CANJES"
-                    ? movementItemQuantity(movement, itemId)
-                    : -Math.max(0, movementItemQuantity(movement, itemId))),
-                0,
-              ),
-            )
-          : Math.max(0, Number(currentRedemption[itemId]) || 0);
-        return [itemId, quantity];
-      }),
-    );
-    const updatedAt = new Date().toISOString();
-    const inventoryData = {
-      ...currentData,
-      marketId,
-      tastingStock,
-      redemptionStock,
-      updatedAt,
-    };
-    await client.query(
-      `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (market_id) DO UPDATE SET tasting_stock=EXCLUDED.tasting_stock,
-       redemption_stock=EXCLUDED.redemption_stock,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
-      [marketId, tastingStock, redemptionStock, inventoryData, updatedAt],
-    );
-  }
-}
-
 
 function normalizeCatalogText(input: unknown) {
   return String(input ?? "")
@@ -832,7 +579,10 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       ON CONFLICT (id) DO UPDATE SET receipt_photo=EXCLUDED.receipt_photo,exchange_photo=EXCLUDED.exchange_photo,
+       ON CONFLICT (id) DO UPDATE SET
+       promoter_id=EXCLUDED.promoter_id,client_id=EXCLUDED.client_id,market_id=EXCLUDED.market_id,
+       mode=EXCLUDED.mode,units=EXCLUDED.units,amount_soles=EXCLUDED.amount_soles,weight_kg=EXCLUDED.weight_kg,
+       sale_date=EXCLUDED.sale_date,receipt_photo=EXCLUDED.receipt_photo,exchange_photo=EXCLUDED.exchange_photo,
        status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
        WHERE sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at`,
       [
@@ -857,7 +607,9 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO attendance (id,promoter_id,client_id,market_id,event_type,event_date,status,photo,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       ON CONFLICT (id) DO UPDATE SET photo=EXCLUDED.photo,status=EXCLUDED.status,data=EXCLUDED.data,
+       ON CONFLICT (id) DO UPDATE SET promoter_id=EXCLUDED.promoter_id,client_id=EXCLUDED.client_id,
+       market_id=EXCLUDED.market_id,event_type=EXCLUDED.event_type,event_date=EXCLUDED.event_date,
+       photo=EXCLUDED.photo,status=EXCLUDED.status,data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
       [
         key,
@@ -889,7 +641,9 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO inventory_movements (id,market_id,kind,item_id,quantity,actor_id,movement_date,status,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data,
+       ON CONFLICT (id) DO UPDATE SET market_id=EXCLUDED.market_id,kind=EXCLUDED.kind,
+       item_id=EXCLUDED.item_id,quantity=EXCLUDED.quantity,actor_id=EXCLUDED.actor_id,
+       movement_date=EXCLUDED.movement_date,status=EXCLUDED.status,data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
       [
         key,
@@ -924,7 +678,9 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO session_closures (id,promoter_id,market_id,client_id,tasting_used,leads,closure_date,status,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data,
+       ON CONFLICT (id) DO UPDATE SET promoter_id=EXCLUDED.promoter_id,market_id=EXCLUDED.market_id,
+       client_id=EXCLUDED.client_id,tasting_used=EXCLUDED.tasting_used,leads=EXCLUDED.leads,
+       closure_date=EXCLUDED.closure_date,status=EXCLUDED.status,data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
       [
         key,
@@ -1175,14 +931,20 @@ router.get("/app-storage/integrity-audit", async (req, res): Promise<void> => {
       ["warehouse_movements_without_warehouse", "SELECT count(*)::int AS count FROM warehouse_movements wm LEFT JOIN warehouses w ON w.id=wm.warehouse_id WHERE w.id IS NULL"],
       ["markets_without_valid_warehouse", "SELECT count(*)::int AS count FROM markets m WHERE COALESCE(m.warehouse_id,m.data->>'warehouseId','')<>'' AND NOT EXISTS (SELECT 1 FROM warehouses w WHERE w.id=COALESCE(m.warehouse_id,m.data->>'warehouseId'))"],
       ["sale_items_unmapped", "SELECT count(*)::int AS count FROM sale_items WHERE product_sku IS NULL"],
-      ["sales_without_sale_items", "SELECT count(*)::int AS count FROM sales s WHERE NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)"]
+      ["sales_without_sale_items", "SELECT count(*)::int AS count FROM sales s WHERE NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)"],
+      ["legacy_inventory_rows", "SELECT count(*)::int AS count FROM inventory"],
+      ["legacy_personal_stock_users", "SELECT count(*)::int AS count FROM users WHERE data ? 'tastingStock' OR data ? 'redemptionStock'"]
     ] as const;
     const results: Record<string, number> = {};
     for (const [name, sql] of checks) {
       const result = await pool.query(sql);
       results[name] = Number(result.rows[0]?.count || 0);
     }
-    const totalIssues = Object.values(results).reduce((sum, count) => sum + count, 0);
+    const informationalKeys = new Set(["legacy_inventory_rows", "legacy_personal_stock_users"]);
+    const totalIssues = Object.entries(results).reduce(
+      (sum, [name, count]) => sum + (informationalKeys.has(name) ? 0 : count),
+      0,
+    );
     res.json({
       status: totalIssues === 0 ? "OK" : "REVISAR",
       totalIssues,
@@ -3131,247 +2893,11 @@ router.get("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
   }
 });
 
-router.post("/app-storage/admin/canjes", async (req, res): Promise<void> => {
-  if (Array.isArray(req.body?.canjes)) {
-    return void res.status(409).json({ message: "El stock ya no se asigna al promotor. Realiza la recarga desde el módulo Almacén del mercado correspondiente." });
-    const inputs: StoredRecord[] = (req.body.canjes as unknown[]).filter(
-      (input): input is StoredRecord => isRecord(input),
-    );
-    const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
-    const promoterId = inputs.length ? value(inputs[0], "promoterId") : "";
-    if (
-      !inputs.length ||
-      inputs.length !== req.body.canjes.length ||
-      !promoterId ||
-      inputs.some((input) => {
-        const kind = value(input, "kind");
-        const validKind =
-          kind === "AJUSTE_CANJES"
-            ? validItemIds.has(value(input, "itemId"))
-            : kind === "AJUSTE_DEGUSTACION" &&
-              value(input, "degustacionProductId") === "PANETON";
-        return (
-          value(input, "promoterId") !== promoterId ||
-          !validKind ||
-          numeric(input, "quantity") <= 0
-        );
-      })
-    ) {
-      res.status(400).json({
-        message:
-          "El abastecimiento requiere un promotor y cantidades válidas para los artículos.",
-      });
-      return;
-    }
-    const canjes: StoredRecord[] = inputs.map((input) => ({
-      id:
-        value(input, "id") ||
-        `CANJE-${Date.now()}-${value(input, "itemId")}-${randomUUID().slice(0, 8)}`,
-      marketId: value(input, "marketId") || `PERSONAL:${promoterId}`,
-      kind: value(input, "kind") || "AJUSTE_CANJES",
-      itemId: value(input, "itemId") || undefined,
-      degustacionProductId: value(input, "degustacionProductId") || undefined,
-      degustacionProductLabel:
-        value(input, "degustacionProductLabel") || undefined,
-      promoterId,
-      quantity: Math.floor(numeric(input, "quantity")),
-      actorId: value(input, "actorId") || "ADMIN",
-      actorName: value(input, "actorName") || "Analista",
-      date: value(input, "date") || new Date().toISOString(),
-      status: "PENDIENTE",
-    }));
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      await lockInventoryLedger(client as unknown as QueryClient);
-      const userResult = (await client.query(
-        "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-        [promoterId],
-      )) as unknown as { rows: Array<{ data: StoredRecord }> };
-      const current = userResult.rows[0];
-      if (!current) {
-        await client.query("ROLLBACK");
-        res
-          .status(404)
-          .json({ message: "El promotor seleccionado no existe." });
-        return;
-      }
-      const currentStock = isRecord(current.data.redemptionStock)
-        ? current.data.redemptionStock
-        : {};
-      const redemptionStock = {
-        AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
-        BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
-        MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
-        SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
-      };
-      let tastingStock = Math.max(0, Number(current.data.tastingStock) || 0);
-      for (const canje of canjes) {
-        if (value(canje, "kind") === "AJUSTE_DEGUSTACION") {
-          tastingStock += Math.floor(numeric(canje, "quantity"));
-        } else {
-          const itemId = value(canje, "itemId") as keyof typeof redemptionStock;
-          redemptionStock[itemId] += Math.floor(numeric(canje, "quantity"));
-        }
-        await upsertRecord(
-          client as unknown as QueryClient,
-          "movements",
-          canje,
-        );
-      }
-      const updatedAt = canjes[canjes.length - 1].date;
-      await client.query(
-        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-        [
-          promoterId,
-          { ...current.data, tastingStock, redemptionStock, updatedAt },
-          updatedAt,
-        ],
-      );
-      await client.query("COMMIT");
-      res.status(201).json({ canjes, snapshot: await readSnapshot() });
-      return;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      req.log.error({ err: error }, "Unable to create grouped canjes");
-      res.status(500).json({ message: "No se pudo cargar el stock agrupado." });
-    } finally {
-      client.release();
-    }
-    return;
-  }
-  const input = req.body?.canje;
-  const personalStock = isRecord(input) && Boolean(value(input, "promoterId"));
-  if (personalStock) {
-    return void res.status(409).json({ message: "El stock ya no se asigna al promotor. Realiza la recarga desde el módulo Almacén del mercado correspondiente." });
-  }
-  const validItemIds = new Set(["AVENA", "SPAGHETTI", "BATEA", "MANDIL"]);
-  if (
-    !isRecord(input) ||
-    numeric(input, "quantity") <= 0 ||
-    (personalStock
-      ? !validItemIds.has(value(input, "itemId"))
-      : !value(input, "marketId") ||
-        (!value(input, "itemId") && !value(input, "canjeProductId")))
-  ) {
-    res.status(400).json({
-      message:
-        "El abastecimiento requiere promotor, artículo y cantidad mayor a cero.",
-    });
-    return;
-  }
-  const canje: StoredRecord = {
-    id: value(input, "id") || `CANJE-${Date.now()}-${randomUUID().slice(0, 8)}`,
-    marketId:
-      value(input, "marketId") || `PERSONAL:${value(input, "promoterId")}`,
-    kind: "AJUSTE_CANJES",
-    itemId: value(input, "itemId") || undefined,
-    promoterId: value(input, "promoterId") || undefined,
-    canjeProductId: value(input, "canjeProductId") || undefined,
-    canjeProductLabel: value(input, "canjeProductLabel") || undefined,
-    canjeComponents: isRecord(input.canjeComponents)
-      ? input.canjeComponents
-      : undefined,
-    quantity: Math.floor(numeric(input, "quantity")),
-    actorId: value(input, "actorId") || "ADMIN",
-    actorName: value(input, "actorName") || "Analista",
-    date: value(input, "date") || new Date().toISOString(),
-    status: "PENDIENTE",
-  };
-  const components = isRecord(canje.canjeComponents)
-    ? canje.canjeComponents
-    : {};
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await lockInventoryLedger(client as unknown as QueryClient);
-    if (personalStock) {
-      const userResult = (await client.query(
-        "SELECT data FROM users WHERE id=$1 FOR UPDATE",
-        [canje.promoterId],
-      )) as unknown as { rows: Array<{ data: StoredRecord }> };
-      const current = userResult.rows[0];
-      if (!current) {
-        await client.query("ROLLBACK");
-        res
-          .status(404)
-          .json({ message: "El promotor seleccionado no existe." });
-        return;
-      }
-      const currentStock = isRecord(current.data.redemptionStock)
-        ? current.data.redemptionStock
-        : {};
-      const redemptionStock = {
-        AVENA: Math.max(0, Number(currentStock.AVENA) || 0),
-        BATEA: Math.max(0, Number(currentStock.BATEA) || 0),
-        MANDIL: Math.max(0, Number(currentStock.MANDIL) || 0),
-        SPAGHETTI: Math.max(0, Number(currentStock.SPAGHETTI) || 0),
-      };
-      const itemId = value(canje, "itemId") as keyof typeof redemptionStock;
-      redemptionStock[itemId] += Math.floor(numeric(canje, "quantity"));
-      const updatedAt = value(canje, "date");
-      const userData = { ...current.data, redemptionStock, updatedAt };
-      await upsertRecord(client as unknown as QueryClient, "movements", canje);
-      await client.query(
-        "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-        [canje.promoterId, userData, updatedAt],
-      );
-      await client.query("COMMIT");
-      res.status(201).json({ canje, snapshot: await readSnapshot() });
-      return;
-    }
-    await upsertRecord(client as unknown as QueryClient, "movements", canje);
-    const inventoryResult = (await client.query(
-      "SELECT tasting_stock, redemption_stock, data FROM inventory WHERE market_id=$1 FOR UPDATE",
-      [canje.marketId],
-    )) as unknown as {
-      rows: Array<{
-        tasting_stock: number;
-        redemption_stock: Record<string, number>;
-        data: StoredRecord;
-      }>;
-    };
-    const current = inventoryResult.rows[0];
-    const redemptionStock = {
-      AVENA: Math.max(0, Number(current?.redemption_stock?.AVENA) || 0),
-      BATEA: Math.max(0, Number(current?.redemption_stock?.BATEA) || 0),
-      MANDIL: Math.max(0, Number(current?.redemption_stock?.MANDIL) || 0),
-      SPAGHETTI: Math.max(0, Number(current?.redemption_stock?.SPAGHETTI) || 0),
-    };
-    for (const itemId of Object.keys(redemptionStock)) {
-      redemptionStock[itemId as keyof typeof redemptionStock] +=
-        Math.max(0, Number(components[itemId]) || 0) *
-        Math.floor(numeric(canje, "quantity"));
-    }
-    const inventoryRecord: StoredRecord = {
-      ...(current?.data || {}),
-      marketId: canje.marketId,
-      tastingStock: Math.max(0, Number(current?.tasting_stock) || 0),
-      redemptionStock,
-      updatedAt: canje.date,
-    };
-    await client.query(
-      `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at)
-       VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (market_id) DO UPDATE SET redemption_stock=EXCLUDED.redemption_stock,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
-      [
-        canje.marketId,
-        inventoryRecord.tastingStock,
-        redemptionStock,
-        inventoryRecord,
-        canje.date,
-      ],
-    );
-    await client.query("COMMIT");
-    res.status(201).json({ canje, snapshot: await readSnapshot() });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    req.log.error({ err: error }, "Unable to create canje");
-    res.status(500).json({ message: "No se pudo crear el canje." });
-  } finally {
-    client.release();
-  }
+router.post("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
+  res.status(409).json({
+    message:
+      "El stock operativo se administra únicamente desde Almacén. Los canjes se generan desde Ventas.",
+  });
 });
 
 router.delete(
