@@ -9358,11 +9358,46 @@ function PromoterApp({
           saleModes: ["UNIDADES", "PLANCHAS"] as SaleMode[],
         }));
   }, [availableProducts]);
-  const unitProducts = saleCatalogProducts.filter((product) =>
-    product.saleModes.includes("UNIDADES"),
+  const productSalesRank = useMemo(() => {
+    const unitsBySku: Record<string, number> = {};
+    sales.forEach((sale) => {
+      if (sale.planchaLines?.length) {
+        sale.planchaLines.forEach((line) => {
+          unitsBySku[line.sku] = (unitsBySku[line.sku] || 0) + Math.max(0, Number(line.units) || 0);
+        });
+        return;
+      }
+      const saleSkus = Object.keys(sale.unitPrices || {});
+      if (saleSkus.length === 1) {
+        unitsBySku[saleSkus[0]] =
+          (unitsBySku[saleSkus[0]] || 0) + Math.max(0, Number(sale.units) || 0);
+      }
+    });
+    return unitsBySku;
+  }, [sales]);
+  const productPriority = (product: (typeof saleCatalogProducts)[number]) => {
+    const brand = (product.brand || "").toUpperCase();
+    return brand.includes("TODINNO") || brand.includes("TODDINO") || brand.includes("TODINO")
+      ? 0
+      : brand.includes("COSTA")
+        ? 1
+        : 2;
+  };
+  const sortSaleProducts = (
+    productsToSort: typeof saleCatalogProducts,
+  ) =>
+    [...productsToSort].sort((a, b) => {
+      const salesDifference = (productSalesRank[b.sku] || 0) - (productSalesRank[a.sku] || 0);
+      if (salesDifference) return salesDifference;
+      const priorityDifference = productPriority(a) - productPriority(b);
+      if (priorityDifference) return priorityDifference;
+      return a.label.localeCompare(b.label, "es");
+    });
+  const unitProducts = sortSaleProducts(
+    saleCatalogProducts.filter((product) => product.saleModes.includes("UNIDADES")),
   );
-  const planchaProductsCatalog = saleCatalogProducts.filter((product) =>
-    product.saleModes.includes("PLANCHAS"),
+  const planchaProductsCatalog = sortSaleProducts(
+    saleCatalogProducts.filter((product) => product.saleModes.includes("PLANCHAS")),
   );
   const unitsPerPlanchaBySku = Object.fromEntries(
     saleCatalogProducts.map((product) => [product.sku, product.unitsPerPlancha]),
@@ -9378,17 +9413,20 @@ function PromoterApp({
   useEffect(() => {
     if (!planchaProductsCatalog.length) return;
     setPlanchaLines((current) =>
-      current.map((line, index) =>
-        planchaProductsCatalog.some((product) => product.sku === line.sku)
-          ? line
-          : {
-              ...line,
-              sku: planchaProductsCatalog[Math.min(index, planchaProductsCatalog.length - 1)].sku,
-              units: "",
-            },
-      ),
+      current.map((line, index) => {
+        const configuredProduct =
+          planchaProductsCatalog.find((product) => product.sku === line.sku) ||
+          planchaProductsCatalog[Math.min(index, planchaProductsCatalog.length - 1)];
+        if (!configuredProduct) return line;
+        return {
+          ...line,
+          sku: configuredProduct.sku,
+          presentation: configuredProduct.presentation,
+          units: configuredProduct.sku === line.sku ? line.units : "",
+        };
+      }),
     );
-  }, [productPrices]);
+  }, [productPrices, productSalesRank]);
   useEffect(() => {
     setClientId(selectedClientId);
     setMarkClientId(selectedClientId);
@@ -9403,6 +9441,11 @@ function PromoterApp({
     unitProducts.find((product) => product.sku === sku) ||
     unitProducts[0] ||
     saleCatalogProducts[0];
+  useEffect(() => {
+    if (selectedProduct?.presentation && presentation !== selectedProduct.presentation) {
+      setPresentation(selectedProduct.presentation);
+    }
+  }, [selectedProduct?.sku, selectedProduct?.presentation, presentation]);
   useEffect(() => {
     if (planchaType !== "FLAT" || !planchaLines[0]) return;
     const expected = requestedFlatPlanchas * (unitsPerPlanchaBySku[planchaLines[0].sku] || 6);
@@ -10235,12 +10278,19 @@ function PromoterApp({
                 testId="input-unit-price"
               />
             </Field>
-            <SelectField
-              label="Presentación *"
-              value={presentation}
-              onChange={(value) => setPresentation(value as "CAJA" | "LATA" | "BOLSA")}
-              items={SALE_PRESENTATIONS.map((value) => ({ value, label: value }))}
-            />
+            <Field label="Presentación *">
+              <select
+                className="select"
+                value={selectedProduct?.presentation || presentation}
+                disabled
+                data-testid="select-sale-presentation"
+                title="La presentación se toma automáticamente del módulo Marcas"
+              >
+                <option value={selectedProduct?.presentation || presentation}>
+                  {selectedProduct?.presentation || presentation}
+                </option>
+              </select>
+            </Field>
           </div>
         ) : (
           <div className="plancha-box">
@@ -10299,12 +10349,14 @@ function PromoterApp({
                       value={line.sku}
                       onChange={(event) => {
                         const nextSku = event.target.value;
+                        const nextProduct = planchaProductsCatalog.find((item) => item.sku === nextSku);
                         setPlanchaLines((current) =>
                           current.map((item) =>
                             item.id === line.id
                               ? {
                                   ...item,
                                   sku: nextSku,
+                                  presentation: nextProduct?.presentation || item.presentation,
                                   units:
                                     planchaType === "FLAT"
                                       ? String(requestedFlatPlanchas * (unitsPerPlanchaBySku[nextSku] || 6))
@@ -10351,20 +10403,18 @@ function PromoterApp({
                         placeholder="0.00"
                       />
                     </Field>
-                    <SelectField
-                      label="Presentación *"
-                      value={line.presentation}
-                      onChange={(value) =>
-                        setPlanchaLines((current) =>
-                          current.map((item) =>
-                            item.id === line.id
-                              ? { ...item, presentation: value as "CAJA" | "LATA" | "BOLSA" }
-                              : item,
-                          ),
-                        )
-                      }
-                      items={SALE_PRESENTATIONS.map((value) => ({ value, label: value }))}
-                    />
+                    <Field label="Presentación *">
+                      <select
+                        className="select"
+                        value={product?.presentation || line.presentation}
+                        disabled
+                        title="La presentación se toma automáticamente del módulo Marcas"
+                      >
+                        <option value={product?.presentation || line.presentation}>
+                          {product?.presentation || line.presentation}
+                        </option>
+                      </select>
+                    </Field>
                   </div>
                   <p className="formula">
                     {product.label} · {unitsPerPlancha} unidades por plancha
