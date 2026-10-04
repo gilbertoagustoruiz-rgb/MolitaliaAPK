@@ -197,7 +197,7 @@ export const warehouseMovementsTable = pgTable("warehouse_movements", {
   id: text("id").primaryKey(),
   warehouseId: text("warehouse_id")
     .notNull()
-    .references(() => warehousesTable.id, { onDelete: "cascade" }),
+    .references(() => warehousesTable.id, { onDelete: "restrict" }),
   kind: text("kind").notNull(),
   itemId: text("item_id").notNull(),
   quantity: numeric("quantity").notNull().default("0"),
