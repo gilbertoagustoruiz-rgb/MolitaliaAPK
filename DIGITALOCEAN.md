@@ -35,3 +35,5 @@ Al iniciar, la API crea únicamente las tablas que falten mediante CREATE TABLE 
 - `/api/healthz` queda disponible como liveness check liviano.
 - La API reporta `storage: digitalocean-postgresql`.
 - Google Sheets no forma parte del flujo productivo.
+
+- Auditoría relacional (Admin/Analista): `GET /api/app-storage/integrity-audit`.
