@@ -25,3 +25,13 @@ Configurar todas las credenciales como variables cifradas. No guardarlas en GitH
 - Rama: main
 
 Al iniciar, la API crea únicamente las tablas que falten mediante CREATE TABLE IF NOT EXISTS.
+
+
+## Verificación posterior al despliegue
+
+- Confirmar que App Platform despliega la rama `main` con el Dockerfile del repositorio.
+- El build productivo ejecuta typecheck de frontend y API antes de compilar.
+- Health check: `/api/health` valida proceso y conexión PostgreSQL.
+- `/api/healthz` queda disponible como liveness check liviano.
+- La API reporta `storage: digitalocean-postgresql`.
+- Google Sheets no forma parte del flujo productivo.
