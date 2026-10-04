@@ -1616,6 +1616,13 @@ router.all(
       });
       return;
     }
+    if (name === "movements") {
+      res.status(409).json({
+        message:
+          "Los movimientos operativos no se editan ni eliminan directamente. Corrige la Venta o usa el flujo de Degustación para conservar el kardex de Almacén.",
+      });
+      return;
+    }
     if (
       name === "users" &&
       id === actor.data.id &&
@@ -1867,13 +1874,28 @@ router.all(
         }
       }
       if (deleting) {
-        await db.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
-        await db.query(
-          "INSERT INTO app_storage_tombstones (collection,record_id,deleted_at) VALUES ($1,$2,now()) ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now()",
-          [name, id],
-        );
-        if (name === "users")
-          await db.query("DELETE FROM assignments WHERE promoter_id=$1", [id]);
+        if (name === "users" || name === "markets") {
+          const archivedAt = new Date().toISOString();
+          const archived = {
+            ...old,
+            status: "INACTIVO",
+            archivedAt,
+            archivedBy: value(actor.data, "id") || value(actor.data, "dni"),
+            updatedAt: archivedAt,
+          };
+          await db.query(
+            `UPDATE ${table}
+             SET status='INACTIVO',data=$2,record_updated_at=$3,updated_at=now()
+             WHERE id=$1`,
+            [id, archived, archivedAt],
+          );
+        } else {
+          await db.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
+          await db.query(
+            "INSERT INTO app_storage_tombstones (collection,record_id,deleted_at) VALUES ($1,$2,now()) ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now()",
+            [name, id],
+          );
+        }
       } else if (name === "users") {
         const passwordHash = value(next, "password")
           ? await hashPassword(value(next, "password"))
@@ -2065,19 +2087,37 @@ router.delete(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await lockInventoryLedger(client as unknown as QueryClient);
-      await client.query("DELETE FROM clients WHERE market_id=$1", [id]);
-      await client.query("DELETE FROM inventory WHERE market_id=$1", [id]);
-      await client.query("DELETE FROM inventory_movements WHERE market_id=$1", [
-        id,
-      ]);
-      await client.query("DELETE FROM markets WHERE id=$1", [id]);
+      const result = await client.query(
+        "SELECT data FROM markets WHERE id=$1 FOR UPDATE",
+        [id],
+      );
+      if (!result.rows.length) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ message: "El mercado no existe." });
+        return;
+      }
+      const updatedAt = new Date().toISOString();
+      const current = isRecord(result.rows[0].data) ? result.rows[0].data : {};
+      const next = {
+        ...current,
+        status: "INACTIVO",
+        archivedAt: updatedAt,
+        updatedAt,
+      };
+      await client.query(
+        "UPDATE markets SET status='INACTIVO',data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+        [id, next, updatedAt],
+      );
+      await client.query(
+        "UPDATE clients SET status='INACTIVO',data=data || jsonb_build_object('status','INACTIVO','marketArchivedAt',$2::text),record_updated_at=$2,updated_at=now() WHERE market_id=$1 AND status='ACTIVO'",
+        [id, updatedAt],
+      );
       await client.query("COMMIT");
-      res.json({ deleted: id, snapshot: await readSnapshot() });
+      res.json({ archived: id, snapshot: await readSnapshot() });
     } catch (error) {
-      await client.query("ROLLBACK");
-      req.log.error({ err: error }, "Unable to delete market");
-      res.status(500).json({ message: "No se pudo eliminar el mercado." });
+      await client.query("ROLLBACK").catch(() => undefined);
+      req.log.error({ err: error }, "Unable to archive market");
+      res.status(500).json({ message: "No se pudo inactivar el mercado." });
     } finally {
       client.release();
     }
@@ -2329,15 +2369,30 @@ router.delete(
       return;
     }
     try {
-      await pool.query(
-        "INSERT INTO app_storage_tombstones (collection,record_id,deleted_at) VALUES ('clients',$1,now()) ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now()",
+      const result = await pool.query(
+        "SELECT data FROM clients WHERE id=$1",
         [id],
       );
-      await pool.query("DELETE FROM clients WHERE id=$1", [id]);
-      res.json({ deleted: id, snapshot: await readSnapshot() });
+      if (!result.rows.length) {
+        res.status(404).json({ message: "El cliente no existe." });
+        return;
+      }
+      const updatedAt = new Date().toISOString();
+      const current = isRecord(result.rows[0].data) ? result.rows[0].data : {};
+      const next = {
+        ...current,
+        status: "INACTIVO",
+        archivedAt: updatedAt,
+        updatedAt,
+      };
+      await pool.query(
+        "UPDATE clients SET status='INACTIVO',data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+        [id, next, updatedAt],
+      );
+      res.json({ archived: id, snapshot: await readSnapshot() });
     } catch (error) {
-      req.log.error({ err: error }, "Unable to delete client");
-      res.status(500).json({ message: "No se pudo eliminar el cliente." });
+      req.log.error({ err: error }, "Unable to archive client");
+      res.status(500).json({ message: "No se pudo inactivar el cliente." });
     }
   },
 );
