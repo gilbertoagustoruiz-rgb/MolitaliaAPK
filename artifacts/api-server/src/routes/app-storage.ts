@@ -928,6 +928,11 @@ router.get("/app-storage/integrity-audit", async (req, res): Promise<void> => {
       ["attendance_without_market", "SELECT count(*)::int AS count FROM attendance a LEFT JOIN markets m ON m.id=a.market_id WHERE m.id IS NULL"],
       ["closures_without_promoter", "SELECT count(*)::int AS count FROM session_closures s LEFT JOIN users u ON u.id=s.promoter_id WHERE u.id IS NULL"],
       ["closures_without_market", "SELECT count(*)::int AS count FROM session_closures s LEFT JOIN markets m ON m.id=s.market_id WHERE m.id IS NULL"],
+      ["closures_without_client", "SELECT count(*)::int AS count FROM session_closures s LEFT JOIN clients c ON c.id=s.client_id WHERE s.client_id IS NOT NULL AND c.id IS NULL"],
+      ["assignments_without_promoter", "SELECT count(*)::int AS count FROM assignments a LEFT JOIN users u ON u.id=a.promoter_id WHERE u.id IS NULL"],
+      ["trade_without_promoter", "SELECT count(*)::int AS count FROM trade_approvals t LEFT JOIN users u ON u.id=t.promoter_id WHERE u.id IS NULL"],
+      ["trade_without_client", "SELECT count(*)::int AS count FROM trade_approvals t LEFT JOIN clients c ON c.id=t.client_id WHERE c.id IS NULL"],
+      ["trade_without_market", "SELECT count(*)::int AS count FROM trade_approvals t LEFT JOIN markets m ON m.id=t.market_id WHERE m.id IS NULL"],
       ["warehouse_movements_without_warehouse", "SELECT count(*)::int AS count FROM warehouse_movements wm LEFT JOIN warehouses w ON w.id=wm.warehouse_id WHERE w.id IS NULL"],
       ["markets_without_valid_warehouse", "SELECT count(*)::int AS count FROM markets m WHERE COALESCE(m.warehouse_id,m.data->>'warehouseId','')<>'' AND NOT EXISTS (SELECT 1 FROM warehouses w WHERE w.id=COALESCE(m.warehouse_id,m.data->>'warehouseId'))"],
       ["sale_items_unmapped", "SELECT count(*)::int AS count FROM sale_items WHERE product_sku IS NULL"],
@@ -952,6 +957,8 @@ router.get("/app-storage/integrity-audit", async (req, res): Promise<void> => {
       auditedAt: new Date().toISOString(),
       stockSource: "warehouses",
       legacyInventoryOperational: false,
+      relationModel: "sale_items -> product_prices",
+      foreignKeys: "safe-not-valid-then-validate-when-clean",
     });
   } catch (error) {
     req.log.error({ err: error }, "Integrity audit failed");
