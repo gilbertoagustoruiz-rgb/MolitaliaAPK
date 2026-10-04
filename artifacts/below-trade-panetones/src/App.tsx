@@ -7442,7 +7442,9 @@ function AnalystApp({
   ) => {
     if (
       !window.confirm(
-        "¿Eliminar definitivamente este registro? Los movimientos de stock se revertirán cuando corresponda.",
+        collection === "users" || collection === "markets"
+          ? "¿Inactivar este registro? Se conservará su información histórica y sus relaciones."
+          : "¿Eliminar este registro? Solo se eliminará el registro seleccionado.",
       )
     )
       return;
@@ -7451,7 +7453,11 @@ function AnalystApp({
         `/records/${collection}/${encodeURIComponent(record.id)}`,
         { method: "DELETE" },
       );
-      notify("Registro eliminado");
+      notify(
+        collection === "users" || collection === "markets"
+          ? "Registro inactivado. La información histórica se conserva."
+          : "Registro eliminado",
+      );
     } catch (error) {
       notify(
         error instanceof Error ? error.message : "No se pudo eliminar",
@@ -7536,7 +7542,7 @@ function AnalystApp({
   const deleteMarket = async (market: Market) => {
     if (
       !window.confirm(
-        `¿Eliminar definitivamente ${market.name} y sus clientes asociados?`,
+        `¿Inactivar ${market.name}? Sus clientes activos también se inactivarán, pero toda la información histórica se conservará.`,
       )
     )
       return;
@@ -7544,7 +7550,7 @@ function AnalystApp({
       await adminRequest(`/markets/${encodeURIComponent(market.id)}`, {
         method: "DELETE",
       });
-      notify(`Mercado eliminado: ${market.name}`);
+      notify(`Mercado inactivado: ${market.name}`);
     } catch (error) {
       notify(
         error instanceof Error
@@ -7591,13 +7597,13 @@ function AnalystApp({
     }
   };
   const deleteClient = async (client: Client) => {
-    if (!window.confirm(`¿Eliminar definitivamente al cliente ${client.name}?`))
+    if (!window.confirm(`¿Inactivar al cliente ${client.name}? Sus ventas históricas se conservarán.`))
       return;
     try {
       await adminRequest(`/clients/${encodeURIComponent(client.id)}`, {
         method: "DELETE",
       });
-      notify(`Cliente eliminado: ${client.name}`);
+      notify(`Cliente inactivado: ${client.name}`);
     } catch (error) {
       notify(
         error instanceof Error
