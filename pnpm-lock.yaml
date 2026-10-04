@@ -201,6 +201,9 @@ importers:
         specifier: ^10.5.0
         version: 10.5.0
     devDependencies:
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
       '@types/cookie-parser':
         specifier: ^1.4.10
         version: 1.4.10(@types/express@5.0.6)

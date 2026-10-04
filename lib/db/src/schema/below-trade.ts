@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   index,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -275,6 +276,42 @@ export const productPricesTable = pgTable("product_prices", {
   recordUpdatedAt,
   ...timestamps,
 });
+
+export const saleItemsTable = pgTable(
+  "sale_items",
+  {
+    saleId: text("sale_id")
+      .notNull()
+      .references(() => salesTable.id, { onDelete: "cascade" }),
+    lineNo: integer("line_no").notNull(),
+    sku: text("sku")
+      .notNull()
+      .references(() => productPricesTable.sku, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    productName: text("product_name").notNull().default(""),
+    quantity: numeric("quantity").notNull().default("0"),
+    unitPrice: numeric("unit_price", { precision: 14, scale: 2 })
+      .notNull()
+      .default("0"),
+    amountSoles: numeric("amount_soles", { precision: 14, scale: 2 })
+      .notNull()
+      .default("0"),
+    mode: text("mode").notNull().default(""),
+    presentation: text("presentation"),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    ...timestamps,
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.saleId, table.lineNo],
+      name: "sale_items_pkey",
+    }),
+    index("idx_sale_items_sale").on(table.saleId),
+    index("idx_sale_items_sku").on(table.sku),
+  ],
+);
 
 export const clientCategoriesTable = pgTable("client_categories", {
   id: text("id").primaryKey(),
