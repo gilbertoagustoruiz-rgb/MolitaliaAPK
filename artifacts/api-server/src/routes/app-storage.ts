@@ -12,6 +12,7 @@ const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
+const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"] as const;
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -2697,6 +2698,7 @@ router.delete(
         return;
       }
       if (movement && movementKind === "DEGUSTACION") {
+        const updatedAt = new Date().toISOString();
         const promoterId =
           value(movement.data, "promoterId") || value(movement.data, "actorId") || "ADMIN";
         await restoreWarehouseStockMovements(client as unknown as QueryClient, `DEG:${id}`, promoterId);
@@ -2731,57 +2733,11 @@ router.delete(
   },
 );
 
-router.post("/app-storage/admin/cleanup", async (req, res): Promise<void> => {
-  if (req.body?.confirmation !== "LIMPIAR_MERCADOS_CLIENTES_CANJES") {
-    res.status(400).json({ message: "Confirmación inválida." });
-    return;
-  }
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      "SELECT pg_advisory_xact_lock(hashtextextended('catalog_revision',0))",
-    );
-    await lockInventoryLedger(client as unknown as QueryClient);
-    await client.query("DELETE FROM sales");
-    await client.query("DELETE FROM app_storage_tombstones");
-    await client.query("DELETE FROM attendance");
-    await client.query("DELETE FROM session_closures");
-    await client.query("DELETE FROM inventory_movements");
-    await client.query("DELETE FROM clients");
-    await client.query("DELETE FROM inventory");
-    await client.query("DELETE FROM markets");
-    await client.query("DELETE FROM assignments");
-    await client.query("DELETE FROM users WHERE role <> 'ANALISTA'");
-    const catalogRevision = randomUUID();
-    await client.query(
-      `INSERT INTO app_metadata (key,value) VALUES ($1,$2)
-       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()`,
-      ["catalog_revision", catalogRevision],
-    );
-    await client.query("COMMIT");
-    res.json({
-      deleted: [
-        "markets",
-        "clients",
-        "sales",
-        "attendance",
-        "session_closures",
-        "inventory",
-        "inventory_movements",
-        "assignments",
-        "non_analyst_users",
-      ],
-      catalogRevision,
-      snapshot: await readSnapshot(),
-    });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    req.log.error({ err: error }, "Unable to clean catalogs");
-    res.status(500).json({ message: "No se pudo limpiar la información." });
-  } finally {
-    client.release();
-  }
+router.post("/app-storage/admin/cleanup", async (_req, res): Promise<void> => {
+  res.status(409).json({
+    message:
+      "Limpieza masiva deshabilitada para proteger la información de producción. Usa edición/eliminación individual con validación de relaciones.",
+  });
 });
 
 router.post("/app-storage/login", async (req, res): Promise<void> => {
