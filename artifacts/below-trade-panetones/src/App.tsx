@@ -322,6 +322,16 @@ type AdminDegustacion = InventoryMovement & {
   degustacionId: string;
 };
 type Toast = { message: string; error?: boolean };
+type IntegrityAudit = {
+  status: "OK" | "REVISAR";
+  totalIssues: number;
+  checks: Record<string, number>;
+  auditedAt: string;
+  stockSource: "warehouses";
+  legacyInventoryOperational: false;
+  relationModel: string;
+  foreignKeys: string;
+};
 type CloudSnapshot = {
   markets: Market[];
   users: AppUser[];
@@ -1368,14 +1378,12 @@ function catalogProductForLegacyBrand(
     preferredName &&
     catalog.find(
       (item) =>
-        item.status === "ACTIVO" &&
         normalizeCsvHeader(item.brand || "") === normalizedBrand &&
         normalizeCsvHeader(item.product) === normalizeCsvHeader(preferredName),
     );
   if (byPreferredName) return byPreferredName;
   return catalog.find(
     (item) =>
-      item.status === "ACTIVO" &&
       normalizeCsvHeader(item.brand || "") === normalizedBrand &&
       item.saleModes?.includes("PLANCHAS"),
   );
@@ -1385,9 +1393,8 @@ function catalogProductForSaleKey(
   key: string,
   productPrices: ProductPrice[] = [],
 ) {
-  const catalog = normalizedProducts(productPrices).filter(
-    (item) => item.status === "ACTIVO",
-  );
+  // Historical sales must keep resolving even if a product was later inactivated.
+  const catalog = normalizedProducts(productPrices);
   const normalizedKey = normalizeCsvHeader(key);
   if (!normalizedKey) return undefined;
 
@@ -2375,6 +2382,7 @@ function Input({
   maxLength,
   autoComplete,
   readOnly = false,
+  disabled = false,
   testId,
 }: {
   value: string | number;
@@ -2387,6 +2395,7 @@ function Input({
   maxLength?: number;
   autoComplete?: string;
   readOnly?: boolean;
+  disabled?: boolean;
   testId?: string;
 }) {
   return (
@@ -2402,6 +2411,7 @@ function Input({
       maxLength={maxLength}
       autoComplete={autoComplete}
       readOnly={readOnly}
+      disabled={disabled}
       data-testid={testId}
     />
   );
@@ -6015,7 +6025,6 @@ function CoordinatorApp({
     ["clientes", "Clientes"],
     ["usuarios", "Usuarios"],
     ["ventas", "Ventas"],
-    ["inventario", "Inventario"],
   ];
   const exportSales = () => {
     downloadCsv(
@@ -6284,71 +6293,7 @@ function CoordinatorApp({
           </div>
         </section>
       )}
-      {tab === "inventario" && (
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Stock de promotores</h2>
-              <p>
-                Consulta las existencias personales de los promotores de tus
-                zonas.
-              </p>
-            </div>
-          </div>
-          <div className="panel-body">
-            {allowedUsers.filter((current) => isPromoterRole(current.role))
-              .length ? (
-              <div className="stock-reconciliation-table inventory-stock-table">
-                <div className="stock-reconciliation-row header">
-                  <span>Promotor</span>
-                  <span>Degustación personal</span>
-                  {redemptionItems.map((item) => (
-                    <span key={item.id}>{item.label}</span>
-                  ))}
-                </div>
-                {allowedUsers
-                  .filter((current) => isPromoterRole(current.role))
-                  .map((current) => {
-                    const stock = calculatedPromoterStock(
-                      current.id,
-                      sales,
-                      movements,
-                    );
-                    return (
-                      <div
-                        className="stock-reconciliation-row"
-                        key={current.id}
-                      >
-                        <div>
-                          <strong>{current.name}</strong>
-                          <small>
-                            DNI {current.dni} ·{" "}
-                            {current.roleLabel || current.role}
-                          </small>
-                        </div>
-                        <b>
-                          {stock.tastingStock}
-                          <small>panetones</small>
-                        </b>
-                        {redemptionItems.map((item) => (
-                          <span key={item.id}>
-                            {stock.redemptionStock[item.id]}
-                            <small>unidades</small>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-              </div>
-            ) : (
-              <Empty
-                title="Sin promotores asignados"
-                detail="No hay promotores vinculados a tus zonas."
-              />
-            )}
-          </div>
-        </section>
-      )}
+
     </main>
   );
 }
@@ -6432,6 +6377,8 @@ function AnalystApp({
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
+  const [integrityAudit, setIntegrityAudit] = useState<IntegrityAudit | null>(null);
+  const [integrityAuditLoading, setIntegrityAuditLoading] = useState(false);
   const [marketWarehouses, setMarketWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
     void fetch("/api/app-storage/warehouses")
@@ -6446,7 +6393,12 @@ function AnalystApp({
   const loadTradeApprovals = async () => {
     setTradeApprovalsLoading(true);
     try {
-      const response = await fetch("/api/app-storage/trade-approvals");
+      const response = await fetch("/api/app-storage/trade-approvals", {
+        headers: {
+          "x-admin-dni": user.dni,
+          "x-admin-key": user.password || "",
+        },
+      });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "No se pudieron cargar las aprobaciones.");
       setTradeApprovals(Array.isArray(payload.approvals) ? payload.approvals : []);
@@ -6457,10 +6409,11 @@ function AnalystApp({
     }
   };
   useEffect(() => {
+    if (!["ADMIN", "ANALISTA"].includes(user.role)) return;
     void loadTradeApprovals();
     const timer = window.setInterval(() => void loadTradeApprovals(), 15000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [user.role]);
   const resolveTradeApproval = async (approval: TradeApproval, decision: "APROBADA" | "RECHAZADA") => {
     try {
       const response = await fetch(`/api/app-storage/trade-approvals/${approval.id}/resolve`, {
@@ -6484,6 +6437,41 @@ function AnalystApp({
       notify(error instanceof Error ? error.message : "No se pudo resolver la solicitud.", true);
     }
   };
+  const loadIntegrityAudit = async () => {
+    setIntegrityAuditLoading(true);
+    try {
+      const response = await fetch("/api/app-storage/integrity-audit", {
+        headers: {
+          "x-admin-dni": user.dni,
+          "x-admin-key": user.password || "",
+        },
+      });
+      const payload = (await response.json()) as IntegrityAudit & {
+        message?: string;
+      };
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo ejecutar la auditoría.");
+      setIntegrityAudit(payload);
+      notify(
+        payload.status === "OK"
+          ? "Auditoría completada: relaciones coherentes."
+          : "Auditoría completada: " +
+              payload.totalIssues +
+              " incidencia(s) por revisar.",
+        payload.status !== "OK",
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo ejecutar la auditoría de integridad.",
+        true,
+      );
+    } finally {
+      setIntegrityAuditLoading(false);
+    }
+  };
+
   const adminPromoter = users.find((person) => person.id === adminPromoterId);
   const adminAssignment = adminPromoter
     ? assignments.find((item) => assignmentMatchesUser(item, adminPromoter))
@@ -7457,7 +7445,9 @@ function AnalystApp({
   ) => {
     if (
       !window.confirm(
-        "¿Eliminar definitivamente este registro? Los movimientos de stock se revertirán cuando corresponda.",
+        collection === "users" || collection === "markets"
+          ? "¿Inactivar este registro? Se conservará su información histórica y sus relaciones."
+          : "¿Eliminar este registro? Solo se eliminará el registro seleccionado.",
       )
     )
       return;
@@ -7466,7 +7456,11 @@ function AnalystApp({
         `/records/${collection}/${encodeURIComponent(record.id)}`,
         { method: "DELETE" },
       );
-      notify("Registro eliminado");
+      notify(
+        collection === "users" || collection === "markets"
+          ? "Registro inactivado. La información histórica se conserva."
+          : "Registro eliminado",
+      );
     } catch (error) {
       notify(
         error instanceof Error ? error.message : "No se pudo eliminar",
@@ -7551,7 +7545,7 @@ function AnalystApp({
   const deleteMarket = async (market: Market) => {
     if (
       !window.confirm(
-        `¿Eliminar definitivamente ${market.name} y sus clientes asociados?`,
+        `¿Inactivar ${market.name}? Sus clientes activos también se inactivarán, pero toda la información histórica se conservará.`,
       )
     )
       return;
@@ -7559,7 +7553,7 @@ function AnalystApp({
       await adminRequest(`/markets/${encodeURIComponent(market.id)}`, {
         method: "DELETE",
       });
-      notify(`Mercado eliminado: ${market.name}`);
+      notify(`Mercado inactivado: ${market.name}`);
     } catch (error) {
       notify(
         error instanceof Error
@@ -7606,13 +7600,13 @@ function AnalystApp({
     }
   };
   const deleteClient = async (client: Client) => {
-    if (!window.confirm(`¿Eliminar definitivamente al cliente ${client.name}?`))
+    if (!window.confirm(`¿Inactivar al cliente ${client.name}? Sus ventas históricas se conservarán.`))
       return;
     try {
       await adminRequest(`/clients/${encodeURIComponent(client.id)}`, {
         method: "DELETE",
       });
-      notify(`Cliente eliminado: ${client.name}`);
+      notify(`Cliente inactivado: ${client.name}`);
     } catch (error) {
       notify(
         error instanceof Error
@@ -7782,7 +7776,7 @@ function AnalystApp({
   const deleteTastingConsumption = async (consumo: InventoryMovement) => {
     if (
       !window.confirm(
-        `¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? "" : "es"}? La cantidad volverá a su stock personal.`,
+        `¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? "" : "es"}? La cantidad volverá al Almacén correspondiente.`,
       )
     )
       return;
@@ -7791,7 +7785,7 @@ function AnalystApp({
         `/degustaciones/movement/${encodeURIComponent(consumo.id)}`,
         { method: "DELETE" },
       );
-      notify("Degustación eliminada y stock personal restaurado");
+      notify("Degustación eliminada y stock de Almacén restaurado");
     } catch (error) {
       notify(
         error instanceof Error
@@ -7802,30 +7796,10 @@ function AnalystApp({
     }
   };
   const cleanupCatalogs = async () => {
-    if (
-      !window.confirm(
-        "Se eliminarán definitivamente todos los mercados, clientes, ventas, marcaciones, inventario, canjes, asignaciones, cierres y usuarios que no sean ANALISTA. Los precios y el usuario ANALISTA se conservarán. ¿Empezar desde cero?",
-      )
-    )
-      return;
-    try {
-      await adminRequest("/cleanup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          confirmation: "LIMPIAR_MERCADOS_CLIENTES_CANJES",
-        }),
-      });
-      localStorage.removeItem(DEFAULT_STOCK_SEED_KEY);
-      notify("Marcaciones, inventario y demás datos operativos eliminados.");
-    } catch (error) {
-      notify(
-        error instanceof Error
-          ? error.message
-          : "No se pudo limpiar la información",
-        true,
-      );
-    }
+    notify(
+      "La limpieza masiva está deshabilitada para proteger la información histórica.",
+      true,
+    );
   };
   const filteredClients = clients.filter((client) =>
     matchesTableSearch(query, [
@@ -7978,7 +7952,7 @@ function AnalystApp({
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
-    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["aprobaciones-trade", "Aprobaciones Trade"]] : []),
+    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["aprobaciones-trade", "Aprobaciones Trade"], ["auditoria", "Auditoría"]] : []),
     ["marcaciones", "Marcaciones"],
   ];
   return (
@@ -8521,18 +8495,23 @@ function AnalystApp({
             } else await deleteRecord("movements", record);
           }}
           onCleanup={cleanupCatalogs}
-          canCleanup={user.role === "ADMIN"}
+          canCleanup={false}
           notify={notify}
         />
       )}
       {tab === "degustacion" && (
         <AdminDegustacionesModule
-          onEdit={(record) => editRecord("movements", record)}
+          onEdit={() =>
+            notify(
+              "La degustación operativa se corrige eliminándola y registrando nuevamente el cierre para conservar el kardex de Almacén.",
+              true,
+            )
+          }
           consumos={tastingConsumptions}
           users={users}
           marketMap={marketMap}
           closures={closures}
-          onDeleteConsumo={(record) => deleteRecord("movements", record)}
+          onDeleteConsumo={(record) => void deleteTastingConsumption(record)}
         />
       )}
       {tab === "asignaciones" && (
@@ -8545,6 +8524,84 @@ function AnalystApp({
           setUsers={setUsers}
           notify={notify}
         />
+      )}
+      {tab === "auditoria" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Auditoría de integridad</h2>
+              <p>
+                Verifica relaciones de PostgreSQL, productos de ventas y coherencia entre Mercados, Almacenes y operaciones. No modifica información.
+              </p>
+            </div>
+            <Btn
+              onClick={() => void loadIntegrityAudit()}
+              disabled={integrityAuditLoading}
+              testId="button-integrity-audit"
+            >
+              <ShieldCheck />{" "}
+              {integrityAuditLoading ? "Auditando..." : "Ejecutar auditoría"}
+            </Btn>
+          </div>
+          <div className="panel-body">
+            {integrityAudit ? (
+              <>
+                <div className="import-hint">
+                  <strong>
+                    Estado: {integrityAudit.status} · Incidencias:{" "}
+                    {integrityAudit.totalIssues}
+                  </strong>
+                  <br />
+                  Stock operativo: Almacén · Relación de ventas:{" "}
+                  {integrityAudit.relationModel}
+                  <br />
+                  Última auditoría: {formatDate(integrityAudit.auditedAt)}
+                </div>
+                <div className="module-table-wrap">
+                  <div className="module-table">
+                    <div className="module-table-row module-table-header cols-2">
+                      <span>Validación</span>
+                      <span>Resultado</span>
+                    </div>
+                    {Object.entries(integrityAudit.checks).map(
+                      ([check, count]) => (
+                        <article
+                          className="module-table-row cols-2"
+                          key={check}
+                        >
+                          <span>
+                            <strong>
+                              {check
+                                .replaceAll("_", " ")
+                                .replace(/\b\w/g, (letter) =>
+                                  letter.toUpperCase(),
+                                )}
+                            </strong>
+                          </span>
+                          <span>
+                            <strong>{count}</strong>
+                            <small>
+                              {check.startsWith("legacy_")
+                                ? "Informativo / histórico"
+                                : count === 0
+                                  ? "Correcto"
+                                  : "Requiere revisión"}
+                            </small>
+                          </span>
+                        </article>
+                      ),
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <Empty
+                title="Auditoría pendiente"
+                detail="Ejecuta la auditoría para validar las relaciones actuales sin modificar datos."
+              />
+            )}
+          </div>
+        </section>
       )}
       {tab === "aprobaciones-trade" && (
         <section className="panel">
@@ -9473,11 +9530,13 @@ function PromoterApp({
       ? unitPrice > 0
       : normalizedPlanchaLines.length > 0 &&
         normalizedPlanchaLines.every((line) => line.units > 0 && line.unitPrice > 0);
-  const promoterStock = administrative
-    ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
-    : userRedemptionStock(user);
-  const selectedWarehouse = warehouses.find((warehouse) =>
-    warehouse.marketIds?.includes(selectedMarketId),
+  const selectedMarketWarehouseId = markets.find(
+    (market) => market.id === selectedMarketId,
+  )?.warehouseId;
+  const selectedWarehouse = warehouses.find(
+    (warehouse) =>
+      warehouse.id === selectedMarketWarehouseId ||
+      warehouse.marketIds?.includes(selectedMarketId),
   );
   const warehouseRedemptionStock = redemptionItems.reduce(
     (result, item) => ({
@@ -9490,14 +9549,12 @@ function PromoterApp({
     PANETON_900G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_900G) || 0),
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
-  const redemptionTotal = sumRedemptionStock(
-    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock,
-  );
+  const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
   const bonusProducts = bonusProductsFor(
     mode,
     total,
     planchas,
-    promoterStock,
+    warehouseRedemptionStock,
     administrative ? new Date(administrative.date + "-05:00") : new Date(),
   );
   const selectedBonusProduct =
@@ -9567,8 +9624,7 @@ function PromoterApp({
     mode === "PLANCHAS" && planchas >= 1
       ? canjeRequirementsLabel(requiredRedemptions)
       : selectedBonusProduct?.label;
-  const stockForCanje =
-    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock;
+  const stockForCanje = warehouseRedemptionStock;
   const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
     ([itemId, quantity]) => stockForCanje[itemId] < quantity,
   );
@@ -9956,18 +10012,6 @@ function PromoterApp({
     setSales(next);
     writeStore("bt-sales", next);
     if (bonus && mode === "UNIDADES") {
-      const nextPromoterStock = requiredRedemptionEntries(
-        requiredRedemptions,
-      ).reduce(
-        (nextStock, [itemId, quantity]) => ({
-          ...nextStock,
-          [itemId]: nextStock[itemId] - quantity,
-        }),
-        { ...promoterStock },
-      );
-      onUpdateUser(
-        withUserStock(user, userTastingStock(user), nextPromoterStock),
-      );
       const currentMovements = readStore<InventoryMovement[]>(
         "bt-inventory-movements",
         [],
