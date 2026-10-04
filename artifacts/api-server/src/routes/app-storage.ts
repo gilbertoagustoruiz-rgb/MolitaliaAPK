@@ -1889,6 +1889,12 @@ router.all(
              WHERE id=$1`,
             [id, archived, archivedAt],
           );
+          if (name === "markets") {
+            await db.query(
+              "UPDATE clients SET status='INACTIVO',data=data || jsonb_build_object('status','INACTIVO','marketArchivedAt',$2::text),record_updated_at=$2,updated_at=now() WHERE market_id=$1 AND status='ACTIVO'",
+              [id, archivedAt],
+            );
+          }
         } else {
           await db.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
           await db.query(
