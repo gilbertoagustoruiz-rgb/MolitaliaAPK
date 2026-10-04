@@ -55,6 +55,9 @@ function isPromoterRole(role?: Role) {
 function isZoneManagerRole(role?: Role) {
   return isPromoterRole(role) || role === "COORDINADOR";
 }
+function isArchivedUser(user?: AppUser) {
+  return Boolean(user?.catalogArchived || user?.sheetArchived);
+}
 type Status = "ACTIVO" | "INACTIVO";
 type SyncStatus = "SINCRONIZADA" | "PENDIENTE";
 type Market = {
@@ -79,7 +82,9 @@ type AppUser = {
   status: Status;
   tastingStock?: number;
   redemptionStock?: RedemptionStock;
+  /** @deprecated compatibilidad con datos históricos anteriores */
   sheetArchived?: boolean;
+  catalogArchived?: boolean;
 };
 type PromoterAssignment = {
   promoterId: string;
@@ -4144,7 +4149,7 @@ function NewCanjeModal({
 }) {
   const promoters = users.filter(
     (current) =>
-      !current.sheetArchived &&
+      !isArchivedUser(current) &&
       current.status === "ACTIVO" &&
       isPromoterRole(current.role),
   );
@@ -4347,7 +4352,6 @@ function AdminCanjesModule({
   canjes,
   marketMap,
   users,
-  onCreate,
   onDelete,
   onCleanup,
   canCleanup,
@@ -4357,7 +4361,6 @@ function AdminCanjesModule({
   canjes: AdminCanje[];
   marketMap: Record<string, Market>;
   users: AppUser[];
-  onCreate: () => void;
   onDelete: (canje: AdminCanje) => void;
   onCleanup: () => void;
   canCleanup: boolean;
@@ -5221,7 +5224,7 @@ function AssignmentModule({
             ) : (
               <Empty
                 title="No hay mercados activos"
-                detail="Actualiza primero la hoja de Mercados."
+                detail="Actualiza primero el catálogo de Mercados."
               />
             )}
           </div>
@@ -5604,26 +5607,6 @@ function SalesDashboard({
     () => aggregateSalesByMarket(sales, markets),
     [sales, markets],
   );
-  const stockRows = useMemo(
-    () =>
-      users
-        .filter((user) => isPromoterRole(user.role) && user.status === "ACTIVO")
-        .map((promoter) => {
-          const { tastingStock, redemptionStock } = calculatedPromoterStock(
-            promoter.id,
-            sales,
-            movements,
-          );
-          return {
-            promoter,
-            tastingStock,
-            redemptionStock,
-            lowStock: lowStockLabels(tastingStock, redemptionStock),
-          };
-        }),
-    [users, sales, movements],
-  );
-  const lowStockRows = stockRows.filter((row) => row.lowStock.length);
   const promoterRows = useMemo(
     () => aggregateSalesByPromoter(sales, users),
     [sales, users],
@@ -5995,7 +5978,7 @@ function CoordinatorApp({
   };
   const allowedUsers = users.filter(
     (current) =>
-      !current.sheetArchived &&
+      !isArchivedUser(current) &&
       (current.id === user.id ||
         userMarketIds(current).some((marketId) =>
           allowedMarketIds.has(marketId),
@@ -6015,7 +5998,7 @@ function CoordinatorApp({
     ["clientes", "Clientes"],
     ["usuarios", "Usuarios"],
     ["ventas", "Ventas"],
-    ["inventario", "Inventario"],
+    ["almacen", "Almacén"],
   ];
   const exportSales = () => {
     downloadCsv(
@@ -6503,7 +6486,7 @@ function AnalystApp({
   );
   const activeMarkets = markets.filter((market) => market.status === "ACTIVO");
   const canManageCatalogs = user.role === "ANALISTA" || user.role === "ADMIN";
-  const visibleUsers = users.filter((current) => !current.sheetArchived);
+  const visibleUsers = users.filter((current) => !isArchivedUser(current));
   const marketMap = Object.fromEntries(
     markets.map((market) => [market.id, market]),
   );
@@ -6519,7 +6502,7 @@ function AnalystApp({
             ).length,
             promoters: users.filter((current) => {
               if (
-                current.sheetArchived ||
+                isArchivedUser(current) ||
                 !isPromoterRole(current.role) ||
                 current.status !== "ACTIVO"
               )
@@ -7177,7 +7160,7 @@ function AnalystApp({
       );
     if (authoritative && skipped)
       throw new Error(
-        `La hoja tiene ${skipped} fila${skipped === 1 ? "" : "s"} inválida${skipped === 1 ? "" : "s"}. No se retiró ningún usuario.`,
+        `El archivo tiene ${skipped} fila${skipped === 1 ? "" : "s"} inválida${skipped === 1 ? "" : "s"}. No se retiró ningún usuario.`,
       );
     const repeatedDnis = imported
       .filter(
@@ -7188,7 +7171,7 @@ function AnalystApp({
       .map((item) => item.dni);
     if (repeatedDnis.length)
       throw new Error(
-        "La hoja contiene DNI repetidos. No se actualizó ningún usuario.",
+        "El archivo contiene DNI repetidos. No se actualizó ningún usuario.",
       );
     const next = [...users];
     imported.forEach((item) => {
@@ -8497,7 +8480,6 @@ function AnalystApp({
           canjes={adminCanjes}
           marketMap={marketMap}
           users={users}
-          onCreate={() => setModal("canje")}
           onDelete={async (record) => {
             const linked =
               record.sale ||
@@ -9473,11 +9455,10 @@ function PromoterApp({
       ? unitPrice > 0
       : normalizedPlanchaLines.length > 0 &&
         normalizedPlanchaLines.every((line) => line.units > 0 && line.unitPrice > 0);
-  const promoterStock = administrative
-    ? calculatedPromoterStock(user.id, sales, movements).redemptionStock
-    : userRedemptionStock(user);
-  const selectedWarehouse = warehouses.find((warehouse) =>
-    warehouse.marketIds?.includes(selectedMarketId),
+  const selectedWarehouse = warehouses.find(
+    (warehouse) =>
+      warehouse.id === selectedMarket?.warehouseId ||
+      warehouse.marketIds?.includes(selectedMarketId),
   );
   const warehouseRedemptionStock = redemptionItems.reduce(
     (result, item) => ({
@@ -9490,14 +9471,12 @@ function PromoterApp({
     PANETON_900G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_900G) || 0),
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
-  const redemptionTotal = sumRedemptionStock(
-    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock,
-  );
+  const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
   const bonusProducts = bonusProductsFor(
     mode,
     total,
     planchas,
-    promoterStock,
+    warehouseRedemptionStock,
     administrative ? new Date(administrative.date + "-05:00") : new Date(),
   );
   const selectedBonusProduct =
@@ -9567,8 +9546,7 @@ function PromoterApp({
     mode === "PLANCHAS" && planchas >= 1
       ? canjeRequirementsLabel(requiredRedemptions)
       : selectedBonusProduct?.label;
-  const stockForCanje =
-    mode === "PLANCHAS" ? warehouseRedemptionStock : promoterStock;
+  const stockForCanje = warehouseRedemptionStock;
   const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
     ([itemId, quantity]) => stockForCanje[itemId] < quantity,
   );
@@ -9956,18 +9934,6 @@ function PromoterApp({
     setSales(next);
     writeStore("bt-sales", next);
     if (bonus && mode === "UNIDADES") {
-      const nextPromoterStock = requiredRedemptionEntries(
-        requiredRedemptions,
-      ).reduce(
-        (nextStock, [itemId, quantity]) => ({
-          ...nextStock,
-          [itemId]: nextStock[itemId] - quantity,
-        }),
-        { ...promoterStock },
-      );
-      onUpdateUser(
-        withUserStock(user, userTastingStock(user), nextPromoterStock),
-      );
       const currentMovements = readStore<InventoryMovement[]>(
         "bt-inventory-movements",
         [],
