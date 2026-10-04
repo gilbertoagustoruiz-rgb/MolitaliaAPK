@@ -322,6 +322,16 @@ type AdminDegustacion = InventoryMovement & {
   degustacionId: string;
 };
 type Toast = { message: string; error?: boolean };
+type IntegrityAudit = {
+  status: "OK" | "REVISAR";
+  totalIssues: number;
+  checks: Record<string, number>;
+  auditedAt: string;
+  stockSource: "warehouses";
+  legacyInventoryOperational: false;
+  relationModel: string;
+  foreignKeys: string;
+};
 type CloudSnapshot = {
   markets: Market[];
   users: AppUser[];
@@ -6370,6 +6380,8 @@ function AnalystApp({
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
+  const [integrityAudit, setIntegrityAudit] = useState<IntegrityAudit | null>(null);
+  const [integrityAuditLoading, setIntegrityAuditLoading] = useState(false);
   const [marketWarehouses, setMarketWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
     void fetch("/api/app-storage/warehouses")
@@ -6422,6 +6434,41 @@ function AnalystApp({
       notify(error instanceof Error ? error.message : "No se pudo resolver la solicitud.", true);
     }
   };
+  const loadIntegrityAudit = async () => {
+    setIntegrityAuditLoading(true);
+    try {
+      const response = await fetch("/api/app-storage/integrity-audit", {
+        headers: {
+          "x-admin-dni": user.dni,
+          "x-admin-key": user.password || "",
+        },
+      });
+      const payload = (await response.json()) as IntegrityAudit & {
+        message?: string;
+      };
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo ejecutar la auditoría.");
+      setIntegrityAudit(payload);
+      notify(
+        payload.status === "OK"
+          ? "Auditoría completada: relaciones coherentes."
+          : "Auditoría completada: " +
+              payload.totalIssues +
+              " incidencia(s) por revisar.",
+        payload.status !== "OK",
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error
+          ? error.message
+          : "No se pudo ejecutar la auditoría de integridad.",
+        true,
+      );
+    } finally {
+      setIntegrityAuditLoading(false);
+    }
+  };
+
   const adminPromoter = users.find((person) => person.id === adminPromoterId);
   const adminAssignment = adminPromoter
     ? assignments.find((item) => assignmentMatchesUser(item, adminPromoter))
@@ -7896,7 +7943,7 @@ function AnalystApp({
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
-    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["aprobaciones-trade", "Aprobaciones Trade"]] : []),
+    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["aprobaciones-trade", "Aprobaciones Trade"], ["auditoria", "Auditoría"]] : []),
     ["marcaciones", "Marcaciones"],
   ];
   return (
@@ -8468,6 +8515,84 @@ function AnalystApp({
           setUsers={setUsers}
           notify={notify}
         />
+      )}
+      {tab === "auditoria" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h2>Auditoría de integridad</h2>
+              <p>
+                Verifica relaciones de PostgreSQL, productos de ventas y coherencia entre Mercados, Almacenes y operaciones. No modifica información.
+              </p>
+            </div>
+            <Btn
+              onClick={() => void loadIntegrityAudit()}
+              disabled={integrityAuditLoading}
+              testId="button-integrity-audit"
+            >
+              <ShieldCheck />{" "}
+              {integrityAuditLoading ? "Auditando..." : "Ejecutar auditoría"}
+            </Btn>
+          </div>
+          <div className="panel-body">
+            {integrityAudit ? (
+              <>
+                <div className="import-hint">
+                  <strong>
+                    Estado: {integrityAudit.status} · Incidencias:{" "}
+                    {integrityAudit.totalIssues}
+                  </strong>
+                  <br />
+                  Stock operativo: Almacén · Relación de ventas:{" "}
+                  {integrityAudit.relationModel}
+                  <br />
+                  Última auditoría: {formatDate(integrityAudit.auditedAt)}
+                </div>
+                <div className="module-table-wrap">
+                  <div className="module-table">
+                    <div className="module-table-row module-table-header cols-2">
+                      <span>Validación</span>
+                      <span>Resultado</span>
+                    </div>
+                    {Object.entries(integrityAudit.checks).map(
+                      ([check, count]) => (
+                        <article
+                          className="module-table-row cols-2"
+                          key={check}
+                        >
+                          <span>
+                            <strong>
+                              {check
+                                .replaceAll("_", " ")
+                                .replace(/\b\w/g, (letter) =>
+                                  letter.toUpperCase(),
+                                )}
+                            </strong>
+                          </span>
+                          <span>
+                            <strong>{count}</strong>
+                            <small>
+                              {check.startsWith("legacy_")
+                                ? "Informativo / histórico"
+                                : count === 0
+                                  ? "Correcto"
+                                  : "Requiere revisión"}
+                            </small>
+                          </span>
+                        </article>
+                      ),
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <Empty
+                title="Auditoría pendiente"
+                detail="Ejecuta la auditoría para validar las relaciones actuales sin modificar datos."
+              />
+            )}
+          </div>
+        </section>
       )}
       {tab === "aprobaciones-trade" && (
         <section className="panel">
