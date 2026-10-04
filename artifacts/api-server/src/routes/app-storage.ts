@@ -2505,31 +2505,84 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         units
     )
       throw new Error("El mix debe sumar las unidades de la venta.");
-    if (
-      mode === "PLANCHAS" &&
-      (!Number.isInteger(planchas) ||
-        planchas < 1 ||
-        planchas > 80 ||
-        units !== planchas * 6)
-    )
-      throw new Error(
-        "Cada plancha debe sumar 6 unidades; más de 80 requiere autorización Trade.",
-      );
-    const amount =
-      mode === "PLANCHAS"
-        ? Object.entries(mix).reduce(
-            (sum, [brand, n]) => sum + Number(n) * Number(prices[brand] || 0),
-            0,
+
+    let amount = 0;
+    if (mode === "PLANCHAS") {
+      if (!Number.isInteger(planchas) || planchas < 1 || planchas > 80)
+        throw new Error(
+          "La cantidad de planchas debe estar entre 1 y 80; más de 80 requiere autorización Trade.",
+        );
+      const rawLines = Array.isArray(input.planchaLines)
+        ? input.planchaLines.filter(isRecord)
+        : [];
+      if (rawLines.length) {
+        let calculatedUnits = 0;
+        let calculatedPlanchas = 0;
+        for (const line of rawLines) {
+          const lineSku = value(line, "sku");
+          const lineUnits = Math.max(0, Math.floor(numeric(line, "units")));
+          const linePrice = Number(line.unitPrice);
+          if (!lineSku || lineUnits < 1 || !(linePrice > 0))
+            throw new Error(
+              "Cada línea de plancha requiere producto, unidades y precio válido.",
+            );
+          const catalog = await db.query(
+            "SELECT data FROM product_prices WHERE sku=$1 LIMIT 1",
+            [lineSku],
+          );
+          if (!catalog.rows.length)
+            throw new Error("Uno de los productos de plancha no existe en Marcas.");
+          const productData = isRecord(catalog.rows[0].data)
+            ? catalog.rows[0].data
+            : {};
+          const saleModes = Array.isArray(productData.saleModes)
+            ? productData.saleModes.map(String)
+            : [];
+          if (
+            value(productData, "status") === "INACTIVO" ||
+            (saleModes.length && !saleModes.includes("PLANCHAS"))
           )
-        : units * Number(Object.values(prices)[0]);
+            throw new Error(
+              "Uno de los productos no está habilitado para venta por planchas.",
+            );
+          const unitsPerPlancha = Math.max(
+            1,
+            Math.floor(Number(productData.unitsPerPlancha) || 6),
+          );
+          if (lineUnits % unitsPerPlancha !== 0)
+            throw new Error(
+              `Las unidades de ${value(productData, "product") || lineSku} deben ser múltiplo de ${unitsPerPlancha} por plancha.`,
+            );
+          calculatedUnits += lineUnits;
+          calculatedPlanchas += lineUnits / unitsPerPlancha;
+          amount += lineUnits * linePrice;
+        }
+        if (
+          calculatedUnits !== units ||
+          calculatedPlanchas !== planchas ||
+          !Number.isInteger(calculatedPlanchas)
+        )
+          throw new Error(
+            "Las líneas de productos no coinciden con las unidades y planchas declaradas.",
+          );
+      } else {
+        // Compatibilidad con ventas administrativas creadas antes del catálogo Marcas.
+        if (units !== planchas * 6)
+          throw new Error(
+            "La venta histórica sin detalle de productos debe mantener 6 unidades por plancha.",
+          );
+        amount = Object.entries(mix).reduce(
+          (sum, [key, n]) => sum + Number(n) * Number(prices[key] || 0),
+          0,
+        );
+      }
+    } else {
+      amount = units * Number(Object.values(prices)[0]);
+    }
     if (
       !(amount > 0) ||
       !Number.isFinite(amount) ||
-      Math.abs(amount - Number(input.amountSoles)) > 0.01 ||
-      (mode === "PLANCHAS" &&
-        Object.entries(mix).some(
-          ([brand, n]) => Number(n) > 0 && !(Number(prices[brand]) > 0),
-        ))
+      Math.abs(amount - Number(input.amountSoles)) > 0.01
     )
       throw new Error("Verifica los precios unitarios y el total.");
     const photoValid = (photo: string) => /^(https:\/\/|\/api\/)/.test(photo);
