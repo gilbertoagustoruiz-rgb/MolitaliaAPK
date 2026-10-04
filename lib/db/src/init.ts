@@ -206,6 +206,83 @@ export async function ensureDatabaseSchema() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS sale_items (
+      sale_id text NOT NULL,
+      line_no integer NOT NULL,
+      sku text NOT NULL,
+      product_name text NOT NULL DEFAULT '',
+      quantity numeric NOT NULL DEFAULT 0,
+      unit_price numeric(14,2) NOT NULL DEFAULT 0,
+      amount_soles numeric(14,2) NOT NULL DEFAULT 0,
+      mode text NOT NULL DEFAULT '',
+      presentation text,
+      data jsonb NOT NULL DEFAULT '{}',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (sale_id,line_no)
+    );
+
+    -- Backfill aditivo: normaliza únicamente ventas cuyo SKU ya está explícito.
+    -- La venta original en sales.data nunca se modifica ni se elimina.
+    INSERT INTO sale_items
+      (sale_id,line_no,sku,product_name,quantity,unit_price,amount_soles,mode,presentation,data)
+    SELECT
+      s.id,
+      lines.ordinality::integer,
+      lines.item->>'sku',
+      COALESCE(lines.item->>'product',''),
+      COALESCE(NULLIF(lines.item->>'units','')::numeric,0),
+      COALESCE(NULLIF(lines.item->>'unitPrice','')::numeric,0),
+      COALESCE(NULLIF(lines.item->>'units','')::numeric,0) *
+        COALESCE(NULLIF(lines.item->>'unitPrice','')::numeric,0),
+      s.mode,
+      NULLIF(lines.item->>'presentation',''),
+      lines.item
+    FROM sales s
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE
+        WHEN jsonb_typeof(s.data->'planchaLines')='array' THEN s.data->'planchaLines'
+        ELSE '[]'::jsonb
+      END
+    ) WITH ORDINALITY AS lines(item,ordinality)
+    WHERE COALESCE(lines.item->>'sku','') <> ''
+    ON CONFLICT (sale_id,line_no) DO NOTHING;
+
+    INSERT INTO sale_items
+      (sale_id,line_no,sku,product_name,quantity,unit_price,amount_soles,mode,presentation,data)
+    SELECT
+      s.id,
+      1,
+      unit_price.key,
+      COALESCE(p.product,s.data->>'product',''),
+      s.units,
+      COALESCE(NULLIF(unit_price.value,'')::numeric,0),
+      s.units * COALESCE(NULLIF(unit_price.value,'')::numeric,0),
+      s.mode,
+      NULLIF(s.data->>'presentation',''),
+      jsonb_build_object(
+        'sku',unit_price.key,
+        'quantity',s.units,
+        'unitPrice',COALESCE(NULLIF(unit_price.value,'')::numeric,0),
+        'source','historical-unitPrices'
+      )
+    FROM sales s
+    CROSS JOIN LATERAL (
+      SELECT key,value
+      FROM jsonb_each_text(
+        CASE
+          WHEN jsonb_typeof(s.data->'unitPrices')='object' THEN s.data->'unitPrices'
+          ELSE '{}'::jsonb
+        END
+      )
+      ORDER BY key
+      LIMIT 1
+    ) AS unit_price
+    LEFT JOIN product_prices p ON p.sku=unit_price.key
+    WHERE s.mode='UNIDADES'
+      AND NOT EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id=s.id)
+    ON CONFLICT (sale_id,line_no) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS client_categories (
       id text PRIMARY KEY,
       name text NOT NULL UNIQUE,
@@ -229,5 +306,112 @@ export async function ensureDatabaseSchema() {
     CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(event_date DESC);
     CREATE INDEX IF NOT EXISTS idx_movements_date ON inventory_movements(movement_date DESC);
     CREATE INDEX IF NOT EXISTS idx_closures_date ON session_closures(closure_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_items_sku ON sale_items(sku);
+
+    -- FK seguras: solo se crean y validan cuando la auditoría no encuentra huérfanos.
+    -- Si existen datos históricos inconsistentes, el arranque continúa sin borrar ni alterar filas.
+    DO $
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='clients_market_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM clients c LEFT JOIN markets m ON m.id=c.market_id
+        WHERE c.market_id='' OR m.id IS NULL
+      ) THEN
+        ALTER TABLE clients ADD CONSTRAINT clients_market_fk
+          FOREIGN KEY (market_id) REFERENCES markets(id) NOT VALID;
+        ALTER TABLE clients VALIDATE CONSTRAINT clients_market_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='sales_promoter_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM sales s LEFT JOIN users u ON u.id=s.promoter_id
+        WHERE s.promoter_id='' OR u.id IS NULL
+      ) THEN
+        ALTER TABLE sales ADD CONSTRAINT sales_promoter_fk
+          FOREIGN KEY (promoter_id) REFERENCES users(id) NOT VALID;
+        ALTER TABLE sales VALIDATE CONSTRAINT sales_promoter_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='sales_client_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM sales s LEFT JOIN clients c ON c.id=s.client_id
+        WHERE s.client_id='' OR c.id IS NULL
+      ) THEN
+        ALTER TABLE sales ADD CONSTRAINT sales_client_fk
+          FOREIGN KEY (client_id) REFERENCES clients(id) NOT VALID;
+        ALTER TABLE sales VALIDATE CONSTRAINT sales_client_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='sales_market_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM sales s LEFT JOIN markets m ON m.id=s.market_id
+        WHERE s.market_id='' OR m.id IS NULL
+      ) THEN
+        ALTER TABLE sales ADD CONSTRAINT sales_market_fk
+          FOREIGN KEY (market_id) REFERENCES markets(id) NOT VALID;
+        ALTER TABLE sales VALIDATE CONSTRAINT sales_market_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='sale_items_sale_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM sale_items si LEFT JOIN sales s ON s.id=si.sale_id
+        WHERE s.id IS NULL
+      ) THEN
+        ALTER TABLE sale_items ADD CONSTRAINT sale_items_sale_fk
+          FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE NOT VALID;
+        ALTER TABLE sale_items VALIDATE CONSTRAINT sale_items_sale_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='sale_items_sku_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM sale_items si LEFT JOIN product_prices p ON p.sku=si.sku
+        WHERE p.sku IS NULL
+      ) THEN
+        ALTER TABLE sale_items ADD CONSTRAINT sale_items_sku_fk
+          FOREIGN KEY (sku) REFERENCES product_prices(sku)
+          ON UPDATE CASCADE ON DELETE RESTRICT NOT VALID;
+        ALTER TABLE sale_items VALIDATE CONSTRAINT sale_items_sku_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='attendance_promoter_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM attendance a LEFT JOIN users u ON u.id=a.promoter_id
+        WHERE a.promoter_id='' OR u.id IS NULL
+      ) THEN
+        ALTER TABLE attendance ADD CONSTRAINT attendance_promoter_fk
+          FOREIGN KEY (promoter_id) REFERENCES users(id) NOT VALID;
+        ALTER TABLE attendance VALIDATE CONSTRAINT attendance_promoter_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='attendance_client_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM attendance a LEFT JOIN clients c ON c.id=a.client_id
+        WHERE a.client_id='' OR c.id IS NULL
+      ) THEN
+        ALTER TABLE attendance ADD CONSTRAINT attendance_client_fk
+          FOREIGN KEY (client_id) REFERENCES clients(id) NOT VALID;
+        ALTER TABLE attendance VALIDATE CONSTRAINT attendance_client_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='attendance_market_fk'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM attendance a LEFT JOIN markets m ON m.id=a.market_id
+        WHERE a.market_id='' OR m.id IS NULL
+      ) THEN
+        ALTER TABLE attendance ADD CONSTRAINT attendance_market_fk
+          FOREIGN KEY (market_id) REFERENCES markets(id) NOT VALID;
+        ALTER TABLE attendance VALIDATE CONSTRAINT attendance_market_fk;
+      END IF;
+    END $;
   `);
 }
