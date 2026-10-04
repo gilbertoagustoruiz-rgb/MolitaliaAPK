@@ -1296,7 +1296,12 @@ router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<vo
   } finally { db.release(); }
 });
 
-router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
+router.get("/app-storage/trade-approvals", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) {
+    res.status(403).json({ message: "Solo Admin o Analista puede consultar Aprobaciones Trade." });
+    return;
+  }
   try {
     const result = await pool.query(
       "SELECT data,status,requested_at,resolved_at,resolved_by,resolution_comment FROM trade_approvals ORDER BY requested_at DESC,created_at DESC",
