@@ -311,7 +311,7 @@ export async function ensureDatabaseSchema() {
 
     -- FK seguras: solo se crean y validan cuando la auditoría no encuentra huérfanos.
     -- Si existen datos históricos inconsistentes, el arranque continúa sin borrar ni alterar filas.
-    DO $
+    DO $fk$
     BEGIN
       IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname='clients_market_fk'
@@ -412,6 +412,6 @@ export async function ensureDatabaseSchema() {
           FOREIGN KEY (market_id) REFERENCES markets(id) NOT VALID;
         ALTER TABLE attendance VALIDATE CONSTRAINT attendance_market_fk;
       END IF;
-    END $;
+    END $fk$;
   `);
 }
