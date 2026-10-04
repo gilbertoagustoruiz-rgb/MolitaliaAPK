@@ -6393,7 +6393,12 @@ function AnalystApp({
   const loadTradeApprovals = async () => {
     setTradeApprovalsLoading(true);
     try {
-      const response = await fetch("/api/app-storage/trade-approvals");
+      const response = await fetch("/api/app-storage/trade-approvals", {
+        headers: {
+          "x-admin-dni": user.dni,
+          "x-admin-key": user.password || "",
+        },
+      });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "No se pudieron cargar las aprobaciones.");
       setTradeApprovals(Array.isArray(payload.approvals) ? payload.approvals : []);
@@ -6404,10 +6409,11 @@ function AnalystApp({
     }
   };
   useEffect(() => {
+    if (!["ADMIN", "ANALISTA"].includes(user.role)) return;
     void loadTradeApprovals();
     const timer = window.setInterval(() => void loadTradeApprovals(), 15000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [user.role]);
   const resolveTradeApproval = async (approval: TradeApproval, decision: "APROBADA" | "RECHAZADA") => {
     try {
       const response = await fetch(`/api/app-storage/trade-approvals/${approval.id}/resolve`, {
