@@ -80,7 +80,7 @@ try {
   await request("/app-storage/warehouses/ALM-E2E/recharge", {
     method: "POST",
     headers: adminHeaders,
-    body: JSON.stringify({ initial: true, quantities: { PANETON_900G: 10, PANETON_85G: 10, AVENA: 20, BATEA: 5, MANDIL: 5, SPAGHETTI: 20 } }),
+    body: JSON.stringify({ initial: true, quantities: { PANETON_900G: 10, PANETON_85G: 10, AVENA: 1000, BATEA: 20, MANDIL: 20, SPAGHETTI: 1000 } }),
   });
 
   const now = new Date().toISOString();
