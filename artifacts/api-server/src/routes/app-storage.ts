@@ -12,7 +12,7 @@ const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
-const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"] as const;
+const redemptionItemIds: readonly string[] = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
