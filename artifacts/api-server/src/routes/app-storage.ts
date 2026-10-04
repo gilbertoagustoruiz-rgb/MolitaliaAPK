@@ -919,6 +919,7 @@ router.get("/app-storage/integrity-audit", async (req, res): Promise<void> => {
     return;
   }
   try {
+    await ensureSaleItemsBackfill();
     const checks = [
       ["sales_without_promoter", "SELECT count(*)::int AS count FROM sales s LEFT JOIN users u ON u.id=s.promoter_id WHERE u.id IS NULL"],
       ["sales_without_client", "SELECT count(*)::int AS count FROM sales s LEFT JOIN clients c ON c.id=s.client_id WHERE c.id IS NULL"],
@@ -1439,7 +1440,9 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
 
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    await ensureSaleItemsBackfill();
+    void ensureSaleItemsBackfill().catch((error) =>
+      req.log.error({ err: error }, "Unable to backfill sale_items"),
+    );
     res.json({
       storage: "digitalocean-postgresql",
       catalogRevision: await readCatalogRevision(),
