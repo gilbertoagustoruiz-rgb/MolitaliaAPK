@@ -98,6 +98,94 @@ function recordDate(record: StoredRecord) {
   return value(record, "updatedAt") || value(record, "date") || null;
 }
 
+function saleItemDrafts(source: StoredRecord) {
+  const mode = value(source, "mode");
+  if (mode === "PLANCHAS" && Array.isArray(source.planchaLines)) {
+    return source.planchaLines
+      .filter(isRecord)
+      .map((line, index) => ({
+        lineNo: index + 1,
+        sku: value(line, "sku"),
+        quantity: numeric(line, "units"),
+        unitPrice: numeric(line, "unitPrice"),
+        presentation: value(line, "presentation") || null,
+        raw: line,
+      }))
+      .filter((line) => line.sku && line.quantity > 0);
+  }
+  if (mode === "UNIDADES" && isRecord(source.unitPrices)) {
+    const entries = Object.entries(source.unitPrices);
+    if (!entries.length) return [];
+    const [sku, rawPrice] = entries[0];
+    const quantity = numeric(source, "units");
+    return quantity > 0
+      ? [{
+          lineNo: 1,
+          sku: String(sku || "").trim(),
+          quantity,
+          unitPrice: Number(rawPrice) || 0,
+          presentation: value(source, "presentation") || null,
+          raw: {
+            sku,
+            quantity,
+            unitPrice: Number(rawPrice) || 0,
+            presentation: value(source, "presentation") || undefined,
+          },
+        }]
+      : [];
+  }
+  return [];
+}
+
+async function replaceSaleItems(
+  client: QueryClient,
+  saleId: string,
+  source: StoredRecord,
+) {
+  const drafts = saleItemDrafts(source);
+  if (!drafts.length) {
+    throw new Error(
+      "La venta no contiene un SKU válido. Actualiza Marcas antes de registrar la venta.",
+    );
+  }
+  const skuList = [...new Set(drafts.map((line) => line.sku))];
+  const catalog = await client.query(
+    "SELECT sku,product FROM product_prices WHERE sku = ANY($1::text[])",
+    [skuList],
+  );
+  const catalogBySku = new Map(
+    catalog.rows.map((row) => [String(row.sku), String(row.product || "")]),
+  );
+  const missing = skuList.filter((sku) => !catalogBySku.has(sku));
+  if (missing.length) {
+    throw new Error(
+      `SKU no encontrado en Marcas: ${missing.join(", ")}. No se modificó la venta.`,
+    );
+  }
+
+  await client.query("DELETE FROM sale_items WHERE sale_id=$1", [saleId]);
+  for (const line of drafts) {
+    const amount = line.quantity * line.unitPrice;
+    await client.query(
+      `INSERT INTO sale_items
+        (sale_id,line_no,sku,product_name,quantity,unit_price,amount_soles,mode,presentation,data,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now())`,
+      [
+        saleId,
+        line.lineNo,
+        line.sku,
+        catalogBySku.get(line.sku) || "",
+        line.quantity,
+        line.unitPrice,
+        amount,
+        value(source, "mode"),
+        line.presentation,
+        line.raw,
+      ],
+    );
+  }
+}
+
 function campaignDateParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: campaignTimeZone,
@@ -459,6 +547,7 @@ async function upsertRecord(
         updated,
       ],
     );
+    await replaceSaleItems(client, key, normalized);
   } else if (name === "attendance") {
     await client.query(
       `INSERT INTO attendance (id,promoter_id,client_id,market_id,event_type,event_date,status,photo,data,record_updated_at)
@@ -2462,6 +2551,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         updatedAt,
       ],
     );
+    await replaceSaleItems(client as unknown as QueryClient, id, sale);
     await client.query(
       "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
       [movementPrefix],
@@ -2566,6 +2656,7 @@ router.delete(
        ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now(),updated_at=now()`,
         [id],
       );
+      await client.query("DELETE FROM sale_items WHERE sale_id=$1", [id]);
       await client.query("DELETE FROM sales WHERE id=$1", [id]);
       await client.query("COMMIT");
       res.json({
