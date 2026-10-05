@@ -13,6 +13,11 @@ const scrypt = promisify(scryptCallback);
 const campaignTimeZone = "America/Lima";
 const automaticClosureIntervalMs = 30_000;
 const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
+const miniHalfPlanchaSkus = new Set([
+  "TODINNITO-85",
+  "MINI-COSTA-MINIONS-80",
+  "MINI-COSTA-JURASSIC-80",
+]);
 
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
@@ -2275,6 +2280,32 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     const units = Number(input.units);
     const planchas = Number(input.planchas);
     const mode = value(input, "mode");
+    const inputPlanchaLines = Array.isArray(input.planchaLines)
+      ? input.planchaLines.filter(isRecord)
+      : [];
+    const miniOnlyPlancha =
+      inputPlanchaLines.length > 0 &&
+      inputPlanchaLines.every((line) => miniHalfPlanchaSkus.has(value(line, "sku")));
+    const miniEligibleUnits = inputPlanchaLines.reduce(
+      (sum, line) =>
+        sum +
+        (miniHalfPlanchaSkus.has(value(line, "sku"))
+          ? Math.max(0, Math.floor(numeric(line, "units")))
+          : 0),
+      0,
+    );
+    const validMiniHalfPlancha =
+      mode === "PLANCHAS" &&
+      miniOnlyPlancha &&
+      miniEligibleUnits === 24 &&
+      units === 24 &&
+      planchas === 0.5;
+    const validMiniFullPlancha =
+      mode === "PLANCHAS" &&
+      miniOnlyPlancha &&
+      miniEligibleUnits === 48 &&
+      units === 48 &&
+      planchas === 1;
     if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
       throw new Error("La fecha de venta no puede estar vacía ni ser futura.");
     if (
@@ -2297,13 +2328,15 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error("El mix debe sumar las unidades de la venta.");
     if (
       mode === "PLANCHAS" &&
+      !validMiniHalfPlancha &&
+      !validMiniFullPlancha &&
       (!Number.isInteger(planchas) ||
         planchas < 1 ||
         planchas > 80 ||
         units !== planchas * 6)
     )
       throw new Error(
-        "Cada plancha debe sumar 6 unidades; más de 80 requiere autorización Trade.",
+        "La cantidad no corresponde a la plancha. En minis de 80/85 g se permiten 24 und (1/2 plancha) o 48 und (1 plancha).",
       );
     const amount =
       mode === "PLANCHAS"
@@ -2367,27 +2400,41 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
           month: "numeric",
         }).format(date),
       );
-      const eligible =
-        planchas === 10 ||
-        ([9, 10, 11, 12].includes(month) && [1, 4].includes(planchas));
-      if (Boolean(bonus) !== eligible)
-        throw new Error(
-          "El canje no corresponde a las planchas y fecha elegidas.",
-        );
-      if (bonus) {
-        const avena = planchas === 1 ? 3 : planchas === 4 ? 12 : 24;
-        const spaghetti = planchas === 1 ? 1 : planchas === 4 ? 3 : 10;
-        const accessory = requested.MANDIL || requested.BATEA;
+      if (validMiniHalfPlancha) {
         if (
-          requested.AVENA !== avena * count ||
-          requested.SPAGHETTI !== spaghetti * count ||
-          (accessory && (planchas !== 10 || accessory !== count)) ||
-          (requested.MANDIL && ![9, 10].includes(month)) ||
-          (requested.BATEA && month !== 11)
+          !bonus ||
+          count !== 1 ||
+          requested.AVENA !== 2 ||
+          requested.SPAGHETTI ||
+          requested.MANDIL ||
+          requested.BATEA
         )
           throw new Error(
-            "Los items del canje no corresponden a esta dinámica.",
+            "Para 24 unidades de minis corresponde 2 Avena Clásica.",
           );
+      } else {
+        const eligible =
+          planchas === 10 ||
+          ([9, 10, 11, 12].includes(month) && [1, 4].includes(planchas));
+        if (Boolean(bonus) !== eligible)
+          throw new Error(
+            "El canje no corresponde a las planchas y fecha elegidas.",
+          );
+        if (bonus) {
+          const avena = planchas === 1 ? 3 : planchas === 4 ? 12 : 24;
+          const spaghetti = planchas === 1 ? 1 : planchas === 4 ? 3 : 10;
+          const accessory = requested.MANDIL || requested.BATEA;
+          if (
+            requested.AVENA !== avena * count ||
+            requested.SPAGHETTI !== spaghetti * count ||
+            (accessory && (planchas !== 10 || accessory !== count)) ||
+            (requested.MANDIL && ![9, 10].includes(month)) ||
+            (requested.BATEA && month !== 11)
+          )
+            throw new Error(
+              "Los items del canje no corresponden a esta dinámica.",
+            );
+        }
       }
     }
     await applyWarehouseStockMovement(
