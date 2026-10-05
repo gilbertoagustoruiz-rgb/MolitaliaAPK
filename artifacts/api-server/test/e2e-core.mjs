@@ -72,6 +72,104 @@ try {
   if (login.user?.id !== promoter.id) throw new Error("Login E2E did not return the promoter.");
 
   const adminHeaders = { "x-admin-dni": admin.dni, "x-admin-key": admin.password };
+
+  await request("/app-storage/admin/users", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      user: {
+        id: "USR-E2E-USER-EDIT",
+        dni: "99999993",
+        name: "E2E COORDINADOR",
+        role: "COORDINADOR",
+        roleLabel: "COORDINADOR",
+        marketId: market.id,
+        password: "E2E-user-2026",
+        status: "ACTIVO",
+      },
+    }),
+  });
+  await request("/app-storage/assignments", {
+    method: "POST",
+    body: JSON.stringify({
+      assignment: {
+        promoterId: "USR-E2E-USER-EDIT",
+        promoterDni: "99999993",
+        marketIds: [market.id],
+        clientIds: [client.id],
+        updatedAt: new Date().toISOString(),
+      },
+    }),
+  });
+
+  await request("/app-storage/admin/records/users/USR-E2E-USER-EDIT", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      record: {
+        id: "USR-E2E-USER-EDIT",
+        dni: "99999994",
+        name: "E2E COORDINADOR",
+        role: "COORDINADOR",
+        roleLabel: "COORDINADOR",
+        marketId: market.id,
+        status: "ACTIVO",
+        password: "",
+      },
+    }),
+  });
+  const updatedAssignmentDni = await pool.query(
+    "SELECT promoter_dni FROM assignments WHERE promoter_id='USR-E2E-USER-EDIT'",
+  );
+  if (updatedAssignmentDni.rows[0]?.promoter_dni !== "99999994")
+    throw new Error("User DNI edit did not update assignment promoter_dni.");
+
+  const duplicateDniEdit = await fetch(
+    base + "/app-storage/admin/records/users/USR-E2E-USER-EDIT",
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json", ...adminHeaders },
+      body: JSON.stringify({
+        record: {
+          id: "USR-E2E-USER-EDIT",
+          dni: admin.dni,
+          name: "E2E COORDINADOR",
+          role: "COORDINADOR",
+          marketId: market.id,
+          status: "ACTIVO",
+        },
+      }),
+    },
+  );
+  if (duplicateDniEdit.status !== 409)
+    throw new Error("Duplicate DNI edit was not rejected.");
+
+  await request("/app-storage/admin/records/users/USR-E2E-USER-EDIT", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      record: {
+        id: "USR-E2E-USER-EDIT",
+        dni: "99999994",
+        name: "E2E ANALISTA TEMP",
+        role: "ANALISTA",
+        roleLabel: "ANALISTA",
+        status: "ACTIVO",
+        password: "",
+      },
+    }),
+  });
+  const removedAssignment = await pool.query(
+    "SELECT promoter_id FROM assignments WHERE promoter_id='USR-E2E-USER-EDIT'",
+  );
+  if (removedAssignment.rows.length)
+    throw new Error("Assignment remained after user changed to non-zone role.");
+
+  await request("/app-storage/admin/records/users/USR-E2E-USER-EDIT", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+
   await request("/app-storage/warehouses", {
     method: "POST",
     headers: adminHeaders,
@@ -275,6 +373,22 @@ try {
   await pool.query(
     "UPDATE sales SET data=jsonb_set(data,'{status}','\"PENDIENTE\"'::jsonb) WHERE id='VTA-E2E-PLANCHA'",
   );
+  const deletePromoterWithHistory = await fetch(
+    base + "/app-storage/admin/records/users/" + promoter.id,
+    {
+      method: "DELETE",
+      headers: adminHeaders,
+    },
+  );
+  const deletePromoterWithHistoryBody = await deletePromoterWithHistory.json().catch(() => ({}));
+  if (deletePromoterWithHistory.status !== 409)
+    throw new Error(
+      `Promoter with history deletion was not blocked: ${deletePromoterWithHistory.status} ${JSON.stringify(deletePromoterWithHistoryBody)}`,
+    );
+  const promoterStillExists = await pool.query("SELECT id FROM users WHERE id=$1", [promoter.id]);
+  if (!promoterStillExists.rows.length)
+    throw new Error("Promoter with historical records was deleted.");
+
   const snapshot = await request("/app-storage");
   const repairedStatusSale = snapshot.snapshot.sales.find(
     (sale) => sale.id === "VTA-E2E-PLANCHA",

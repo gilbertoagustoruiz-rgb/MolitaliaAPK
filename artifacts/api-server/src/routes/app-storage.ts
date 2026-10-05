@@ -1646,6 +1646,15 @@ router.all(
     }
     if (
       name === "users" &&
+      !["ADMIN", "ANALISTA"].includes(String(actor.data.role || ""))
+    ) {
+      res.status(403).json({
+        message: "Solo Admin o Analista pueden administrar usuarios.",
+      });
+      return;
+    }
+    if (
+      name === "users" &&
       id === actor.data.id &&
       (req.method === "DELETE" || req.body?.record?.status === "INACTIVO")
     ) {
@@ -1738,6 +1747,7 @@ router.all(
           }
         }
         if (name === "users") {
+          const nextRole = value(next, "role");
           if (
             ![
               "PROMOTOR",
@@ -1749,15 +1759,50 @@ router.all(
               "TRADE",
               "ADMIN",
               "CLIENTE",
-            ].includes(value(next, "role"))
+            ].includes(nextRole)
           )
             throw new Error("Rol no válido.");
           required(["name", "role", "status"]);
           if (!/^\d{8}$/.test(value(next, "dni")))
             throw new Error("El DNI debe tener 8 dígitos.");
+          const duplicateDni = await db.query(
+            "SELECT id FROM users WHERE dni=$1 AND id<>$2 LIMIT 1",
+            [next.dni, id],
+          );
+          if (duplicateDni.rows.length)
+            throw new Error("Ya existe otro usuario con este DNI.");
           if (value(input, "password") && value(input, "password").length < 3)
             throw new Error("La clave debe tener al menos 3 caracteres.");
           if (!value(input, "password")) delete next.password;
+
+          const needsMarket = [
+            "PROMOTOR",
+            "PROMOTOR ROTATIVO",
+            "PROMOTOR PERMANENTE",
+            "COORDINADOR",
+          ].includes(nextRole);
+          if (needsMarket) {
+            required(["marketId"]);
+            const marketExists = await db.query(
+              "SELECT id FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+              [next.marketId],
+            );
+            if (!marketExists.rows.length)
+              throw new Error("Selecciona un Mercado activo para este usuario.");
+            delete next.clientId;
+          } else if (nextRole === "CLIENTE") {
+            required(["clientId"]);
+            const clientExists = await db.query(
+              "SELECT id FROM clients WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+              [next.clientId],
+            );
+            if (!clientExists.rows.length)
+              throw new Error("Selecciona un Cliente activo para esta cuenta.");
+            delete next.marketId;
+          } else {
+            delete next.clientId;
+            delete next.marketId;
+          }
         }
         if (name === "attendance" || name === "movements") {
           if (!Number.isFinite(new Date(value(next, "date")).getTime()))
@@ -1807,6 +1852,25 @@ router.all(
           if (!others.rows.length)
             throw new Error(
               "Debes conservar al menos un administrador o analista activo.",
+            );
+        }
+      }
+      if (name === "users" && deleting) {
+        const relatedChecks = [
+          ["sales", "promoter_id"],
+          ["attendance", "promoter_id"],
+          ["inventory_movements", "actor_id"],
+          ["trade_approvals", "promoter_id"],
+          ["warehouse_movements", "actor_id"],
+        ] as const;
+        for (const [relatedTable, relatedColumn] of relatedChecks) {
+          const related = await db.query(
+            `SELECT 1 FROM ${relatedTable} WHERE ${relatedColumn}=$1 LIMIT 1`,
+            [id],
+          );
+          if (related.rows.length)
+            throw new Error(
+              "El usuario tiene historial operativo. Cámbialo a INACTIVO en lugar de eliminarlo.",
             );
         }
       }
@@ -1886,6 +1950,18 @@ router.all(
             next.updatedAt,
           ],
         );
+        if (
+          ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE", "COORDINADOR"].includes(
+            value(next, "role"),
+          )
+        ) {
+          await db.query(
+            "UPDATE assignments SET promoter_dni=$2,updated_at=now() WHERE promoter_id=$1",
+            [id, next.dni],
+          );
+        } else {
+          await db.query("DELETE FROM assignments WHERE promoter_id=$1", [id]);
+        }
       } else if (name === "attendance") {
         await db.query(
           "UPDATE attendance SET promoter_id=$2,client_id=$3,market_id=$4,event_type=$5,event_date=$6,photo=$7,data=$8,record_updated_at=$9,updated_at=now() WHERE id=$1",
@@ -2020,13 +2096,14 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
     });
     return;
   }
-  if (
-    ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"].includes(
-      role,
-    ) &&
-    !value(input, "marketId")
-  ) {
-    res.status(400).json({ message: "Selecciona el mercado del promotor." });
+  const needsMarket = [
+    "PROMOTOR",
+    "PROMOTOR ROTATIVO",
+    "PROMOTOR PERMANENTE",
+    "COORDINADOR",
+  ].includes(role);
+  if (needsMarket && !value(input, "marketId")) {
+    res.status(400).json({ message: "Selecciona un Mercado activo para este usuario." });
     return;
   }
   if (role === "CLIENTE" && !value(input, "clientId")) {
@@ -2034,6 +2111,26 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
     return;
   }
   try {
+    if (needsMarket) {
+      const marketExists = await pool.query(
+        "SELECT id FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+        [value(input, "marketId")],
+      );
+      if (!marketExists.rows.length) {
+        res.status(400).json({ message: "Selecciona un Mercado activo para este usuario." });
+        return;
+      }
+    }
+    if (role === "CLIENTE") {
+      const clientExists = await pool.query(
+        "SELECT id FROM clients WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+        [value(input, "clientId")],
+      );
+      if (!clientExists.rows.length) {
+        res.status(400).json({ message: "Selecciona un Cliente activo para esta cuenta." });
+        return;
+      }
+    }
     const existing = await pool.query("SELECT id FROM users WHERE dni=$1", [
       dni,
     ]);
