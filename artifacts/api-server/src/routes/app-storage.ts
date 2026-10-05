@@ -700,6 +700,122 @@ async function upsertRecord(
   }
 }
 
+async function validateNewAttendance(
+  db: QueryClient,
+  record: StoredRecord,
+) {
+  const promoterId = value(record, "promoterId");
+  const clientId = value(record, "clientId");
+  const marketId = value(record, "marketId");
+  const type = value(record, "type");
+  const photo = value(record, "photo");
+  const date = dateValue(record);
+
+  if (!promoterId || !clientId || !marketId)
+    throw new Error("La marcación requiere Promotor, Mercado y Cliente.");
+  if (!["ENTRADA", "SALIDA"].includes(type))
+    throw new Error("El tipo de marcación debe ser ENTRADA o SALIDA.");
+  if (!photo)
+    throw new Error("La fotografía de la marcación es obligatoria.");
+
+  const promoterResult = await db.query(
+    "SELECT id,dni,role,status,data FROM users WHERE id=$1 LIMIT 1",
+    [promoterId],
+  );
+  const promoter = promoterResult.rows[0];
+  const promoterData = isRecord(promoter?.data) ? promoter.data : {};
+  const role = String(promoter?.role || value(promoterData, "role") || "");
+  if (
+    !promoter ||
+    promoter.status !== "ACTIVO" ||
+    !["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"].includes(role)
+  )
+    throw new Error("El promotor de la marcación no existe o está inactivo.");
+
+  const client = await db.query(
+    "SELECT id FROM clients WHERE id=$1 AND market_id=$2 AND status='ACTIVO' LIMIT 1",
+    [clientId, marketId],
+  );
+  if (!client.rows.length)
+    throw new Error("El Cliente no pertenece al Mercado o está inactivo.");
+
+  const market = await db.query(
+    "SELECT id FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+    [marketId],
+  );
+  if (!market.rows.length)
+    throw new Error("El Mercado de la marcación no existe o está inactivo.");
+
+  const assignment = await db.query(
+    "SELECT market_ids,client_ids FROM assignments WHERE promoter_id=$1 LIMIT 1",
+    [promoterId],
+  );
+  const coverage = assignment.rows[0];
+  const allowedMarkets = coverage
+    ? Array.isArray(coverage.market_ids)
+      ? coverage.market_ids.map(String)
+      : []
+    : value(promoterData, "marketId")
+      ? [value(promoterData, "marketId")]
+      : [];
+  const allowedClients = coverage && Array.isArray(coverage.client_ids)
+    ? coverage.client_ids.map(String)
+    : [];
+
+  if (!allowedMarkets.includes(marketId))
+    throw new Error("El Mercado no está asignado al promotor.");
+  if (coverage && !allowedClients.includes(clientId))
+    throw new Error("El Cliente no está asignado al promotor.");
+
+  const campaignDay = campaignDateParts(date).day;
+  const bounds = campaignDayBounds(campaignDay);
+  const count = await db.query(
+    `SELECT COUNT(*)::int AS count
+       FROM attendance
+      WHERE promoter_id=$1
+        AND event_type=$2
+        AND event_date >= $3::timestamptz
+        AND event_date <= $4::timestamptz
+        AND id<>$5`,
+    [promoterId, type, bounds.start, bounds.end, value(record, "id")],
+  );
+  if (Number(count.rows[0]?.count || 0) >= 3)
+    throw new Error(
+      `Ya existe el máximo de 3 ${type === "ENTRADA" ? "entradas" : "salidas"} para ese día.`,
+    );
+
+  const isRotative = role === "PROMOTOR ROTATIVO";
+  const latest = await db.query(
+    isRotative
+      ? `SELECT event_type
+           FROM attendance
+          WHERE promoter_id=$1
+            AND market_id=$2
+            AND event_date >= $3::timestamptz
+            AND event_date < $4::timestamptz
+            AND id<>$5
+          ORDER BY event_date DESC,created_at DESC
+          LIMIT 1`
+      : `SELECT event_type
+           FROM attendance
+          WHERE promoter_id=$1
+            AND client_id=$2
+            AND event_date >= $3::timestamptz
+            AND event_date < $4::timestamptz
+            AND id<>$5
+          ORDER BY event_date DESC,created_at DESC
+          LIMIT 1`,
+    [promoterId, isRotative ? marketId : clientId, bounds.start, date.toISOString(), value(record, "id")],
+  );
+  const latestType = String(latest.rows[0]?.event_type || "");
+  if (type === "SALIDA" && latestType !== "ENTRADA")
+    throw new Error("La Salida requiere una Entrada activa previa.");
+  if (type === "ENTRADA" && latestType === "ENTRADA")
+    throw new Error("Ya existe una Entrada activa previa.");
+
+  return { role, campaignDay };
+}
+
 async function syncSnapshot(
   incoming: Partial<StorageSnapshot>,
   incomingRevision?: string | null,
@@ -769,9 +885,16 @@ async function syncSnapshot(
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
       // inventory es histórico: nunca se acepta como fuente de saldo operativo.
       if (name === "inventory") continue;
-      const records = Array.isArray(guardedIncoming[name])
+      const sourceRecords = Array.isArray(guardedIncoming[name])
         ? guardedIncoming[name]
         : [];
+      const records =
+        name === "attendance"
+          ? [...sourceRecords].sort(
+              (first, second) =>
+                dateValue(first).getTime() - dateValue(second).getTime(),
+            )
+          : sourceRecords;
       for (const record of records) {
         if (!isRecord(record)) continue;
         if (deletedRecords.has(`${name}:${value(record, "id")}`)) continue;
@@ -800,6 +923,12 @@ async function syncSnapshot(
         }
         if (record && typeof record === "object") {
           const isNewRecord = !existing.rows.length;
+          if (isNewRecord && name === "attendance") {
+            await validateNewAttendance(
+              client as unknown as QueryClient,
+              record,
+            );
+          }
           if (isNewRecord && name === "sales") {
             requireFinalClientForCanje(record);
           }
@@ -2174,6 +2303,63 @@ router.all(
             throw new Error(
               "El mercado tiene registros relacionados. Reasígnalos antes de eliminarlo.",
             );
+        }
+      }
+      if (name === "attendance") {
+        const originalType = value(old, "type");
+        const originalPromoterId = value(old, "promoterId");
+        const originalMarketId = value(old, "marketId");
+        const originalDate = value(old, "date");
+        if (originalType === "SALIDA" && originalPromoterId && originalMarketId && originalDate) {
+          const closure = await db.query(
+            `SELECT id,tasting_used,data,closure_date
+               FROM session_closures
+              WHERE promoter_id=$1
+                AND market_id=$2
+                AND ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz))) <= 43200
+              ORDER BY ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz)))
+              LIMIT 1
+              FOR UPDATE`,
+            [originalPromoterId, originalMarketId, originalDate],
+          );
+          const linkedClosure = closure.rows[0];
+          if (linkedClosure) {
+            const relationshipChanged =
+              !deleting &&
+              (
+                value(next, "promoterId") !== originalPromoterId ||
+                value(next, "marketId") !== originalMarketId ||
+                value(next, "clientId") !== value(old, "clientId") ||
+                value(next, "type") !== originalType ||
+                value(next, "date") !== originalDate
+              );
+            if (relationshipChanged)
+              throw new Error(
+                "Esta Salida ya tiene un cierre asociado. Solo puedes reemplazar la evidencia; para cambiar Promotor, Cliente, Mercado, tipo o fecha, regulariza primero el cierre.",
+              );
+
+            if (deleting) {
+              const tastingUsed = Math.max(0, Number(linkedClosure.tasting_used) || 0);
+              const tastingMovement = await db.query(
+                `SELECT 1
+                   FROM inventory_movements
+                  WHERE kind='DEGUSTACION'
+                    AND market_id=$1
+                    AND COALESCE(data->>'promoterId',data->>'actorId','')=$2
+                    AND ABS(EXTRACT(EPOCH FROM (movement_date - $3::timestamptz))) <= 60
+                  LIMIT 1`,
+                [originalMarketId, originalPromoterId, linkedClosure.closure_date],
+              );
+              if (tastingUsed > 0 || tastingMovement.rows.length)
+                throw new Error(
+                  "Esta Salida tiene Degustación asociada. Elimina o regulariza primero la Degustación para restaurar correctamente el stock.",
+                );
+              await db.query(
+                "DELETE FROM session_closures WHERE id=$1",
+                [linkedClosure.id],
+              );
+            }
+          }
         }
       }
       if (name === "movements") {
