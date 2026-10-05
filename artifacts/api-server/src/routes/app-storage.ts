@@ -968,15 +968,33 @@ async function recalculateDegustacionClosure(
   movementDate: string,
 ) {
   if (!promoterId || !marketId || !movementDate) return;
+
+  const closures = await db.query(
+    `SELECT id,data,closure_date
+       FROM session_closures
+      WHERE promoter_id=$1
+        AND market_id=$2
+        AND ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz))) <= 43200
+      ORDER BY ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz)))
+      LIMIT 1
+      FOR UPDATE`,
+    [promoterId, marketId, movementDate],
+  );
+  const closure = closures.rows[0];
+  if (!closure) return;
+
+  const closureDate = new Date(String(closure.closure_date)).toISOString();
   const movements = await db.query(
     `SELECT quantity,data
        FROM inventory_movements
       WHERE kind='DEGUSTACION'
         AND market_id=$1
-        AND movement_date=$2
-        AND COALESCE(data->>'promoterId',data->>'actorId','')=$3`,
-    [marketId, movementDate, promoterId],
+        AND COALESCE(data->>'promoterId',data->>'actorId','')=$2
+        AND movement_date BETWEEN $3::timestamptz - interval '1 minute'
+                              AND $3::timestamptz + interval '1 minute'`,
+    [marketId, promoterId, closureDate],
   );
+
   let tasting900g = 0;
   let tasting85g = 0;
   for (const row of movements.rows) {
@@ -989,37 +1007,26 @@ async function recalculateDegustacionClosure(
   }
   const tastingUsed = tasting900g + tasting85g;
   const leads = tasting900g * 80 + tasting85g * 10;
-  const closures = await db.query(
-    `SELECT id,data
-       FROM session_closures
-      WHERE promoter_id=$1
-        AND market_id=$2
-        AND closure_date=$3
-      FOR UPDATE`,
-    [promoterId, marketId, movementDate],
-  );
   const updatedAt = new Date().toISOString();
-  for (const row of closures.rows) {
-    const data = isRecord(row.data) ? row.data : {};
-    const nextData = {
-      ...data,
-      tastingUsed,
-      tasting900g,
-      tasting85g,
-      leads,
-      updatedAt,
-    };
-    await db.query(
-      `UPDATE session_closures
-          SET tasting_used=$2,
-              leads=$3,
-              data=$4,
-              record_updated_at=$5,
-              updated_at=now()
-        WHERE id=$1`,
-      [row.id, tastingUsed, leads, nextData, updatedAt],
-    );
-  }
+  const data = isRecord(closure.data) ? closure.data : {};
+  const nextData = {
+    ...data,
+    tastingUsed,
+    tasting900g,
+    tasting85g,
+    leads,
+    updatedAt,
+  };
+  await db.query(
+    `UPDATE session_closures
+        SET tasting_used=$2,
+            leads=$3,
+            data=$4,
+            record_updated_at=$5,
+            updated_at=now()
+      WHERE id=$1`,
+    [closure.id, tastingUsed, leads, nextData, updatedAt],
+  );
 }
 
 
