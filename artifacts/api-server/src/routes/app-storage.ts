@@ -1208,10 +1208,17 @@ router.delete("/app-storage/warehouses/:id", async (req, res): Promise<void> => 
       return;
     }
     const linkedMarket = await db.query(
-      "SELECT id FROM markets WHERE data->>'warehouseId'=$1 OR $1 = ANY(COALESCE((SELECT market_ids FROM warehouses WHERE id=$1),'{}'::text[])) LIMIT 1",
+      "SELECT id FROM markets WHERE data->>'warehouseId'=$1 LIMIT 1",
       [id],
     );
-    if (linkedMarket.rows.length)
+    const legacyLinks = await db.query(
+      "SELECT market_ids FROM warehouses WHERE id=$1",
+      [id],
+    );
+    const legacyMarketIds = Array.isArray(legacyLinks.rows[0]?.market_ids)
+      ? legacyLinks.rows[0].market_ids
+      : [];
+    if (linkedMarket.rows.length || legacyMarketIds.length)
       throw new Error("El almacén tiene Mercados asignados. Reasígnalos antes de eliminarlo.");
 
     const movement = await db.query(
