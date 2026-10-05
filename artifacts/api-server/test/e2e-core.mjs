@@ -491,6 +491,45 @@ try {
   const itemRows = await pool.query("SELECT sale_id,sku,quantity FROM sale_items WHERE sale_id LIKE 'VTA-E2E-%' ORDER BY sale_id,line_no");
   if (itemRows.rows.length !== 3) throw new Error(`Expected 3 normalized sale_items rows, found ${itemRows.rows.length}.`);
 
+  await request("/app-storage/admin/catalog/products", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      record: {
+        sku: "E2E-UNUSED-SKU",
+        product: "PRODUCTO E2E SIN USO",
+        brand: "E2E",
+        presentation: "BOLSA",
+        unitMeasure: 1,
+        weightKg: 0.1,
+        saleModes: ["UNIDADES"],
+        unitsPerPlancha: 1,
+        unitPrice: 1,
+        totalPrice: 1,
+        status: "ACTIVO",
+      },
+    }),
+  });
+  await request("/app-storage/admin/catalog/products/E2E-UNUSED-SKU", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const unusedSku = await pool.query(
+    "SELECT sku FROM product_prices WHERE sku='E2E-UNUSED-SKU'",
+  );
+  if (unusedSku.rows.length)
+    throw new Error("Unused SKU was not physically removed.");
+
+  await request("/app-storage/admin/catalog/products/E2E-PLANCHA", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const usedSku = await pool.query(
+    "SELECT sku,data FROM product_prices WHERE sku='E2E-PLANCHA'",
+  );
+  if (!usedSku.rows.length || usedSku.rows[0]?.data?.status !== "INACTIVO")
+    throw new Error("Used SKU was deleted instead of being marked INACTIVO.");
+
   const legacySale = {
     id: "VTA-E2E-LEGACY", promoterId: promoter.id, clientId: client.id, marketId: market.id,
     mode: "PLANCHAS", planchas: 80, units: 480, amountSoles: 5760,
