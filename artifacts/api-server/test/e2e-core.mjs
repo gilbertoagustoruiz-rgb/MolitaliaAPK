@@ -93,9 +93,25 @@ try {
     id: "VTA-E2E-UNIT", promoterId: promoter.id, clientId: client.id, marketId: market.id,
     mode: "UNIDADES", units: 2, amountSoles: 20, weightKg: 1.8,
     unitPrices: { "E2E-UNIT": 10 }, presentation: "BOLSA", mix: { TODINNO: 2 },
-    bonus: "CANJE_AVENA_1", redemptionCount: 1, redemptionItems: { AVENA: 1, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 },
+    bonus: "CANJE_AVENA_1", finalClientName: "CLIENTE FINAL E2E", redemptionCount: 1, redemptionItems: { AVENA: 1, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 },
     receiptPhoto: "/api/e2e-unit.jpg", exchangePhoto: "/api/e2e-canje.jpg", date: now, updatedAt: now, status: "PENDIENTE",
   };
+  const invalidCanjeSale = {
+    ...unitSale,
+    id: "VTA-E2E-CANJE-SIN-CLIENTE",
+    finalClientName: "",
+  };
+  const invalidCanjeResponse = await fetch(base + "/app-storage/sync", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ snapshot: { sales: [invalidCanjeSale] } }),
+  });
+  const invalidCanjeBody = await invalidCanjeResponse.json().catch(() => ({}));
+  if (invalidCanjeResponse.ok)
+    throw new Error("A canje sale without finalClientName was accepted.");
+  if (!String(invalidCanjeBody.message || "").includes("Nombre Cliente Final"))
+    throw new Error("Missing final client rejection did not return the expected message.");
+
   await request("/app-storage/sync", { method: "POST", body: JSON.stringify({ snapshot: { sales: [unitSale] } }) });
 
   const planchaSale = {
