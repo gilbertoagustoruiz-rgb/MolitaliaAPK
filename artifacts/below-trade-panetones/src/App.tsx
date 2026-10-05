@@ -10209,7 +10209,9 @@ function PromoterApp({
         : "Venta sin canje registrada",
     );
   };
-  const finalizeAttendance = (usage = { paneton900g: 0, paneton85g: 0, contacts: 0 }) => {
+  const finalizeAttendance = async (
+    usage = { paneton900g: 0, paneton85g: 0, contacts: 0 },
+  ) => {
     const tasting900g = Math.max(0, Math.trunc(usage.paneton900g || 0));
     const tasting85g = Math.max(0, Math.trunc(usage.paneton85g || 0));
     const tastingUsed = tasting900g + tasting85g;
@@ -10308,15 +10310,70 @@ function PromoterApp({
       const closures = readStore<SessionClosure[]>("bt-session-closures", []);
       writeStore("bt-session-closures", [closure, ...closures]);
     }
+    let confirmedItem: Attendance | null = null;
+    if (navigator.onLine) {
+      try {
+        const response = await fetch(APP_STORAGE_SYNC, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            snapshot: { attendance: [item] },
+            catalogRevision:
+              localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined,
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          message?: string;
+          snapshot?: Partial<CloudSnapshot>;
+        };
+        if (!response.ok)
+          throw new Error(
+            payload.message || "No se pudo sincronizar la marcación.",
+          );
+        confirmedItem =
+          payload.snapshot?.attendance?.find(
+            (serverItem) => serverItem.id === item.id,
+          ) || null;
+        if (!confirmedItem || confirmedItem.status !== "SINCRONIZADA")
+          throw new Error("PostgreSQL no confirmó la marcación.");
+
+        setAttendance((current) => {
+          const nextAttendance = current.map((currentItem) =>
+            currentItem.id === item.id ? confirmedItem! : currentItem,
+          );
+          writeStore("bt-attendance", nextAttendance);
+          return nextAttendance;
+        });
+      } catch (error) {
+        notify(
+          error instanceof Error
+            ? `Marcación guardada localmente. Pendiente de sincronización: ${error.message}`
+            : "Marcación guardada localmente. Pendiente de sincronización.",
+          true,
+        );
+      }
+    }
+
     setMarkPhoto(null);
     setMarkPhotoUrl("");
     setMarkType(type === "ENTRADA" ? "SALIDA" : "ENTRADA");
     setView("LISTA");
-    notify(
-      type === "SALIDA"
-        ? "Salida registrada correctamente. Sesión finalizada."
-        : "Entrada registrada correctamente",
-    );
+
+    if (confirmedItem) {
+      notify(
+        type === "SALIDA"
+          ? "Salida sincronizada correctamente. Sesión finalizada."
+          : "Entrada sincronizada correctamente",
+      );
+    } else if (!navigator.onLine) {
+      notify(
+        type === "SALIDA"
+          ? "Salida guardada en el dispositivo. Se sincronizará al recuperar conexión."
+          : "Entrada guardada en el dispositivo. Se sincronizará al recuperar conexión.",
+        true,
+      );
+    }
+
     if (type === "SALIDA") onLogout();
   };
   const saveAttendance = () => {
@@ -10366,7 +10423,7 @@ function PromoterApp({
       setTastingExitPrompt(true);
       return;
     }
-    finalizeAttendance();
+    void finalizeAttendance();
   };
   const saleForm = (
     <section className="sale-layout">
@@ -11252,7 +11309,7 @@ function PromoterApp({
               available85g={warehouseTastingStock.PANETON_85G}
               onConfirm={(usage) => {
                 setTastingExitPrompt(false);
-                finalizeAttendance(usage);
+                void finalizeAttendance(usage);
               }}
               close={() => setTastingExitPrompt(false)}
             />
