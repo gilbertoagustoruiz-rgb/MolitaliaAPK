@@ -3983,17 +3983,33 @@ function SaleEditModal({
   );
   const parsedAmount = Number(amountSoles);
   const parsedDate = new Date(saleDate);
+  const saleMiniLines = (sale.planchaLines || []).filter((line) =>
+    MINI_HALF_PLANCHA_SKUS.has(line.sku),
+  );
+  const saleMiniOnly =
+    Boolean(sale.planchaLines?.length) &&
+    saleMiniLines.length === sale.planchaLines?.length;
+  const saleMiniEligibleUnits = saleMiniLines.reduce(
+    (sum, line) => sum + Math.max(0, Number(line.units) || 0),
+    0,
+  );
+  const saleMiniHalfPlancha =
+    sale.mode === "PLANCHAS" &&
+    saleMiniOnly &&
+    saleMiniEligibleUnits === 24;
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
   const newRequirements =
     sale.mode === "PLANCHAS"
-      ? planchaCanjeRequirements(
-          sale.planchas || 0,
-          parsedDate,
-          planchaAccessory,
-          planchaMultiplier,
-        )
+      ? saleMiniHalfPlancha
+        ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+        : planchaCanjeRequirements(
+            sale.planchas || 0,
+            parsedDate,
+            planchaAccessory,
+            planchaMultiplier,
+          )
       : selectedCanje
         ? multiplyRedemptionRequirements(
             parseBonusItems(selectedCanje.label),
