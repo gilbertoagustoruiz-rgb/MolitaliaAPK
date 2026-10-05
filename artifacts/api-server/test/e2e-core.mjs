@@ -102,6 +102,35 @@ try {
     }),
   });
 
+  await request("/app-storage/admin/users", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      user: {
+        id: "USR-E2E-ATT",
+        dni: "99999995",
+        name: "E2E PROMOTOR MARCACIONES",
+        role: "PROMOTOR PERMANENTE",
+        roleLabel: "PROMOTOR PERMANENTE",
+        marketId: market.id,
+        password: "E2E-att-2026",
+        status: "ACTIVO",
+      },
+    }),
+  });
+  await request("/app-storage/assignments", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      assignment: {
+        promoterId: "USR-E2E-ATT",
+        marketIds: [market.id],
+        clientIds: [client.id],
+      },
+    }),
+  });
+
+
 
   await request("/app-storage/admin/catalog/categories", {
     method: "POST",
@@ -571,7 +600,73 @@ try {
 
 
 
-  const now = new Date().toISOString();
+  const offlineBase = Date.now() - 60_000;
+  const offlineEntryDate = new Date(offlineBase).toISOString();
+  const offlineExitDate = new Date(offlineBase + 30_000).toISOString();
+  await request("/app-storage/sync", {
+    method: "POST",
+    body: JSON.stringify({
+      snapshot: {
+        attendance: [
+          {
+            id: "ATT-E2E-OFFLINE-OUT",
+            promoterId: "USR-E2E-ATT",
+            promoterDni: "99999995",
+            clientId: client.id,
+            marketId: market.id,
+            type: "SALIDA",
+            photo: "/api/e2e-offline-out.jpg",
+            date: offlineExitDate,
+            status: "PENDIENTE",
+          },
+          {
+            id: "ATT-E2E-OFFLINE-IN",
+            promoterId: "USR-E2E-ATT",
+            promoterDni: "99999995",
+            clientId: client.id,
+            marketId: market.id,
+            type: "ENTRADA",
+            photo: "/api/e2e-offline-in.jpg",
+            date: offlineEntryDate,
+            status: "PENDIENTE",
+          },
+        ],
+      },
+    }),
+  });
+  const offlineAttendance = await pool.query(
+    "SELECT id,event_type FROM attendance WHERE id IN ('ATT-E2E-OFFLINE-IN','ATT-E2E-OFFLINE-OUT') ORDER BY event_date",
+  );
+  if (
+    offlineAttendance.rows.length !== 2 ||
+    offlineAttendance.rows[0]?.event_type !== "ENTRADA" ||
+    offlineAttendance.rows[1]?.event_type !== "SALIDA"
+  )
+    throw new Error("Offline attendance was not processed in chronological order.");
+
+  const invalidAttendanceCoverage = await fetch(base + "/app-storage/sync", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      snapshot: {
+        attendance: [{
+          id: "ATT-E2E-INVALID-COVERAGE",
+          promoterId: "USR-E2E-ATT",
+          promoterDni: "99999995",
+          clientId: "CLI-E2E-OTHER",
+          marketId: "MKT-E2E-OTHER",
+          type: "ENTRADA",
+          photo: "/api/e2e-invalid.jpg",
+          date: new Date(offlineBase + 60_000).toISOString(),
+          status: "PENDIENTE",
+        }],
+      },
+    }),
+  });
+  if (invalidAttendanceCoverage.ok)
+    throw new Error("Attendance outside promoter coverage was accepted.");
+
+    const now = new Date().toISOString();
   await request("/app-storage/sync", {
     method: "POST",
     body: JSON.stringify({ snapshot: { attendance: [{ id: "ATT-E2E-IN", promoterId: promoter.id, promoterDni: promoter.dni, clientId: client.id, marketId: market.id, type: "ENTRADA", photo: "/api/e2e.jpg", date: now, status: "PENDIENTE" }] } }),
@@ -801,6 +896,43 @@ try {
       },
     }),
   });
+
+  await pool.query(
+    `INSERT INTO attendance
+      (id,promoter_id,client_id,market_id,event_type,event_date,status,photo,data,record_updated_at)
+     VALUES
+      ('ATT-E2E-LINKED-OUT',$1,$2,$3,'SALIDA',$4,'SINCRONIZADA','/api/e2e-linked-out.jpg',
+       jsonb_build_object(
+         'id','ATT-E2E-LINKED-OUT',
+         'promoterId',$1::text,
+         'promoterDni',$5::text,
+         'clientId',$2::text,
+         'marketId',$3::text,
+         'type','SALIDA',
+         'photo','/api/e2e-linked-out.jpg',
+         'date',$4::text,
+         'status','SINCRONIZADA'
+       ),
+       $4::timestamptz)`,
+    [promoter.id, client.id, market.id, now, promoter.dni],
+  );
+  const deleteLinkedExit = await fetch(
+    base + "/app-storage/admin/records/attendance/ATT-E2E-LINKED-OUT",
+    {
+      method: "DELETE",
+      headers: adminHeaders,
+    },
+  );
+  const deleteLinkedExitBody = await deleteLinkedExit.json().catch(() => ({}));
+  if (deleteLinkedExit.status !== 409)
+    throw new Error(
+      `Linked SALIDA with degustacion was not protected: ${deleteLinkedExit.status} ${JSON.stringify(deleteLinkedExitBody)}`,
+    );
+  const linkedExitStillExists = await pool.query(
+    "SELECT id FROM attendance WHERE id='ATT-E2E-LINKED-OUT'",
+  );
+  if (!linkedExitStillExists.rows.length)
+    throw new Error("Protected linked SALIDA was deleted.");
 
   const tastingStockAfter85 = await pool.query(
     "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
