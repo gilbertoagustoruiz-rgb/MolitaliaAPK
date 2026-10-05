@@ -4015,6 +4015,7 @@ function SaleEditModal({
   const [planchaMultiplier, setPlanchaMultiplier] = useState(
     Math.max(1, Math.min(4, Number(sale.planchaMultiplier) || inferredMultiplier)),
   );
+  const [manualCanje, setManualCanje] = useState<RedemptionStock | null>(null);
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -4042,7 +4043,7 @@ function SaleEditModal({
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
-  const newRequirements =
+  const calculatedRequirements =
     sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
@@ -4058,13 +4059,35 @@ function SaleEditModal({
             redemptionCount,
           )
         : emptyRedemptionStock();
+  const effectiveRequirements: Partial<RedemptionStock> =
+    sale.mode === "PLANCHAS" && manualCanje
+      ? manualCanje
+      : calculatedRequirements;
   const editedBonus =
     sale.mode === "PLANCHAS"
-      ? canjeRequirementsLabel(newRequirements) || undefined
+      ? canjeRequirementsLabel(effectiveRequirements) || undefined
       : selectedCanje?.label;
-  const missingStock = requiredRedemptionEntries(newRequirements).find(
+  const missingStock = requiredRedemptionEntries(effectiveRequirements).find(
     ([itemId, quantity]) => restoredStock[itemId] < quantity,
   );
+  const updateManualCanje = (itemId: RedemptionItemId, rawValue: string) => {
+    const quantity = Math.max(0, Math.floor(Number(rawValue) || 0));
+    setManualCanje((current) => {
+      const base = current
+        ? { ...current }
+        : redemptionItems.reduce(
+            (result, item) => ({
+              ...result,
+              [item.id]: Math.max(
+                0,
+                Math.floor(Number(calculatedRequirements[item.id]) || 0),
+              ),
+            }),
+            {} as RedemptionStock,
+          );
+      return { ...base, [itemId]: quantity };
+    });
+  };
   const exchangeEvidenceRequired = Boolean(
     editedBonus || sale.mode === "PLANCHAS",
   );
@@ -4103,7 +4126,7 @@ function SaleEditModal({
               : selectedCanje
                 ? redemptionCount
                 : 0,
-          redemptionItems: editedBonus ? newRequirements : undefined,
+          redemptionItems: editedBonus ? effectiveRequirements : undefined,
           planchaAccessory:
             sale.mode === "PLANCHAS" ? planchaAccessory : undefined,
           planchaMultiplier:
@@ -4186,11 +4209,12 @@ function SaleEditModal({
               <SelectField
                 label="Dinámica de canje"
                 value={planchaAccessory}
-                onChange={(value) =>
+                onChange={(value) => {
                   setPlanchaAccessory(
                     value as "MANDIL" | "BATEA" | "NINGUNO",
-                  )
-                }
+                  );
+                  setManualCanje(null);
+                }}
                 items={[
                   { value: "NINGUNO", label: "Sin Mandil / Batea" },
                   { value: "MANDIL", label: "Con Mandil" },
@@ -4203,11 +4227,12 @@ function SaleEditModal({
                 <select
                   className="select"
                   value={planchaMultiplier}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setPlanchaMultiplier(
                       Math.max(1, Math.min(4, Number(event.target.value) || 1)),
-                    )
-                  }
+                    );
+                    setManualCanje(null);
+                  }}
                   data-testid="select-edit-plancha-multiplier"
                 >
                   <option value={1}>x1</option>
@@ -4223,10 +4248,42 @@ function SaleEditModal({
                 <div>
                   <strong>{editedBonus || "Sin canje"}</strong>
                   <small>
-                    Se recalcula contra el stock del Almacén y reemplaza el canje anterior al guardar.
+                    {manualCanje
+                      ? "Corrección manual activa. Estas cantidades reemplazarán el canje anterior al guardar."
+                      : "Cálculo automático según la dinámica. Puedes corregir las cantidades realmente entregadas."}
                   </small>
                 </div>
               </div>
+              <div className="form-grid" style={{ marginTop: 12 }}>
+                {redemptionItems.map((item) => (
+                  <Field key={item.id} label={item.label + " entregado"}>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={String(
+                        Math.max(
+                          0,
+                          Number(effectiveRequirements[item.id]) || 0,
+                        ),
+                      )}
+                      onChange={(value) => updateManualCanje(item.id, value)}
+                      testId={"input-edit-canje-" + item.id.toLowerCase()}
+                    />
+                  </Field>
+                ))}
+              </div>
+              {manualCanje && (
+                <div className="modal-actions" style={{ marginTop: 8 }}>
+                  <Btn
+                    variant="outline"
+                    onClick={() => setManualCanje(null)}
+                    testId="button-reset-edit-canje"
+                  >
+                    <RefreshCw /> Volver al cálculo automático
+                  </Btn>
+                </div>
+              )}
             </Field>
           </>
         )}
