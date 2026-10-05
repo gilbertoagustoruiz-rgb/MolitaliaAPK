@@ -1578,6 +1578,7 @@ router.all(
           "department",
           "province",
           "district",
+          "warehouseId",
           "status",
         ],
         users: [
@@ -1628,8 +1629,17 @@ router.all(
           throw new Error("Completa todos los campos obligatorios.");
       };
       if (!deleting) {
-        if (name === "markets")
+        if (name === "markets") {
           required(["name", "department", "province", "district"]);
+          if (value(next, "warehouseId")) {
+            const warehouse = await db.query(
+              "SELECT id FROM warehouses WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+              [next.warehouseId],
+            );
+            if (!warehouse.rows.length)
+              throw new Error("El almacén seleccionado no existe o está inactivo.");
+          }
+        }
         if (name === "users") {
           if (
             ![
@@ -1827,6 +1837,10 @@ router.all(
 );
 
 router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
+  if (!(await authorizedCatalogActor(req))) {
+    res.status(403).json({ message: "Solo Analista y Admin pueden crear mercados." });
+    return;
+  }
   const input = req.body?.market;
   if (
     !isRecord(input) ||
@@ -1855,6 +1869,16 @@ router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
     updatedAt: new Date().toISOString(),
   };
   try {
+    if (value(market, "warehouseId")) {
+      const warehouse = await pool.query(
+        "SELECT id FROM warehouses WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+        [market.warehouseId],
+      );
+      if (!warehouse.rows.length) {
+        res.status(400).json({ message: "El almacén seleccionado no existe o está inactivo." });
+        return;
+      }
+    }
     await upsertRecord(pool as unknown as QueryClient, "markets", market);
     res.status(201).json({ market, snapshot: await readSnapshot() });
   } catch (error) {
@@ -1944,6 +1968,10 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
 router.delete(
   "/app-storage/admin/markets/:id",
   async (req, res): Promise<void> => {
+    if (!(await authorizedCatalogActor(req))) {
+      res.status(403).json({ message: "Solo Analista y Admin pueden eliminar mercados." });
+      return;
+    }
     const id = String(req.params.id || "").trim();
     if (!id) {
       res.status(400).json({ message: "El mercado es obligatorio." });
@@ -1953,16 +1981,36 @@ router.delete(
     try {
       await client.query("BEGIN");
       await lockInventoryLedger(client as unknown as QueryClient);
-      await client.query("DELETE FROM clients WHERE market_id=$1", [id]);
+      const exists = await client.query("SELECT id FROM markets WHERE id=$1 FOR UPDATE", [id]);
+      if (!exists.rows.length) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ message: "El mercado no existe." });
+        return;
+      }
+      for (const related of ["clients", "sales", "attendance", "inventory_movements"]) {
+        const found = await client.query(
+          `SELECT 1 FROM ${related} WHERE market_id=$1 LIMIT 1`,
+          [id],
+        );
+        if (found.rows.length) {
+          await client.query("ROLLBACK");
+          res.status(409).json({
+            message:
+              "El mercado tiene registros relacionados. Reasígnalos antes de eliminarlo para no perder información.",
+          });
+          return;
+        }
+      }
       await client.query("DELETE FROM inventory WHERE market_id=$1", [id]);
-      await client.query("DELETE FROM inventory_movements WHERE market_id=$1", [
-        id,
-      ]);
       await client.query("DELETE FROM markets WHERE id=$1", [id]);
+      await client.query(
+        "INSERT INTO app_storage_tombstones (collection,record_id,deleted_at) VALUES ('markets',$1,now()) ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now()",
+        [id],
+      );
       await client.query("COMMIT");
       res.json({ deleted: id, snapshot: await readSnapshot() });
     } catch (error) {
-      await client.query("ROLLBACK");
+      await client.query("ROLLBACK").catch(() => undefined);
       req.log.error({ err: error }, "Unable to delete market");
       res.status(500).json({ message: "No se pudo eliminar el mercado." });
     } finally {
