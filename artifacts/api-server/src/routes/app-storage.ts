@@ -996,18 +996,20 @@ async function authorizedTradeActor(req: Request) {
   const key = req.get("x-admin-key") || "";
   if (!dni || !key) return null;
   const credentials = await pool.query(
-    "SELECT id,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
+    "SELECT id,role,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
     [dni],
   );
   const actor = credentials.rows[0];
+  const actorData = isRecord(actor?.data) ? actor.data : {};
+  const actorRole = String(actor?.role || value(actorData, "role") || "");
   if (
     !actor ||
     actor.status !== "ACTIVO" ||
-    !["ADMIN", "ANALISTA"].includes(String(actor.data?.role || "")) ||
+    !["ADMIN", "ANALISTA"].includes(actorRole) ||
     !actor.password_hash ||
     !(await verifyPassword(key, actor.password_hash))
   ) return null;
-  return { id: String(actor.id), data: actor.data as StoredRecord };
+  return { id: String(actor.id), role: actorRole, data: actorData };
 }
 
 async function authorizedWarehouseActor(req: Request) {
@@ -2758,19 +2760,25 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
 
 async function authorizedCatalogActor(req: Request) {
   const credentials = await pool.query(
-    "SELECT data,password_hash,status FROM users WHERE dni=$1",
+    "SELECT id,role,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
     [req.get("x-admin-dni") || ""],
   );
   const actor = credentials.rows[0];
+  const actorData = isRecord(actor?.data) ? actor.data : {};
+  const actorRole = String(actor?.role || value(actorData, "role") || "");
   if (
     !actor ||
     actor.status !== "ACTIVO" ||
-    !["ADMIN", "ANALISTA"].includes(value(actor.data || {}, "role")) ||
+    !["ADMIN", "ANALISTA"].includes(actorRole) ||
     !actor.password_hash ||
     !(await verifyPassword(req.get("x-admin-key") || "", actor.password_hash))
   )
     return null;
-  return actor;
+  return {
+    id: String(actor.id),
+    role: actorRole,
+    data: actorData,
+  };
 }
 
 router.post(
