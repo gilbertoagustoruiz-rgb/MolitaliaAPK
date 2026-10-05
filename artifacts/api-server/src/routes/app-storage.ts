@@ -2096,13 +2096,14 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
     });
     return;
   }
-  if (
-    ["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"].includes(
-      role,
-    ) &&
-    !value(input, "marketId")
-  ) {
-    res.status(400).json({ message: "Selecciona el mercado del promotor." });
+  const needsMarket = [
+    "PROMOTOR",
+    "PROMOTOR ROTATIVO",
+    "PROMOTOR PERMANENTE",
+    "COORDINADOR",
+  ].includes(role);
+  if (needsMarket && !value(input, "marketId")) {
+    res.status(400).json({ message: "Selecciona un Mercado activo para este usuario." });
     return;
   }
   if (role === "CLIENTE" && !value(input, "clientId")) {
@@ -2110,6 +2111,26 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
     return;
   }
   try {
+    if (needsMarket) {
+      const marketExists = await pool.query(
+        "SELECT id FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+        [value(input, "marketId")],
+      );
+      if (!marketExists.rows.length) {
+        res.status(400).json({ message: "Selecciona un Mercado activo para este usuario." });
+        return;
+      }
+    }
+    if (role === "CLIENTE") {
+      const clientExists = await pool.query(
+        "SELECT id FROM clients WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+        [value(input, "clientId")],
+      );
+      if (!clientExists.rows.length) {
+        res.status(400).json({ message: "Selecciona un Cliente activo para esta cuenta." });
+        return;
+      }
+    }
     const existing = await pool.query("SELECT id FROM users WHERE dni=$1", [
       dni,
     ]);
