@@ -145,7 +145,17 @@ try {
     }] } }),
   });
 
+  await pool.query(
+    "UPDATE sales SET data=jsonb_set(data,'{status}','\"PENDIENTE\"'::jsonb) WHERE id='VTA-E2E-PLANCHA'",
+  );
   const snapshot = await request("/app-storage");
+  const repairedStatusSale = snapshot.snapshot.sales.find(
+    (sale) => sale.id === "VTA-E2E-PLANCHA",
+  );
+  if (repairedStatusSale?.status !== "SINCRONIZADA")
+    throw new Error(
+      `Snapshot exposed stale JSON status instead of PostgreSQL status: ${repairedStatusSale?.status}`,
+    );
   for (const id of ["VTA-E2E-UNIT", "VTA-E2E-PLANCHA", "VTA-E2E-TRADE"]) {
     if (!snapshot.snapshot.sales.some((sale) => sale.id === id)) throw new Error(`Sale ${id} missing from dashboard snapshot.`);
   }
