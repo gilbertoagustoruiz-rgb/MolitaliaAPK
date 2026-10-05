@@ -7565,16 +7565,8 @@ function AnalystApp({
   };
   const adminRequest = async (path: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
-    if (
-      path.startsWith("/records/") ||
-      path === "/users" ||
-      path === "/sales" ||
-      path.startsWith("/catalog/") ||
-      path.startsWith("/degustaciones/")
-    ) {
-      headers.set("X-Admin-Dni", user.dni);
-      headers.set("X-Admin-Key", user.password || "");
-    }
+    headers.set("X-Admin-Dni", user.dni);
+    headers.set("X-Admin-Key", user.password || "");
     const catalogRevision = localStorage.getItem(CATALOG_REVISION_STORE_KEY);
     if (catalogRevision) headers.set("X-Catalog-Revision", catalogRevision);
     const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, {
