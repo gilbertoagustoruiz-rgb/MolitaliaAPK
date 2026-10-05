@@ -2355,6 +2355,13 @@ router.post(
           throw new Error(
             "El producto requiere SKU, nombre, marca, peso y al menos un tipo de venta.",
           );
+        if (
+          saleModes.includes("PLANCHAS") &&
+          Math.floor(numeric(input, "unitsPerPlancha") || 0) <= 0
+        )
+          throw new Error(
+            "Los productos habilitados para Planchas requieren Unidades por plancha mayor a cero.",
+          );
         const presentationValue = value(input, "presentation").toUpperCase();
         const presentation = ["CAJA", "BOLSA", "LATA"].includes(presentationValue)
           ? presentationValue
@@ -2441,10 +2448,27 @@ router.delete(
           await pool.query("DELETE FROM client_categories WHERE id=$1", [id]);
       } else {
         const used = await pool.query(
-          "SELECT 1 FROM sales WHERE data->'unitPrices' ? $1 LIMIT 1",
+          `SELECT 1
+             FROM sale_items
+            WHERE sku=$1
+            LIMIT 1`,
           [id],
         );
-        if (used.rows.length) {
+        const legacyUsed = used.rows.length
+          ? used
+          : await pool.query(
+              `SELECT 1
+                 FROM sales
+                WHERE data->'unitPrices' ? $1
+                   OR EXISTS (
+                     SELECT 1
+                       FROM jsonb_array_elements(COALESCE(data->'planchaLines','[]'::jsonb)) line
+                      WHERE line->>'sku'=$1
+                   )
+                LIMIT 1`,
+              [id],
+            );
+        if (legacyUsed.rows.length) {
           const current = await pool.query(
             "SELECT data FROM product_prices WHERE sku=$1",
             [id],
