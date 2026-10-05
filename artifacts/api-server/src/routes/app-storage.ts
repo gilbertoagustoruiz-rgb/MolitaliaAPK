@@ -1395,7 +1395,12 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to sync app storage");
-    res.status(500).json({ message: "No se pudo sincronizar PostgreSQL." });
+    res.status(500).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "No se pudo sincronizar PostgreSQL.",
+    });
   }
 });
 
