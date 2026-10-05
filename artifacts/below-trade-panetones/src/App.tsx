@@ -11807,7 +11807,8 @@ export default function App() {
           if (cancelled) break;
           try {
             const snapshot = await syncOne({ attendance: [item] });
-            const confirmed = snapshot?.attendance?.find(
+            if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
+            const confirmed = snapshot.attendance?.find(
               (serverItem) => serverItem.id === item.id,
             );
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
@@ -11832,7 +11833,8 @@ export default function App() {
           if (cancelled) break;
           try {
             const snapshot = await syncOne({ sales: [sale] });
-            const confirmed = snapshot?.sales?.find(
+            if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
+            const confirmed = snapshot.sales?.find(
               (serverSale) => serverSale.id === sale.id,
             );
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
