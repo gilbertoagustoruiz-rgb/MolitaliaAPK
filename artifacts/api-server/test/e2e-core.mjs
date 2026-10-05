@@ -1071,7 +1071,7 @@ try {
   }
 
   const itemRows = await pool.query("SELECT sale_id,sku,quantity FROM sale_items WHERE sale_id LIKE 'VTA-E2E-%' ORDER BY sale_id,line_no");
-  if (itemRows.rows.length !== 4) throw new Error(`Expected 4 normalized sale_items rows, found ${itemRows.rows.length}.`);
+  if (itemRows.rows.length !== 5) throw new Error(`Expected 5 normalized sale_items rows, found ${itemRows.rows.length}.`);
 
   await request("/app-storage/admin/catalog/products", {
     method: "POST",
