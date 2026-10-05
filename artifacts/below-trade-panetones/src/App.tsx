@@ -665,12 +665,19 @@ function saleFreshness(sale: Sale) {
 }
 function mergeSales(local: Sale[], incoming: Sale[]) {
   const next = new Map(incoming.map((sale) => [sale.id, sale]));
+  const rescueCutoff = Date.now() - 48 * 60 * 60 * 1000;
   local.forEach((localSale) => {
     const cloudSale = next.get(localSale.id);
     if (!cloudSale) {
-      // Solo se conserva lo que todavía no fue confirmado por el servidor.
-      // Una venta sincronizada ausente del snapshot debe reflejar una eliminación real.
-      if (localSale.status === "PENDIENTE") next.set(localSale.id, localSale);
+      const saleTime = new Date(localSale.updatedAt || localSale.date).getTime();
+      if (
+        localSale.status === "PENDIENTE" ||
+        (Number.isFinite(saleTime) && saleTime >= rescueCutoff)
+      )
+        next.set(localSale.id, {
+          ...localSale,
+          status: "PENDIENTE",
+        });
       return;
     }
     if (saleFreshness(localSale) > saleFreshness(cloudSale))
@@ -690,12 +697,22 @@ function attendanceFreshness(item: Attendance) {
 }
 function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
   const next = new Map(incoming.map((item) => [item.id, item]));
+  const rescueCutoff = Date.now() - 48 * 60 * 60 * 1000;
   local.forEach((localItem) => {
     const cloudItem = next.get(localItem.id);
-    if (
-      !cloudItem ||
-      attendanceFreshness(localItem) > attendanceFreshness(cloudItem)
-    )
+    if (!cloudItem) {
+      const itemTime = new Date(localItem.date).getTime();
+      if (
+        localItem.status === "PENDIENTE" ||
+        (Number.isFinite(itemTime) && itemTime >= rescueCutoff)
+      )
+        next.set(localItem.id, {
+          ...localItem,
+          status: "PENDIENTE",
+        });
+      return;
+    }
+    if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
       next.set(localItem.id, localItem);
   });
   return sortNewestByDate(Array.from(next.values()));
@@ -2093,9 +2110,7 @@ function parseSoles(value: string) {
   return Number(value.replace(",", "."));
 }
 function syncStatus(): SyncStatus {
-  return typeof navigator === "undefined" || navigator.onLine
-    ? "SINCRONIZADA"
-    : "PENDIENTE";
+  return "PENDIENTE";
 }
 function movementLabel(
   kind: InventoryMovementKind,
@@ -11792,7 +11807,12 @@ export default function App() {
           if (cancelled) break;
           try {
             const snapshot = await syncOne({ attendance: [item] });
-            if (!snapshot?.attendance) continue;
+            if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
+            const confirmed = snapshot.attendance?.find(
+              (serverItem) => serverItem.id === item.id,
+            );
+            if (!confirmed || confirmed.status !== "SINCRONIZADA")
+              throw new Error("PostgreSQL no confirmó la marcación.");
             setAttendance((current) => {
               const next = mergeAttendance(current, snapshot.attendance || []);
               writeStore("bt-attendance", next);
@@ -11813,7 +11833,12 @@ export default function App() {
           if (cancelled) break;
           try {
             const snapshot = await syncOne({ sales: [sale] });
-            if (!snapshot?.sales) continue;
+            if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
+            const confirmed = snapshot.sales?.find(
+              (serverSale) => serverSale.id === sale.id,
+            );
+            if (!confirmed || confirmed.status !== "SINCRONIZADA")
+              throw new Error("PostgreSQL no confirmó la venta.");
             setSales((current) => {
               const next = mergeSales(current, snapshot.sales || []);
               writeStore("bt-sales", next);
