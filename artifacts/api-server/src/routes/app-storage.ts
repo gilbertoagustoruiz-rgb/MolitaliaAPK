@@ -95,9 +95,10 @@ function numeric(record: StoredRecord, key: string) {
 
 function hasRedemptionConsumption(record: StoredRecord) {
   if (value(record, "bonus")) return true;
-  if (!isRecord(record.redemptionItems)) return false;
+  const items = record.redemptionItems;
+  if (!isRecord(items)) return false;
   return redemptionItemIds.some(
-    (itemId) => Math.max(0, Number(record.redemptionItems?.[itemId]) || 0) > 0,
+    (itemId) => Math.max(0, Number(items[itemId]) || 0) > 0,
   );
 }
 
