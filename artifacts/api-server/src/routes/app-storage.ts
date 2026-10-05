@@ -1957,6 +1957,13 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
 router.post(
   "/app-storage/admin/users/sync",
   async (req, res): Promise<void> => {
+    const actor = await authorizedTradeActor(req);
+    if (!actor) {
+      res.status(403).json({
+        message: "Solo Admin o Analista pueden importar o sincronizar usuarios.",
+      });
+      return;
+    }
     const users = req.body?.users;
     if (
       !Array.isArray(users) ||
@@ -2039,36 +2046,16 @@ router.all(
       res.status(400).json({ message: "Operación no válida." });
       return;
     }
-    const credentials = await pool.query(
-      "SELECT data,password_hash,status FROM users WHERE dni=$1",
-      [req.get("x-admin-dni") || ""],
-    );
-    const actor = credentials.rows[0];
-    if (
-      !actor ||
-      actor.status !== "ACTIVO" ||
-      !["ADMIN", "ANALISTA", "TRADE", "SUPERVISOR"].includes(actor.data.role) ||
-      !actor.password_hash ||
-      !(await verifyPassword(req.get("x-admin-key") || "", actor.password_hash))
-    ) {
+    const actor = await authorizedTradeActor(req);
+    if (!actor) {
       res.status(403).json({
-        message:
-          "Inicia sesión con un usuario autorizado para editar o eliminar.",
+        message: "Solo Admin o Analista pueden editar o eliminar registros.",
       });
       return;
     }
     if (
       name === "users" &&
-      !["ADMIN", "ANALISTA"].includes(String(actor.data.role || ""))
-    ) {
-      res.status(403).json({
-        message: "Solo Admin o Analista pueden administrar usuarios.",
-      });
-      return;
-    }
-    if (
-      name === "users" &&
-      id === actor.data.id &&
+      id === actor.id &&
       (req.method === "DELETE" || req.body?.record?.status === "INACTIVO")
     ) {
       res
@@ -3060,18 +3047,8 @@ router.delete(
 
 // Administrative sales use the promoter as owner and retain the authenticated creator.
 router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
-  const credentials = await pool.query(
-    "SELECT id,data,password_hash,status FROM users WHERE dni=$1",
-    [req.get("x-admin-dni") || ""],
-  );
-  const actor = credentials.rows[0];
-  if (
-    !actor ||
-    actor.status !== "ACTIVO" ||
-    !["ADMIN", "ANALISTA"].includes(actor.data.role) ||
-    !actor.password_hash ||
-    !(await verifyPassword(req.get("x-admin-key") || "", actor.password_hash))
-  ) {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) {
     res.status(403).json({
       message: "Solo Analista y Admin pueden registrar ventas de promotores.",
     });
@@ -3338,7 +3315,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       promoterRole: promoter.data.role,
       promoterRoleLabel: promoter.data.roleLabel || promoter.data.role,
       createdById: actor.id,
-      createdByRole: actor.data.role,
+      createdByRole: actor.role,
       administrative: true,
       status: "SINCRONIZADA",
     };
@@ -3374,6 +3351,13 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
 });
 
 router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) {
+    res.status(403).json({
+      message: "Solo Analista y Admin pueden editar ventas.",
+    });
+    return;
+  }
   const id = String(req.params.id || "").trim();
   const input = req.body?.sale;
   const amountSoles = isRecord(input) ? Number(input.amountSoles) : Number.NaN;
@@ -3587,6 +3571,13 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
 router.delete(
   "/app-storage/admin/sales/:id",
   async (req, res): Promise<void> => {
+    const actor = await authorizedTradeActor(req);
+    if (!actor) {
+      res.status(403).json({
+        message: "Solo Analista y Admin pueden eliminar ventas.",
+      });
+      return;
+    }
     const id = String(req.params.id || "").trim();
     if (!id) {
       res.status(400).json({ message: "La venta es obligatoria." });
