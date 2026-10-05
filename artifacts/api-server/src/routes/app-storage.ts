@@ -961,6 +961,75 @@ async function restoreWarehouseStockMovements(db: QueryClient, referenceId: stri
   return restored;
 }
 
+async function recalculateDegustacionClosure(
+  db: QueryClient,
+  promoterId: string,
+  marketId: string,
+  movementDate: string,
+) {
+  if (!promoterId || !marketId || !movementDate) return;
+
+  const closures = await db.query(
+    `SELECT id,data,closure_date
+       FROM session_closures
+      WHERE promoter_id=$1
+        AND market_id=$2
+        AND ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz))) <= 43200
+      ORDER BY ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz)))
+      LIMIT 1
+      FOR UPDATE`,
+    [promoterId, marketId, movementDate],
+  );
+  const closure = closures.rows[0];
+  if (!closure) return;
+
+  const closureDate = new Date(String(closure.closure_date)).toISOString();
+  const movements = await db.query(
+    `SELECT quantity,data
+       FROM inventory_movements
+      WHERE kind='DEGUSTACION'
+        AND market_id=$1
+        AND COALESCE(data->>'promoterId',data->>'actorId','')=$2
+        AND movement_date BETWEEN $3::timestamptz - interval '1 minute'
+                              AND $3::timestamptz + interval '1 minute'`,
+    [marketId, promoterId, closureDate],
+  );
+
+  let tasting900g = 0;
+  let tasting85g = 0;
+  for (const row of movements.rows) {
+    const data = isRecord(row.data) ? row.data : {};
+    const productId = value(data, "degustacionProductId");
+    const quantity = Math.max(0, Math.floor(Number(row.quantity) || 0));
+    if (productId === "PANETON_85G") tasting85g += quantity;
+    else if (productId === "PANETON_900G" || productId === "PANETON")
+      tasting900g += quantity;
+  }
+  const tastingUsed = tasting900g + tasting85g;
+  const leads = tasting900g * 80 + tasting85g * 10;
+  const updatedAt = new Date().toISOString();
+  const data = isRecord(closure.data) ? closure.data : {};
+  const nextData = {
+    ...data,
+    tastingUsed,
+    tasting900g,
+    tasting85g,
+    leads,
+    updatedAt,
+  };
+  await db.query(
+    `UPDATE session_closures
+        SET tasting_used=$2,
+            leads=$3,
+            data=$4,
+            record_updated_at=$5,
+            updated_at=now()
+      WHERE id=$1`,
+    [closure.id, tastingUsed, leads, nextData, updatedAt],
+  );
+}
+
+
 router.get("/app-storage/warehouses/:id/audit", async (req, res): Promise<void> => {
   const actor = await authorizedWarehouseActor(req);
   if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede auditar almacenes." });
@@ -3213,72 +3282,161 @@ router.delete(
   },
 );
 
+router.put(
+  "/app-storage/admin/degustaciones/movement/:id",
+  async (req, res): Promise<void> => {
+    const actor = await authorizedWarehouseActor(req);
+    if (!actor) {
+      res.status(403).json({ message: "Solo Admin o Analista puede editar degustaciones." });
+      return;
+    }
+    const id = String(req.params.id || "").trim();
+    const input = isRecord(req.body?.record) ? req.body.record : {};
+    const productId = value(input, "degustacionProductId");
+    const quantity = Math.max(0, Math.trunc(Number(input.quantity) || 0));
+    const maxQuantity =
+      productId === "PANETON_900G" || productId === "PANETON"
+        ? 2
+        : productId === "PANETON_85G"
+          ? 8
+          : 0;
+    if (!id || !maxQuantity || quantity < 1 || quantity > maxQuantity) {
+      res.status(400).json({
+        message: "Presentación o cantidad de degustación no válida.",
+      });
+      return;
+    }
+
+    const db = await pool.connect();
+    try {
+      await db.query("BEGIN");
+      await lockInventoryLedger(db as unknown as QueryClient);
+      const found = await db.query(
+        "SELECT market_id,quantity,movement_date,data FROM inventory_movements WHERE id=$1 FOR UPDATE",
+        [id],
+      );
+      const current = found.rows[0];
+      if (!current || value(current.data as StoredRecord, "kind") !== "DEGUSTACION")
+        throw new Error("La degustación no existe o no es operativa.");
+
+      const currentData = isRecord(current.data) ? current.data : {};
+      const promoterId =
+        value(currentData, "promoterId") ||
+        value(currentData, "actorId") ||
+        actor.id;
+      const marketId = String(current.market_id || "");
+      const movementDate = new Date(String(current.movement_date)).toISOString();
+
+      await restoreWarehouseStockMovements(
+        db as unknown as QueryClient,
+        `DEGUSTACION:${id}`,
+        actor.id,
+      );
+      await applyWarehouseStockMovement(
+        db as unknown as QueryClient,
+        marketId,
+        { [productId === "PANETON" ? "PANETON_900G" : productId]: quantity },
+        "DEGUSTACION",
+        promoterId,
+        `DEGUSTACION:${id}`,
+      );
+
+      const updatedAt = new Date().toISOString();
+      const nextData = {
+        ...currentData,
+        degustacionProductId: productId === "PANETON" ? "PANETON_900G" : productId,
+        degustacionProductLabel:
+          productId === "PANETON_85G" ? "Panetón 85 g" : "Panetón 900 g",
+        quantity,
+        updatedAt,
+      };
+      await db.query(
+        `UPDATE inventory_movements
+            SET quantity=$2,
+                item_id=NULL,
+                data=$3,
+                record_updated_at=$4,
+                updated_at=now()
+          WHERE id=$1`,
+        [id, quantity, nextData, updatedAt],
+      );
+      await recalculateDegustacionClosure(
+        db as unknown as QueryClient,
+        promoterId,
+        marketId,
+        movementDate,
+      );
+      await db.query("COMMIT");
+      res.json({ record: nextData, snapshot: await readSnapshot() });
+    } catch (error) {
+      await db.query("ROLLBACK").catch(() => undefined);
+      req.log.error({ err: error }, "Unable to edit degustacion");
+      res.status(409).json({
+        message: error instanceof Error ? error.message : "No se pudo editar la degustación.",
+      });
+    } finally {
+      db.release();
+    }
+  },
+);
+
 router.delete(
   "/app-storage/admin/degustaciones/:source/:id",
   async (req, res): Promise<void> => {
+    const actor = await authorizedWarehouseActor(req);
+    if (!actor) {
+      res.status(403).json({ message: "Solo Admin o Analista puede eliminar degustaciones." });
+      return;
+    }
     const source = String(req.params.source || "");
     const id = String(req.params.id || "").trim();
     if (source !== "movement" || !id) {
-      res
-        .status(400)
-        .json({ message: "El origen de la degustación no es válido." });
+      res.status(400).json({ message: "El origen de la degustación no es válido." });
       return;
     }
-    const client = await pool.connect();
+    const db = await pool.connect();
     try {
-      await client.query("BEGIN");
-      await lockInventoryLedger(client as unknown as QueryClient);
-      const result = (await client.query(
-        "SELECT market_id, quantity, data FROM inventory_movements WHERE id=$1 FOR UPDATE",
+      await db.query("BEGIN");
+      await lockInventoryLedger(db as unknown as QueryClient);
+      const result = await db.query(
+        "SELECT market_id,quantity,movement_date,data FROM inventory_movements WHERE id=$1 FOR UPDATE",
         [id],
-      )) as unknown as {
-        rows: Array<{
-          market_id: string;
-          quantity: number;
-          data: StoredRecord;
-        }>;
-      };
+      );
       const movement = result.rows[0];
-      const movementKind = movement ? value(movement.data, "kind") : "";
-      if (movement && movementKind !== "DEGUSTACION") {
-        await client.query("ROLLBACK");
-        res.status(400).json({
-          message: "El registro no corresponde a una degustación operativa.",
-        });
-        return;
-      }
-      if (movement && movementKind === "DEGUSTACION") {
-        const updatedAt = new Date().toISOString();
-        const promoterId =
-          value(movement.data, "promoterId") || value(movement.data, "actorId") || "ADMIN";
-        await restoreWarehouseStockMovements(client as unknown as QueryClient, `DEG:${id}`, promoterId);
-        const movementDate = value(movement.data, "date");
-        if (movementDate) {
-          const closureResult = (await client.query(
-            "SELECT id,data FROM session_closures WHERE promoter_id=$1 AND closure_date=$2 FOR UPDATE",
-            [promoterId, movementDate],
-          )) as unknown as { rows: Array<{ id: string; data: StoredRecord }> };
-          for (const closure of closureResult.rows) {
-            await client.query(
-              "UPDATE session_closures SET tasting_used=0,data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-              [
-                closure.id,
-                { ...(closure.data || {}), tastingUsed: 0, updatedAt },
-                updatedAt,
-              ],
-            );
-          }
-        }
-      }
-      await client.query("DELETE FROM inventory_movements WHERE id=$1", [id]);
-      await client.query("COMMIT");
+      if (!movement) throw new Error("La degustación ya no existe.");
+      const movementData = isRecord(movement.data) ? movement.data : {};
+      if (value(movementData, "kind") !== "DEGUSTACION")
+        throw new Error("El registro no corresponde a una degustación operativa.");
+
+      const promoterId =
+        value(movementData, "promoterId") ||
+        value(movementData, "actorId") ||
+        actor.id;
+      const marketId = String(movement.market_id || "");
+      const movementDate = new Date(String(movement.movement_date)).toISOString();
+
+      await restoreWarehouseStockMovements(
+        db as unknown as QueryClient,
+        `DEGUSTACION:${id}`,
+        actor.id,
+      );
+      await db.query("DELETE FROM inventory_movements WHERE id=$1", [id]);
+      await recalculateDegustacionClosure(
+        db as unknown as QueryClient,
+        promoterId,
+        marketId,
+        movementDate,
+      );
+      await db.query("COMMIT");
       res.json({ deleted: id, source, snapshot: await readSnapshot() });
     } catch (error) {
-      await client.query("ROLLBACK");
+      await db.query("ROLLBACK").catch(() => undefined);
       req.log.error({ err: error }, "Unable to delete degustacion");
-      res.status(500).json({ message: "No se pudo eliminar la degustación." });
+      res.status(409).json({
+        message: error instanceof Error ? error.message : "No se pudo eliminar la degustación.",
+      });
     } finally {
-      client.release();
+      db.release();
     }
   },
 );

@@ -4554,6 +4554,99 @@ function AdminCanjesModule({
   );
 }
 
+function DegustacionEditModal({
+  record,
+  onSave,
+  close,
+}: {
+  record: InventoryMovement;
+  onSave: (record: InventoryMovement) => Promise<boolean>;
+  close: () => void;
+}) {
+  const initialProduct =
+    record.degustacionProductId === "PANETON_85G"
+      ? "PANETON_85G"
+      : "PANETON_900G";
+  const [productId, setProductId] = useState<"PANETON_900G" | "PANETON_85G">(
+    initialProduct,
+  );
+  const [quantity, setQuantity] = useState(String(record.quantity || 1));
+  const [saving, setSaving] = useState(false);
+  const parsedQuantity = Number(quantity);
+  const max = productId === "PANETON_900G" ? 2 : 8;
+  const contactsPerUnit = productId === "PANETON_900G" ? 80 : 10;
+  const valid =
+    Number.isInteger(parsedQuantity) &&
+    parsedQuantity >= 1 &&
+    parsedQuantity <= max;
+
+  return (
+    <Modal
+      title="Editar degustación"
+      detail="El cambio restaura primero el consumo anterior y vuelve a descontar el nuevo valor desde el Almacén."
+      close={close}
+    >
+      <div className="form-grid">
+        <SelectField
+          label="Presentación *"
+          value={productId}
+          onChange={(value) =>
+            setProductId(value as "PANETON_900G" | "PANETON_85G")
+          }
+          items={[
+            { value: "PANETON_900G", label: "Panetón 900 g" },
+            { value: "PANETON_85G", label: "Panetón 85 g" },
+          ]}
+        />
+        <Field label="Cantidad *">
+          <Input
+            type="number"
+            min={1}
+            max={max}
+            step={1}
+            value={quantity}
+            onChange={(value) => setQuantity(value.replace(/\D/g, ""))}
+          />
+        </Field>
+      </div>
+      <div className="stock-callout">
+        <Users />
+        <div>
+          <strong>{valid ? parsedQuantity * contactsPerUnit : 0} contactos</strong>
+          <small>
+            Máximo {max} · {contactsPerUnit} contactos por unidad
+          </small>
+        </div>
+      </div>
+      {!valid && (
+        <p className="modal-error">
+          Ingresa una cantidad entera entre 1 y {max}.
+        </p>
+      )}
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close}>Cancelar</Btn>
+        <Btn
+          disabled={!valid || saving}
+          onClick={async () => {
+            setSaving(true);
+            const ok = await onSave({
+              ...record,
+              degustacionProductId: productId,
+              degustacionProductLabel:
+                productId === "PANETON_900G" ? "Panetón 900 g" : "Panetón 85 g",
+              quantity: parsedQuantity,
+            });
+            setSaving(false);
+            if (ok) close();
+          }}
+        >
+          {saving ? "Guardando..." : "Guardar cambios"}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function AdminDegustacionesModule({
   onEdit,
   consumos,
@@ -4691,7 +4784,11 @@ function AdminDegustacionesModule({
                       </span>
                       <span>
                         <strong>{consumo.quantity}</strong>
-                        <small>unidades utilizadas</small>
+                        <small>
+                          {consumo.degustacionProductId === "PANETON_85G"
+                            ? "Panetón 85 g"
+                            : "Panetón 900 g"}
+                        </small>
                       </span>
                       <span>
                         <strong>{closureForConsumo(consumo)?.leads ?? 0}</strong>
@@ -6408,6 +6505,8 @@ function AnalystApp({
     "user" | "client" | "market" | "canje" | "product" | "category" | null
   >(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [editingDegustacion, setEditingDegustacion] =
+    useState<InventoryMovement | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [newAdminSale, setNewAdminSale] = useState(false);
   const [adminPromoterId, setAdminPromoterId] = useState("");
@@ -7416,7 +7515,8 @@ function AnalystApp({
       path.startsWith("/records/") ||
       path === "/users" ||
       path === "/sales" ||
-      path.startsWith("/catalog/")
+      path.startsWith("/catalog/") ||
+      path.startsWith("/degustaciones/")
     ) {
       headers.set("X-Admin-Dni", user.dni);
       headers.set("X-Admin-Key", user.password || "");
@@ -7746,6 +7846,27 @@ function AnalystApp({
         error instanceof Error ? error.message : "No se pudo eliminar la venta",
         true,
       );
+    }
+  };
+  const saveTastingConsumption = async (record: InventoryMovement) => {
+    try {
+      await adminRequest(
+        `/degustaciones/movement/${encodeURIComponent(record.id)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ record }),
+        },
+      );
+      setEditingDegustacion(null);
+      notify("Degustación actualizada y stock de Almacén recalculado");
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo editar la degustación",
+        true,
+      );
+      return false;
     }
   };
   const deleteTastingConsumption = async (consumo: InventoryMovement) => {
@@ -8495,12 +8616,12 @@ function AnalystApp({
       )}
       {tab === "degustacion" && (
         <AdminDegustacionesModule
-          onEdit={(record) => editRecord("movements", record)}
+          onEdit={(record) => setEditingDegustacion(record)}
           consumos={tastingConsumptions}
           users={users}
           marketMap={marketMap}
           closures={closures}
-          onDeleteConsumo={(record) => deleteRecord("movements", record)}
+          onDeleteConsumo={(record) => void deleteTastingConsumption(record)}
         />
       )}
       {tab === "asignaciones" && (
@@ -9077,6 +9198,13 @@ function AnalystApp({
           warehouses={marketWarehouses}
           onSave={saveSaleEdit}
           close={() => setEditingSale(null)}
+        />
+      )}
+      {editingDegustacion && (
+        <DegustacionEditModal
+          record={editingDegustacion}
+          onSave={saveTastingConsumption}
+          close={() => setEditingDegustacion(null)}
         />
       )}
       {(modal === "product" || editingProduct) && (
