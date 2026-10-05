@@ -2960,6 +2960,7 @@ function RecordEditModal({
   markets,
   users,
   clients,
+  warehouses,
   close,
   save,
 }: {
@@ -2967,6 +2968,7 @@ function RecordEditModal({
   markets: Market[];
   users: AppUser[];
   clients: Client[];
+  warehouses: Warehouse[];
   close: () => void;
   save: (
     record: Record<string, unknown>,
@@ -3058,6 +3060,15 @@ function RecordEditModal({
             {textField("department", "Departamento")}
             {textField("province", "Provincia")}
             {textField("district", "Distrito")}
+            {select("warehouseId", "Almacén", [
+              { value: "", label: "Sin almacén" },
+              ...warehouses
+                .filter((warehouse) => warehouse.status === "ACTIVO")
+                .map((warehouse) => ({
+                  value: warehouse.id,
+                  label: warehouse.name,
+                })),
+            ])}
             {status}
           </>
         )}
@@ -9210,6 +9221,7 @@ function AnalystApp({
           markets={markets}
           users={users}
           clients={clients}
+          warehouses={marketWarehouses}
           save={saveRecord}
           close={() => setRecordEdit(null)}
         />

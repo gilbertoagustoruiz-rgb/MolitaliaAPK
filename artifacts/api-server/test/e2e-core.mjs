@@ -83,6 +83,64 @@ try {
     body: JSON.stringify({ initial: true, quantities: { PANETON_900G: 10, PANETON_85G: 10, AVENA: 1000, BATEA: 20, MANDIL: 20, SPAGHETTI: 1000 } }),
   });
 
+  await request("/app-storage/admin/markets", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      market: {
+        id: "MKT-E2E-EDIT",
+        name: "Mercado E2E Editable",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+      },
+    }),
+  });
+  await request("/app-storage/admin/records/markets/MKT-E2E-EDIT", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      record: {
+        id: "MKT-E2E-EDIT",
+        name: "MERCADO E2E EDITADO",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+        warehouseId: "ALM-E2E",
+        status: "ACTIVO",
+      },
+    }),
+  });
+  const editedMarketSnapshot = await request("/app-storage");
+  const editedMarket = editedMarketSnapshot.snapshot.markets.find(
+    (item) => item.id === "MKT-E2E-EDIT",
+  );
+  if (editedMarket?.warehouseId !== "ALM-E2E")
+    throw new Error("Market edit did not persist warehouseId.");
+
+  await pool.query(
+    `INSERT INTO clients(id,code,name,market_id,status,data,record_updated_at)
+     VALUES('CLI-E2E-MARKET-GUARD','CLI-E2E-GUARD','CLIENTE GUARD','MKT-E2E-EDIT','ACTIVO',
+       '{"id":"CLI-E2E-MARKET-GUARD","code":"CLI-E2E-GUARD","name":"CLIENTE GUARD","marketId":"MKT-E2E-EDIT","status":"ACTIVO"}'::jsonb,now())`,
+  );
+  const guardedDelete = await fetch(base + "/app-storage/admin/markets/MKT-E2E-EDIT", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const guardedDeleteBody = await guardedDelete.json().catch(() => ({}));
+  if (guardedDelete.status !== 409)
+    throw new Error(
+      `Market deletion with related records was not blocked: ${guardedDelete.status} ${JSON.stringify(guardedDeleteBody)}`,
+    );
+  const guardedClient = await pool.query(
+    "SELECT id FROM clients WHERE id='CLI-E2E-MARKET-GUARD'",
+  );
+  if (!guardedClient.rows.length)
+    throw new Error("Guarded market deletion removed related client data.");
+
+
   const now = new Date().toISOString();
   await request("/app-storage/sync", {
     method: "POST",
