@@ -2329,6 +2329,12 @@ router.post(
         const name = value(input, "name").toUpperCase();
         if (!id || !name)
           throw new Error("La categoría requiere código y nombre.");
+        const duplicateName = await pool.query(
+          "SELECT id FROM client_categories WHERE UPPER(name)=UPPER($1) AND id<>$2 LIMIT 1",
+          [name, id],
+        );
+        if (duplicateName.rows.length)
+          throw new Error("Ya existe otra categoría con ese nombre.");
         const record = {
           id,
           name,

@@ -77,6 +77,64 @@ try {
 
   const adminHeaders = { "x-admin-dni": admin.dni, "x-admin-key": admin.password };
 
+  await request("/app-storage/admin/catalog/categories", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      record: {
+        id: "E2E-CAT-UNUSED",
+        name: "E2E CATEGORIA SIN USO",
+        status: "ACTIVO",
+      },
+    }),
+  });
+  await request("/app-storage/admin/catalog/categories/E2E-CAT-UNUSED", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const unusedCategory = await pool.query(
+    "SELECT id FROM client_categories WHERE id='E2E-CAT-UNUSED'",
+  );
+  if (unusedCategory.rows.length)
+    throw new Error("Unused category was not physically removed.");
+
+  const duplicateCategoryName = await fetch(base + "/app-storage/admin/catalog/categories", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...adminHeaders },
+    body: JSON.stringify({
+      record: {
+        id: "E2E-CAT-DUP",
+        name: "MIXTO",
+        status: "ACTIVO",
+      },
+    }),
+  });
+  if (duplicateCategoryName.status !== 400)
+    throw new Error("Duplicate category name was not rejected.");
+
+  await request("/app-storage/admin/catalog/categories/MIXTO", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const usedCategory = await pool.query(
+    "SELECT id,data FROM client_categories WHERE id='MIXTO'",
+  );
+  if (!usedCategory.rows.length || usedCategory.rows[0]?.data?.status !== "INACTIVO")
+    throw new Error("Used category was deleted instead of being marked INACTIVO.");
+
+  await request("/app-storage/admin/catalog/categories", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      record: {
+        id: "MIXTO",
+        name: "MIXTO",
+        status: "ACTIVO",
+      },
+    }),
+  });
+
+
   await request("/app-storage/admin/clients", {
     method: "POST",
     headers: adminHeaders,
