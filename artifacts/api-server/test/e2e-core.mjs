@@ -62,7 +62,6 @@ try {
         markets: [market],
         users: [admin, promoter],
         clients: [client],
-        assignments: [{ promoterId: promoter.id, promoterDni: promoter.dni, marketIds: [market.id], clientIds: [client.id], updatedAt: new Date().toISOString() }],
         productPrices: products,
         categories,
       },
@@ -76,6 +75,33 @@ try {
   if (login.user?.id !== promoter.id) throw new Error("Login E2E did not return the promoter.");
 
   const adminHeaders = { "x-admin-dni": admin.dni, "x-admin-key": admin.password };
+
+  const unauthorizedAssignment = await fetch(base + "/app-storage/assignments", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      assignment: {
+        promoterId: promoter.id,
+        marketIds: [market.id],
+        clientIds: [client.id],
+      },
+    }),
+  });
+  if (unauthorizedAssignment.status !== 403)
+    throw new Error("Unauthenticated assignment update was not rejected.");
+
+  await request("/app-storage/assignments", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      assignment: {
+        promoterId: promoter.id,
+        marketIds: [market.id],
+        clientIds: [client.id],
+      },
+    }),
+  });
+
 
   await request("/app-storage/admin/catalog/categories", {
     method: "POST",
@@ -220,6 +246,7 @@ try {
   });
   await request("/app-storage/assignments", {
     method: "POST",
+    headers: adminHeaders,
     body: JSON.stringify({
       assignment: {
         promoterId: "USR-E2E-USER-EDIT",
@@ -435,6 +462,113 @@ try {
   );
   if (!guardedClient.rows.length)
     throw new Error("Guarded market deletion removed related client data.");
+
+  await request("/app-storage/admin/markets", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      market: {
+        id: "MKT-E2E-OTHER",
+        name: "MERCADO E2E OTRO",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+      },
+    }),
+  });
+  await request("/app-storage/admin/clients", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      client: {
+        id: "CLI-E2E-OTHER",
+        code: "E2EOTHER",
+        name: "CLIENTE OTRO MERCADO",
+        category: "MIXTO",
+        marketId: "MKT-E2E-OTHER",
+        status: "ACTIVO",
+      },
+    }),
+  });
+
+  const invalidCrossMarketAssignment = await fetch(base + "/app-storage/assignments", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...adminHeaders },
+    body: JSON.stringify({
+      assignment: {
+        promoterId: promoter.id,
+        marketIds: [market.id],
+        clientIds: ["CLI-E2E-OTHER"],
+      },
+    }),
+  });
+  if (invalidCrossMarketAssignment.status !== 409)
+    throw new Error("Assignment accepted a client from a non-selected market.");
+
+  await request("/app-storage/sync", {
+    method: "POST",
+    body: JSON.stringify({
+      snapshot: {
+        assignments: [{
+          promoterId: promoter.id,
+          promoterDni: promoter.dni,
+          marketIds: ["MKT-E2E-OTHER"],
+          clientIds: ["CLI-E2E-OTHER"],
+          updatedAt: new Date(Date.now() + 999999).toISOString(),
+        }],
+      },
+    }),
+  });
+  const assignmentAfterGenericSync = await pool.query(
+    "SELECT market_ids,client_ids FROM assignments WHERE promoter_id=$1",
+    [promoter.id],
+  );
+  if (
+    assignmentAfterGenericSync.rows[0]?.market_ids?.[0] !== market.id ||
+    assignmentAfterGenericSync.rows[0]?.client_ids?.[0] !== client.id
+  )
+    throw new Error("Generic sync was able to overwrite official assignments.");
+
+  await request("/app-storage/assignments", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      assignment: {
+        promoterId: promoter.id,
+        marketIds: [],
+        clientIds: [],
+      },
+    }),
+  });
+  const clearedAssignment = await pool.query(
+    "SELECT market_ids,client_ids FROM assignments WHERE promoter_id=$1",
+    [promoter.id],
+  );
+  if (
+    clearedAssignment.rows[0]?.market_ids?.length ||
+    clearedAssignment.rows[0]?.client_ids?.length
+  )
+    throw new Error("Assignment clear did not persist empty coverage.");
+  const clearedPromoterUser = await pool.query(
+    "SELECT data FROM users WHERE id=$1",
+    [promoter.id],
+  );
+  if (clearedPromoterUser.rows[0]?.data?.marketId)
+    throw new Error("Clearing assignment left stale user.marketId fallback.");
+
+  await request("/app-storage/assignments", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      assignment: {
+        promoterId: promoter.id,
+        marketIds: [market.id],
+        clientIds: [client.id],
+      },
+    }),
+  });
+
 
 
   const now = new Date().toISOString();

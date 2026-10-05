@@ -4926,6 +4926,7 @@ function TastingExitModal({
 }
 
 function AssignmentModule({
+  user,
   markets,
   users,
   clients,
@@ -4934,6 +4935,7 @@ function AssignmentModule({
   setUsers,
   notify,
 }: {
+  user: AppUser;
   markets: Market[];
   users: AppUser[];
   clients: Client[];
@@ -5090,43 +5092,58 @@ function AssignmentModule({
       clientIds: selectedClientIds,
       updatedAt: new Date().toISOString(),
     };
-    const next = [
-      ...assignments.filter(
-        (item) =>
-          !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter),
-      ),
-      assignment,
-    ];
-    setAssignments(next);
-    writeStore("bt-promoter-assignments", next);
-    setUsers(
-      users.map((user) =>
-        user.id === selectedPromoterId
-          ? { ...user, marketId: selectedMarketIds[0] }
-          : user,
-      ),
-    );
     try {
       const response = await fetch(APP_STORAGE_ASSIGNMENTS, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-dni": user.dni,
+          "x-admin-key": user.password || "",
+        },
         body: JSON.stringify({ assignment }),
       });
-      if (!response.ok) throw new Error("No se pudo sincronizar");
       const payload = (await response.json()) as {
+        message?: string;
         assignments?: PromoterAssignment[];
+        snapshot?: Partial<CloudSnapshot>;
       };
-      if (Array.isArray(payload.assignments)) {
-        const merged = mergeAssignments(next, payload.assignments);
-        setAssignments(merged);
-        writeStore("bt-promoter-assignments", merged);
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo guardar la asignación");
+
+      const nextAssignments = Array.isArray(payload.assignments)
+        ? payload.assignments
+        : [
+            ...assignments.filter(
+              (item) =>
+                !selectedPromoter ||
+                !assignmentMatchesUser(item, selectedPromoter),
+            ),
+            assignment,
+          ];
+      setAssignments(nextAssignments);
+      writeStore("bt-promoter-assignments", nextAssignments);
+
+      if (Array.isArray(payload.snapshot?.users)) {
+        setUsers(payload.snapshot.users);
+        writeStore("bt-users", payload.snapshot.users);
+      } else {
+        setUsers(
+          users.map((current) =>
+            current.id === selectedPromoterId
+              ? { ...current, marketId: selectedMarketIds[0] }
+              : current,
+          ),
+        );
       }
+
       notify(
-        `Asignación sincronizada para ${selectedPromoter?.name || "el usuario"}`,
+        `Asignación guardada en DigitalOcean para ${selectedPromoter?.name || "el usuario"}`,
       );
-    } catch {
+    } catch (error) {
       notify(
-        "Asignación guardada en este dispositivo, pero pendiente de sincronizar. Intenta guardar nuevamente.",
+        error instanceof Error
+          ? error.message
+          : "No se pudo guardar la asignación.",
         true,
       );
     }
@@ -5146,37 +5163,59 @@ function AssignmentModule({
       clientIds: [],
       updatedAt: new Date().toISOString(),
     };
-    const next = [
-      ...assignments.filter(
-        (item) =>
-          !selectedPromoter || !assignmentMatchesUser(item, selectedPromoter),
-      ),
-      assignment,
-    ];
-    setAssignments(next);
-    writeStore("bt-promoter-assignments", next);
-    setUsers(
-      users.map((user) =>
-        user.id === selectedPromoterId
-          ? { ...user, marketId: undefined }
-          : user,
-      ),
-    );
-    setSelectedMarketIds([]);
-    setSelectedClientIds([]);
     try {
       const response = await fetch(APP_STORAGE_ASSIGNMENTS, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-dni": user.dni,
+          "x-admin-key": user.password || "",
+        },
         body: JSON.stringify({ assignment }),
       });
-      if (!response.ok) throw new Error("No se pudo sincronizar");
+      const payload = (await response.json()) as {
+        message?: string;
+        assignments?: PromoterAssignment[];
+        snapshot?: Partial<CloudSnapshot>;
+      };
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo retirar la asignación");
+
+      const nextAssignments = Array.isArray(payload.assignments)
+        ? payload.assignments
+        : [
+            ...assignments.filter(
+              (item) =>
+                !selectedPromoter ||
+                !assignmentMatchesUser(item, selectedPromoter),
+            ),
+            assignment,
+          ];
+      setAssignments(nextAssignments);
+      writeStore("bt-promoter-assignments", nextAssignments);
+
+      if (Array.isArray(payload.snapshot?.users)) {
+        setUsers(payload.snapshot.users);
+        writeStore("bt-users", payload.snapshot.users);
+      } else {
+        setUsers(
+          users.map((current) =>
+            current.id === selectedPromoterId
+              ? { ...current, marketId: undefined }
+              : current,
+          ),
+        );
+      }
+      setSelectedMarketIds([]);
+      setSelectedClientIds([]);
       notify(
-        `Asignación retirada para ${selectedPromoter?.name || "el promotor"}`,
+        `Asignación retirada en DigitalOcean para ${selectedPromoter?.name || "el promotor"}`,
       );
-    } catch {
+    } catch (error) {
       notify(
-        "La asignación se retiró localmente, pero falta sincronizar el cambio.",
+        error instanceof Error
+          ? error.message
+          : "No se pudo retirar la asignación.",
         true,
       );
     }
@@ -5188,8 +5227,8 @@ function AssignmentModule({
           <span className="eyebrow">COBERTURA DE CAMPO</span>
           <h2>Asignar mercados y clientes</h2>
           <p>
-            Define exactamente qué puede visitar cada promotor. La asignación se
-            guarda localmente y se sincroniza con la BBDD central.
+            Define exactamente qué puede visitar cada promotor o coordinador. La
+            asignación se valida y guarda directamente en la BBDD central.
           </p>
         </div>
         <div className="assignment-counter">
@@ -8626,6 +8665,7 @@ function AnalystApp({
       )}
       {tab === "asignaciones" && (
         <AssignmentModule
+          user={user}
           markets={markets}
           users={users}
           clients={clients}
