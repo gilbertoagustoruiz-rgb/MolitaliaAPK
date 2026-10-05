@@ -7758,7 +7758,11 @@ function AnalystApp({
     }
   };
   const deleteClient = async (client: Client) => {
-    if (!window.confirm(`¿Eliminar definitivamente al cliente ${client.name}?`))
+    if (
+      !window.confirm(
+        `¿Eliminar al cliente ${client.name}? Solo se eliminará si no tiene ventas, marcaciones, asignaciones ni usuarios vinculados. Si tiene historial, debes dejarlo INACTIVO.`,
+      )
+    )
       return;
     try {
       await adminRequest(`/clients/${encodeURIComponent(client.id)}`, {
