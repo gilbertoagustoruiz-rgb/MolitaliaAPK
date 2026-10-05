@@ -4305,161 +4305,6 @@ function SaleEditModal({
     </Modal>
   );
 }
-function NewCanjeModal({
-  users,
-  user,
-  onSave,
-  close,
-}: {
-  users: AppUser[];
-  user: AppUser;
-  onSave: (canjes: InventoryMovement[]) => void | Promise<void>;
-  close: () => void;
-}) {
-  const promoters = users.filter(
-    (current) =>
-      !isArchivedUser(current) &&
-      current.status === "ACTIVO" &&
-      isPromoterRole(current.role),
-  );
-  const [promoterId, setPromoterId] = useState("");
-  const [tastingQuantity, setTastingQuantity] = useState("");
-  const [quantities, setQuantities] = useState<
-    Record<RedemptionItemId, string>
-  >(
-    () =>
-      Object.fromEntries(
-        redemptionItems.map((item) => [item.id, ""]),
-      ) as Record<RedemptionItemId, string>,
-  );
-  const selectedPromoter = promoters.find(
-    (current) => current.id === promoterId,
-  );
-  const parsedTastingQuantity =
-    tastingQuantity.trim() === "" ? 0 : Number(tastingQuantity);
-  const parsedQuantities = redemptionItems.reduce((result, item) => {
-    const raw = quantities[item.id].trim();
-    result[item.id] = raw === "" ? 0 : Number(raw);
-    return result;
-  }, {} as RedemptionStock);
-  const hasInvalidQuantity =
-    !Number.isInteger(parsedTastingQuantity) ||
-    parsedTastingQuantity < 0 ||
-    redemptionItems.some(
-      (item) =>
-        !Number.isInteger(parsedQuantities[item.id]) ||
-        parsedQuantities[item.id] < 0,
-    );
-  const hasQuantity =
-    parsedTastingQuantity > 0 ||
-    redemptionItems.some((item) => parsedQuantities[item.id] > 0);
-  const save = async () => {
-    if (!selectedPromoter || hasInvalidQuantity || !hasQuantity) return;
-    const date = new Date().toISOString();
-    const canjes: InventoryMovement[] = redemptionItems
-      .filter((item) => parsedQuantities[item.id] > 0)
-      .map((item) => ({
-        id: `ABAST-CANJE-${Date.now()}-${item.id}`,
-        marketId:
-          selectedPromoter.marketId || `PERSONAL:${selectedPromoter.id}`,
-        promoterId: selectedPromoter.id,
-        kind: "AJUSTE_CANJES" as const,
-        itemId: item.id,
-        quantity: parsedQuantities[item.id],
-        actorId: user.id,
-        actorName: user.name,
-        date,
-        status: "PENDIENTE" as const,
-      }));
-    if (parsedTastingQuantity > 0) {
-      canjes.push({
-        id: `ABAST-DEGUSTACION-${Date.now()}`,
-        marketId:
-          selectedPromoter.marketId || `PERSONAL:${selectedPromoter.id}`,
-        promoterId: selectedPromoter.id,
-        kind: "AJUSTE_DEGUSTACION" as const,
-        degustacionProductId: "PANETON",
-        degustacionProductLabel: "Panetón",
-        quantity: parsedTastingQuantity,
-        actorId: user.id,
-        actorName: user.name,
-        date,
-        status: "PENDIENTE" as const,
-      });
-    }
-    await onSave(canjes);
-    close();
-  };
-  return (
-    <Modal
-      title="Actualizar stock promotor"
-      detail="Selecciona un promotor e ingresa las cantidades a recargar. Todo lo que coloques se suma al stock actual del promotor."
-      close={close}
-    >
-      <div className="form-grid">
-        <SelectField
-          label="Promotor *"
-          value={promoterId}
-          onChange={setPromoterId}
-          items={promoters.map((current) => ({
-            value: current.id,
-            label: `${current.name} · DNI ${current.dni}`,
-          }))}
-          placeholder="Seleccionar promotor"
-        />
-        <Field label="Panetón para degustación">
-          <Input
-            type="number"
-            value={tastingQuantity}
-            onChange={setTastingQuantity}
-            min={0}
-            step={1}
-            placeholder="0"
-            testId="input-new-degustacion-quantity"
-          />
-        </Field>
-        {redemptionItems.map((item) => (
-          <Field key={item.id} label={`${item.label} recibida`}>
-            <Input
-              type="number"
-              value={quantities[item.id]}
-              onChange={(value) =>
-                setQuantities((current) => ({ ...current, [item.id]: value }))
-              }
-              min={0}
-              step={1}
-              placeholder="0"
-              testId={`input-new-canje-${item.id.toLowerCase()}`}
-            />
-          </Field>
-        ))}
-      </div>
-      {selectedPromoter && (
-        <p className="modal-hint">
-          Stock actual: {userTastingStock(selectedPromoter)} panetones ·{" "}
-          {redemptionStockText(userRedemptionStock(selectedPromoter))}
-        </p>
-      )}
-      {hasInvalidQuantity && (
-        <p className="modal-error">
-          Las cantidades deben ser números enteros iguales o mayores que cero.
-        </p>
-      )}
-      <div className="modal-actions">
-        <Btn variant="outline" onClick={close}>
-          Cancelar
-        </Btn>
-        <Btn
-          disabled={!selectedPromoter || hasInvalidQuantity || !hasQuantity}
-          onClick={save}
-          testId="button-create-canje"
-        >
-          Sumar al stock
-        </Btn>
-      </div>
-    </Modal>
-  );
-}
 function matchesTableSearch(
   query: string,
   fields: (string | number | undefined | null)[],
@@ -7903,42 +7748,10 @@ function AnalystApp({
       );
     }
   };
-  const saveCanje = async (canjes: InventoryMovement[]) => {
-    try {
-      await adminRequest("/canjes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ canjes }),
-      });
-      notify(
-        `${canjes.length} artículo${canjes.length === 1 ? "" : "s"} cargado${canjes.length === 1 ? "" : "s"} en el stock personal`,
-      );
-    } catch (error) {
-      notify(
-        error instanceof Error ? error.message : "No se pudo cargar el stock",
-        true,
-      );
-    }
-  };
-  const deleteCanje = async (canje: AdminCanje) => {
-    if (!window.confirm("¿Eliminar definitivamente este canje?")) return;
-    try {
-      await adminRequest(
-        `/canjes/${canje.source}/${encodeURIComponent(canje.canjeId)}`,
-        { method: "DELETE" },
-      );
-      notify("Canje eliminado");
-    } catch (error) {
-      notify(
-        error instanceof Error ? error.message : "No se pudo eliminar el canje",
-        true,
-      );
-    }
-  };
   const deleteTastingConsumption = async (consumo: InventoryMovement) => {
     if (
       !window.confirm(
-        `¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? "" : "es"}? La cantidad volverá a su stock personal.`,
+        `¿Eliminar la degustación de ${consumo.actorName} por ${consumo.quantity} unidad${consumo.quantity === 1 ? "" : "es"}? La cantidad volverá al Almacén correspondiente.`,
       )
     )
       return;
@@ -7947,7 +7760,7 @@ function AnalystApp({
         `/degustaciones/movement/${encodeURIComponent(consumo.id)}`,
         { method: "DELETE" },
       );
-      notify("Degustación eliminada y stock personal restaurado");
+      notify("Degustación eliminada y stock de Almacén restaurado");
     } catch (error) {
       notify(
         error instanceof Error
@@ -9284,14 +9097,6 @@ function AnalystApp({
             setModal(null);
             setEditingCategory(null);
           }}
-        />
-      )}
-      {modal === "canje" && (
-        <NewCanjeModal
-          users={visibleUsers}
-          user={user}
-          onSave={saveCanje}
-          close={() => setModal(null)}
         />
       )}
     </main>
