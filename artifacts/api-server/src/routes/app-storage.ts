@@ -93,6 +93,23 @@ function numeric(record: StoredRecord, key: string) {
   return Number.isFinite(result) ? result : 0;
 }
 
+function hasRedemptionConsumption(record: StoredRecord) {
+  if (value(record, "bonus")) return true;
+  const items = record.redemptionItems;
+  if (!isRecord(items)) return false;
+  return redemptionItemIds.some(
+    (itemId) => Math.max(0, Number(items[itemId]) || 0) > 0,
+  );
+}
+
+function requireFinalClientForCanje(record: StoredRecord) {
+  if (hasRedemptionConsumption(record) && !value(record, "finalClientName")) {
+    throw new Error(
+      "Nombre Cliente Final es obligatorio cuando la venta tiene canje.",
+    );
+  }
+}
+
 function dateValue(record: StoredRecord) {
   const raw = value(record, "date");
   const date = raw ? new Date(raw) : new Date();
@@ -776,7 +793,10 @@ async function syncSnapshot(
         }
         if (record && typeof record === "object") {
           const isNewRecord = !existing.rows.length;
-          if (isNewRecord && name === "sales" && value(record, "bonus")) {
+          if (isNewRecord && name === "sales") {
+            requireFinalClientForCanje(record);
+          }
+          if (isNewRecord && name === "sales" && hasRedemptionConsumption(record)) {
             const requirementsSource = isRecord(record.redemptionItems) ? record.redemptionItems : {};
             const requirements = Object.fromEntries(
               redemptionItemIds.map((itemId) => [itemId, Math.max(0, Math.floor(Number(requirementsSource[itemId]) || 0))]),
@@ -1210,6 +1230,17 @@ router.post("/app-storage/trade-approvals", async (req, res): Promise<void> => {
     res.status(400).json({ message: "La solicitud debe corresponder a una venta mayor a 80 planchas." });
     return;
   }
+  try {
+    requireFinalClientForCanje(sale);
+  } catch (error) {
+    res.status(400).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Nombre Cliente Final es obligatorio cuando existe canje.",
+    });
+    return;
+  }
   const id = value(req.body, "id") || `TRD-${randomUUID()}`;
   const requestedAt = new Date().toISOString();
   const approval = {
@@ -1262,6 +1293,7 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
     const approvalData = isRecord(found.rows[0].data) ? found.rows[0].data : {};
     const sale = isRecord(approvalData.sale) ? approvalData.sale : null;
     if (!sale) throw new Error("La solicitud no contiene la venta.");
+    if (decision === "APROBADA") requireFinalClientForCanje(sale);
     const resolvedAt = new Date().toISOString();
     if (decision === "APROBADA") {
       const existingSale = await db.query("SELECT id FROM sales WHERE id=$1 LIMIT 1", [value(sale, "id")]);
@@ -1363,7 +1395,12 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to sync app storage");
-    res.status(500).json({ message: "No se pudo sincronizar PostgreSQL." });
+    res.status(500).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "No se pudo sincronizar PostgreSQL.",
+    });
   }
 });
 
@@ -2209,6 +2246,17 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     res.status(400).json({ message: "Venta no válida." });
     return;
   }
+  try {
+    requireFinalClientForCanje(input);
+  } catch (error) {
+    res.status(400).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Nombre Cliente Final es obligatorio cuando existe canje.",
+    });
+    return;
+  }
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
@@ -2507,6 +2555,17 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     res.status(400).json({
       message:
         "La venta requiere cliente, fecha válida e importe mayor a cero.",
+    });
+    return;
+  }
+  try {
+    requireFinalClientForCanje(input);
+  } catch (error) {
+    res.status(400).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "Nombre Cliente Final es obligatorio cuando existe canje.",
     });
     return;
   }

@@ -9745,6 +9745,9 @@ function PromoterApp({
     mode === "PLANCHAS" && requiredRedemptionEntries(requiredRedemptions).length
       ? canjeRequirementsLabel(requiredRedemptions)
       : selectedBonusProduct?.label;
+  const hasCanje = Boolean(
+    bonus || requiredRedemptionEntries(requiredRedemptions).length,
+  );
   const stockForCanje = warehouseRedemptionStock;
   const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
     ([itemId, quantity]) => stockForCanje[itemId] < quantity,
@@ -9771,7 +9774,7 @@ function PromoterApp({
           (miniOnlyPlancha && miniEligibleUnits === 24 && calculatedPlanchas === 0.5)));
   const saleFormValid = Boolean(
     clientId &&
-    (!bonus || finalClientName.trim()) &&
+    (!hasCanje || finalClientName.trim()) &&
     receipt &&
     pricesValid &&
     Number.isFinite(saleAmount) &&
@@ -9994,6 +9997,13 @@ function PromoterApp({
       );
       return;
     }
+    if (hasCanje && !finalClientName.trim()) {
+      notify(
+        "Ingresa el Nombre Cliente Final. Es obligatorio cuando existe canje.",
+        true,
+      );
+      return;
+    }
     if (!canConfirm) {
       notify(
         exceptionNeedsComment
@@ -10017,7 +10027,7 @@ function PromoterApp({
       promoterRole: user.role,
       promoterRoleLabel: user.roleLabel || user.role,
       clientId,
-      finalClientName: bonus ? finalClientName.trim() : undefined,
+      finalClientName: hasCanje ? finalClientName.trim() : undefined,
       marketId: selectedMarketId,
       marketRegion: selectedMarket.region || selectedMarket.department,
       marketDepartment: selectedMarket.department,
@@ -10050,7 +10060,7 @@ function PromoterApp({
           : { [selectedProduct.brand]: unitQty },
       bonus,
       redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
-      redemptionItems: bonus ? requiredRedemptions : undefined,
+      redemptionItems: hasCanje ? requiredRedemptions : undefined,
       planchaAccessory:
         mode === "PLANCHAS" ? effectivePlanchaAccessory : undefined,
       planchaMultiplier:
@@ -10763,7 +10773,7 @@ function PromoterApp({
             source="gallery"
           />
         </div>
-        {bonus && (
+        {hasCanje && (
           <Field label="Nombre Cliente Final *">
             <Input
               value={finalClientName}
