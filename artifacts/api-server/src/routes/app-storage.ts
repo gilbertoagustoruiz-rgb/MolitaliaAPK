@@ -1377,6 +1377,95 @@ router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<vo
   } finally { db.release(); }
 });
 
+async function validateTradeSale(
+  db: QueryClient,
+  sale: StoredRecord,
+) {
+  if (value(sale, "mode") !== "PLANCHAS" || numeric(sale, "planchas") <= 80)
+    throw new Error("La solicitud debe corresponder a una venta mayor a 80 planchas.");
+
+  requireFinalClientForCanje(sale);
+
+  const promoterId = value(sale, "promoterId");
+  const marketId = value(sale, "marketId");
+  const clientId = value(sale, "clientId");
+  if (!promoterId || !marketId || !clientId)
+    throw new Error("La solicitud requiere Promotor, Mercado y Cliente.");
+
+  const promoterResult = await db.query(
+    "SELECT id,dni,role,status,data FROM users WHERE id=$1 LIMIT 1",
+    [promoterId],
+  );
+  const promoter = promoterResult.rows[0];
+  const promoterData = isRecord(promoter?.data) ? promoter.data : {};
+  const promoterRole = String(promoter?.role || value(promoterData, "role") || "");
+  if (
+    !promoter ||
+    promoter.status !== "ACTIVO" ||
+    !["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"].includes(promoterRole)
+  )
+    throw new Error("El promotor de la solicitud no existe o no está activo.");
+
+  const market = await db.query(
+    "SELECT id FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+    [marketId],
+  );
+  if (!market.rows.length)
+    throw new Error("El Mercado de la solicitud no existe o está inactivo.");
+
+  const client = await db.query(
+    "SELECT id FROM clients WHERE id=$1 AND market_id=$2 AND status='ACTIVO' LIMIT 1",
+    [clientId, marketId],
+  );
+  if (!client.rows.length)
+    throw new Error("El Cliente no pertenece al Mercado o está inactivo.");
+
+  const assignment = await db.query(
+    "SELECT market_ids,client_ids FROM assignments WHERE promoter_id=$1 LIMIT 1",
+    [promoterId],
+  );
+  const coverage = assignment.rows[0];
+  const allowedMarkets = coverage
+    ? Array.isArray(coverage.market_ids) ? coverage.market_ids.map(String) : []
+    : value(promoterData, "marketId")
+      ? [value(promoterData, "marketId")]
+      : [];
+  const allowedClients = coverage && Array.isArray(coverage.client_ids)
+    ? coverage.client_ids.map(String)
+    : [];
+
+  if (!allowedMarkets.includes(marketId))
+    throw new Error("El Mercado no está asignado al promotor.");
+  if (coverage && !allowedClients.includes(clientId))
+    throw new Error("El Cliente no está asignado al promotor.");
+
+  const drafts = saleItemDrafts(sale);
+  if (!drafts.length)
+    throw new Error("La venta Trade no contiene SKU válidos de Marcas.");
+  const skuList = [...new Set(drafts.map((line) => line.sku))];
+  const catalog = await db.query(
+    "SELECT sku,data FROM product_prices WHERE sku = ANY($1::text[])",
+    [skuList],
+  );
+  const catalogBySku = new Map(
+    catalog.rows.map((row) => [
+      String(row.sku),
+      String(isRecord(row.data) ? row.data.status || "ACTIVO" : "ACTIVO"),
+    ]),
+  );
+  const invalidSku = skuList.find(
+    (sku) => !catalogBySku.has(sku) || catalogBySku.get(sku) === "INACTIVO",
+  );
+  if (invalidSku)
+    throw new Error(`SKU no disponible en Marcas: ${invalidSku}.`);
+
+  const saleId = value(sale, "id");
+  if (!saleId || !saleId.startsWith("VTA-"))
+    throw new Error("Código de venta Trade no válido.");
+
+  return { promoter, promoterData, promoterId, marketId, clientId, saleId };
+}
+
 router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
   try {
     const result = await pool.query(
@@ -1398,46 +1487,79 @@ router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
 });
 
 router.post("/app-storage/trade-approvals", async (req, res): Promise<void> => {
-  const sale = req.body?.sale;
-  if (!isRecord(sale) || value(sale, "mode") !== "PLANCHAS" || numeric(sale, "planchas") <= 80) {
-    res.status(400).json({ message: "La solicitud debe corresponder a una venta mayor a 80 planchas." });
+  const sale = isRecord(req.body?.sale) ? req.body.sale : null;
+  if (!sale) {
+    res.status(400).json({ message: "Solicitud Trade no válida." });
     return;
   }
+
+  const id = value(req.body as StoredRecord, "id") || `TRD-${randomUUID()}`;
+  const db = await pool.connect();
   try {
-    requireFinalClientForCanje(sale);
-  } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Nombre Cliente Final es obligatorio cuando existe canje.",
-    });
-    return;
-  }
-  const id = value(req.body, "id") || `TRD-${randomUUID()}`;
-  const requestedAt = new Date().toISOString();
-  const approval = {
-    id,
-    promoterId: value(sale, "promoterId"),
-    promoterRole: value(sale, "promoterRole"),
-    promoterRoleLabel: value(sale, "promoterRoleLabel"),
-    clientId: value(sale, "clientId"),
-    finalClientName: value(sale, "finalClientName") || undefined,
-    marketId: value(sale, "marketId"),
-    sale: { ...sale, id: value(sale, "id") || `VTA-${randomUUID()}`, status: "PENDIENTE_APROBACION_TRADE" },
-    status: "PENDIENTE",
-    requestedAt,
-  };
-  try {
-    await pool.query(
-      `INSERT INTO trade_approvals (id,promoter_id,client_id,market_id,status,requested_at,data)
-       VALUES ($1,$2,$3,$4,'PENDIENTE',$5,$6)
-       ON CONFLICT (id) DO NOTHING`,
-      [id, approval.promoterId, approval.clientId, approval.marketId, requestedAt, approval],
+    await db.query("BEGIN");
+    const validated = await validateTradeSale(db as unknown as QueryClient, sale);
+
+    const existingSale = await db.query(
+      "SELECT id FROM sales WHERE id=$1 LIMIT 1",
+      [validated.saleId],
     );
+    if (existingSale.rows.length)
+      throw new Error("La venta ya existe y no puede solicitar aprobación nuevamente.");
+
+    const existingApproval = await db.query(
+      `SELECT id,status
+         FROM trade_approvals
+        WHERE id=$1
+           OR data->'sale'->>'id'=$2
+        LIMIT 1
+        FOR UPDATE`,
+      [id, validated.saleId],
+    );
+    if (existingApproval.rows.length)
+      throw new Error("Ya existe una solicitud Trade para esta venta.");
+
+    const requestedAt = new Date().toISOString();
+    const approval = {
+      id,
+      promoterId: validated.promoterId,
+      promoterName:
+        value(validated.promoterData, "name") || value(sale, "promoterName"),
+      promoterRole:
+        value(validated.promoterData, "role") ||
+        String(validated.promoter.role || ""),
+      promoterRoleLabel:
+        value(validated.promoterData, "roleLabel") ||
+        value(validated.promoterData, "role") ||
+        String(validated.promoter.role || ""),
+      clientId: validated.clientId,
+      finalClientName: value(sale, "finalClientName") || undefined,
+      marketId: validated.marketId,
+      sale: {
+        ...sale,
+        promoterId: validated.promoterId,
+        clientId: validated.clientId,
+        marketId: validated.marketId,
+        status: "PENDIENTE_APROBACION_TRADE",
+      },
+      status: "PENDIENTE",
+      requestedAt,
+    };
+    await db.query(
+      `INSERT INTO trade_approvals
+        (id,promoter_id,client_id,market_id,status,requested_at,data)
+       VALUES ($1,$2,$3,$4,'PENDIENTE',$5,$6)`,
+      [id, validated.promoterId, validated.clientId, validated.marketId, requestedAt, approval],
+    );
+    await db.query("COMMIT");
     res.status(201).json({ approval });
-  } catch {
-    res.status(500).json({ message: "No se pudo guardar la solicitud Trade." });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to create Trade approval");
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo guardar la solicitud Trade.",
+    });
+  } finally {
+    db.release();
   }
 });
 
@@ -1466,14 +1588,16 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
     const approvalData = isRecord(found.rows[0].data) ? found.rows[0].data : {};
     const sale = isRecord(approvalData.sale) ? approvalData.sale : null;
     if (!sale) throw new Error("La solicitud no contiene la venta.");
-    if (decision === "APROBADA") requireFinalClientForCanje(sale);
     const resolvedAt = new Date().toISOString();
     if (decision === "APROBADA") {
-      const existingSale = await db.query("SELECT id FROM sales WHERE id=$1 LIMIT 1", [value(sale, "id")]);
-      if (existingSale.rows.length) throw new Error("La venta de esta solicitud ya fue registrada.");
+      const validated = await validateTradeSale(db as unknown as QueryClient, sale);
+      const existingSale = await db.query(
+        "SELECT id FROM sales WHERE id=$1 LIMIT 1",
+        [validated.saleId],
+      );
+      if (existingSale.rows.length)
+        throw new Error("La venta de esta solicitud ya fue registrada.");
       const requirementsToConsume = isRecord(sale.redemptionItems) ? sale.redemptionItems : {};
-      const promoter = await db.query("SELECT data FROM users WHERE id=$1", [value(sale, "promoterId")]);
-      if (!promoter.rows.length) throw new Error("El promotor ya no existe.");
       const approvedSale = {
         ...sale,
         status: "PENDIENTE",

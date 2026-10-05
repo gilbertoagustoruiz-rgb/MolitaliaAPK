@@ -683,14 +683,88 @@ try {
     planchaLines: [{ sku: "E2E-PLANCHA", product: "PANETON E2E PLANCHA", units: 486, unitPrice: 12, presentation: "CAJA" }],
     mix: { "PANETON E2E PLANCHA": 486 },
   };
+  const invalidTradeCoverage = await fetch(base + "/app-storage/trade-approvals", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: "TRD-E2E-INVALID-COVERAGE",
+      sale: {
+        ...tradeSale,
+        id: "VTA-E2E-TRADE-INVALID-COVERAGE",
+        clientId: "CLI-E2E-OTHER",
+      },
+    }),
+  });
+  if (invalidTradeCoverage.status !== 409)
+    throw new Error("Trade request accepted a client outside promoter coverage.");
+
+  const rejectionRequest = await request("/app-storage/trade-approvals", {
+    method: "POST",
+    body: JSON.stringify({
+      id: "TRD-E2E-REJECT",
+      sale: {
+        ...tradeSale,
+        id: "VTA-E2E-TRADE-REJECT",
+      },
+    }),
+  });
+  if (rejectionRequest.approval?.status !== "PENDIENTE")
+    throw new Error("Trade rejection test request was not pending.");
+  await request("/app-storage/trade-approvals/TRD-E2E-REJECT/resolve", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({ decision: "RECHAZADA" }),
+  });
+  const rejectedSale = await pool.query(
+    "SELECT id FROM sales WHERE id='VTA-E2E-TRADE-REJECT'",
+  );
+  if (rejectedSale.rows.length)
+    throw new Error("Rejected Trade request created a sale.");
+
+  const resolveRejectedAgain = await fetch(
+    base + "/app-storage/trade-approvals/TRD-E2E-REJECT/resolve",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", ...adminHeaders },
+      body: JSON.stringify({ decision: "APROBADA" }),
+    },
+  );
+  if (resolveRejectedAgain.status !== 409)
+    throw new Error("Resolved Trade request was allowed to resolve again.");
+
   const approval = await request("/app-storage/trade-approvals", {
     method: "POST",
     body: JSON.stringify({ id: "TRD-E2E", sale: tradeSale }),
   });
   if (approval.approval?.status !== "PENDIENTE") throw new Error("Trade request was not pending.");
+  const duplicateTradeRequest = await fetch(base + "/app-storage/trade-approvals", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: "TRD-E2E-DUPLICATE-ID",
+      sale: tradeSale,
+    }),
+  });
+  if (duplicateTradeRequest.status !== 409)
+    throw new Error("Duplicate Trade request for the same sale was not rejected.");
   await request("/app-storage/trade-approvals/TRD-E2E/resolve", {
     method: "POST", headers: adminHeaders, body: JSON.stringify({ decision: "APROBADA" }),
   });
+  const resolveApprovedAgain = await fetch(
+    base + "/app-storage/trade-approvals/TRD-E2E/resolve",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", ...adminHeaders },
+      body: JSON.stringify({ decision: "APROBADA" }),
+    },
+  );
+  if (resolveApprovedAgain.status !== 409)
+    throw new Error("Approved Trade request was allowed to resolve twice.");
+  const approvedSaleCount = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM sales WHERE id='VTA-E2E-TRADE'",
+  );
+  if (Number(approvedSaleCount.rows[0]?.count) !== 1)
+    throw new Error("Trade approval did not create exactly one sale.");
 
   await request("/app-storage/sync", {
     method: "POST",
