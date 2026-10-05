@@ -83,6 +83,75 @@ try {
     body: JSON.stringify({ initial: true, quantities: { PANETON_900G: 10, PANETON_85G: 10, AVENA: 1000, BATEA: 20, MANDIL: 20, SPAGHETTI: 1000 } }),
   });
 
+  const duplicateWarehouseResponse = await fetch(base + "/app-storage/warehouses", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...adminHeaders },
+    body: JSON.stringify({
+      warehouse: {
+        id: "ALM-E2E-DUP",
+        name: "ALMACEN E2E",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+        status: "ACTIVO",
+      },
+    }),
+  });
+  if (duplicateWarehouseResponse.status !== 409)
+    throw new Error("Duplicate warehouse name was not rejected.");
+
+  const deactivateLinkedWarehouse = await fetch(base + "/app-storage/warehouses", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...adminHeaders },
+    body: JSON.stringify({
+      warehouse: {
+        id: "ALM-E2E",
+        name: "ALMACEN E2E",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+        status: "INACTIVO",
+      },
+    }),
+  });
+  if (deactivateLinkedWarehouse.status !== 409)
+    throw new Error("Linked warehouse deactivation was not blocked.");
+
+  const deleteOperationalWarehouse = await fetch(base + "/app-storage/warehouses/ALM-E2E", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  if (deleteOperationalWarehouse.status !== 409)
+    throw new Error("Operational warehouse deletion was not blocked.");
+
+  await request("/app-storage/warehouses", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      warehouse: {
+        id: "ALM-E2E-EMPTY",
+        name: "ALMACEN E2E VACIO",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+        status: "ACTIVO",
+      },
+    }),
+  });
+  await request("/app-storage/warehouses/ALM-E2E-EMPTY", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const deletedEmptyWarehouse = await pool.query(
+    "SELECT id FROM warehouses WHERE id='ALM-E2E-EMPTY'",
+  );
+  if (deletedEmptyWarehouse.rows.length)
+    throw new Error("Empty warehouse was not deleted.");
+
+
   await request("/app-storage/admin/markets", {
     method: "POST",
     headers: adminHeaders,

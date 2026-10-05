@@ -1131,20 +1131,117 @@ router.post("/app-storage/warehouses", async (req, res): Promise<void> => {
   const input = isRecord(req.body?.warehouse) ? req.body.warehouse : {};
   const id = value(input, "id") || `ALM-${randomUUID()}`;
   const name = value(input, "name").toUpperCase();
-  if (!name) return void res.status(400).json({ message: "El nombre del almacén es obligatorio." });
-  const existing = await pool.query("SELECT stock FROM warehouses WHERE id=$1", [id]);
-  const stock = isRecord(existing.rows[0]?.stock) ? existing.rows[0].stock : {};
-  const warehouse = { ...input, id, name, marketIds: [], stock, status: value(input, "status") === "INACTIVO" ? "INACTIVO" : "ACTIVO", updatedAt: new Date().toISOString() };
+  const region = value(input, "region").toUpperCase();
+  const department = value(input, "department").toUpperCase();
+  const province = value(input, "province").toUpperCase();
+  const district = value(input, "district").toUpperCase();
+  if (!name || !region || !department || !province || !district)
+    return void res.status(400).json({
+      message: "Completa nombre, región, departamento, provincia y distrito del almacén.",
+    });
+
+  const db = await pool.connect();
   try {
-    await pool.query(
+    await db.query("BEGIN");
+    const duplicate = await db.query(
+      "SELECT id FROM warehouses WHERE UPPER(name)=UPPER($1) AND id<>$2 LIMIT 1",
+      [name, id],
+    );
+    if (duplicate.rows.length)
+      throw new Error("Ya existe otro almacén con ese nombre.");
+
+    const existing = await db.query("SELECT stock FROM warehouses WHERE id=$1 FOR UPDATE", [id]);
+    const stock = isRecord(existing.rows[0]?.stock) ? existing.rows[0].stock : {};
+    const status = value(input, "status") === "INACTIVO" ? "INACTIVO" : "ACTIVO";
+
+    if (status === "INACTIVO") {
+      const linkedMarkets = await db.query(
+        "SELECT id FROM markets WHERE status='ACTIVO' AND data->>'warehouseId'=$1 LIMIT 1",
+        [id],
+      );
+      if (linkedMarkets.rows.length)
+        throw new Error("Reasigna los Mercados activos antes de desactivar este almacén.");
+    }
+
+    const warehouse = {
+      ...input,
+      id,
+      name,
+      region,
+      department,
+      province,
+      district,
+      marketIds: [],
+      stock,
+      status,
+      updatedAt: new Date().toISOString(),
+    };
+    await db.query(
       `INSERT INTO warehouses(id,name,location,status,market_ids,stock,data)
        VALUES($1,$2,$3,$4,'{}'::text[],$5,$6)
        ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,location=EXCLUDED.location,status=EXCLUDED.status,data=EXCLUDED.data,updated_at=now()`,
-      [id,name,[value(input,"region"),value(input,"department"),value(input,"province"),value(input,"district")].filter(Boolean).join(" / ")||null,warehouse.status,stock,warehouse],
+      [id,name,[region,department,province,district].join(" / "),status,stock,warehouse],
     );
+    await db.query("COMMIT");
     res.json({ warehouse });
   } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
     res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo guardar el almacén." });
+  } finally {
+    db.release();
+  }
+});
+
+router.delete("/app-storage/warehouses/:id", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede eliminar almacenes." });
+  const id = String(req.params.id || "").trim();
+  if (!id) return void res.status(400).json({ message: "El almacén es obligatorio." });
+
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const found = await db.query("SELECT stock FROM warehouses WHERE id=$1 FOR UPDATE", [id]);
+    if (!found.rows.length) {
+      await db.query("ROLLBACK");
+      res.status(404).json({ message: "El almacén no existe." });
+      return;
+    }
+    const linkedMarket = await db.query(
+      "SELECT id FROM markets WHERE data->>'warehouseId'=$1 LIMIT 1",
+      [id],
+    );
+    const legacyLinks = await db.query(
+      "SELECT market_ids FROM warehouses WHERE id=$1",
+      [id],
+    );
+    const legacyMarketIds = Array.isArray(legacyLinks.rows[0]?.market_ids)
+      ? legacyLinks.rows[0].market_ids
+      : [];
+    if (linkedMarket.rows.length || legacyMarketIds.length)
+      throw new Error("El almacén tiene Mercados asignados. Reasígnalos antes de eliminarlo.");
+
+    const movement = await db.query(
+      "SELECT 1 FROM warehouse_movements WHERE warehouse_id=$1 LIMIT 1",
+      [id],
+    );
+    if (movement.rows.length)
+      throw new Error("El almacén tiene historial de movimientos. Déjalo INACTIVO para conservar la trazabilidad.");
+
+    const stock = isRecord(found.rows[0].stock) ? found.rows[0].stock : {};
+    if (Object.values(stock).some((quantity) => Number(quantity) > 0))
+      throw new Error("El almacén todavía tiene stock. No puede eliminarse.");
+
+    await db.query("DELETE FROM warehouses WHERE id=$1", [id]);
+    await db.query("COMMIT");
+    res.json({ deleted: id });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo eliminar el almacén.",
+    });
+  } finally {
+    db.release();
   }
 });
 
