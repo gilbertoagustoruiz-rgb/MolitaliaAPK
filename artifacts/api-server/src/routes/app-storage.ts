@@ -3205,64 +3205,11 @@ router.post("/app-storage/admin/canjes", async (_req, res): Promise<void> => {
 
 router.delete(
   "/app-storage/admin/canjes/:source/:id",
-  async (req, res): Promise<void> => {
-    const source = String(req.params.source || "");
-    const id = String(req.params.id || "").trim();
-    const table =
-      source === "movement"
-        ? "inventory_movements"
-        : source === "sale"
-          ? "sales"
-          : null;
-    if (!table || !id) {
-      res.status(400).json({ message: "El origen del canje no es válido." });
-      return;
-    }
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      if (source === "sale") {
-        const revisionIsCurrent = await lockAndValidateCatalogRevision(
-          client as unknown as QueryClient,
-          req.get("x-catalog-revision") || null,
-        );
-        if (!revisionIsCurrent) {
-          await client.query("ROLLBACK");
-          res.status(409).json({
-            message:
-              "La información cambió. Actualiza la aplicación antes de eliminar nuevamente.",
-          });
-          return;
-        }
-        await client.query(
-          "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-          [`sale:${id}`],
-        );
-      }
-      await lockInventoryLedger(client as unknown as QueryClient);
-      if (source === "sale") {
-        await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, "ADMIN");
-      }
-      // Si el origen es movement, se elimina únicamente el evento histórico.
-      // El saldo operativo jamás se calcula desde users.data ni inventory.
-      if (source === "sale") {
-        await client.query(
-          `INSERT INTO app_storage_tombstones (collection,record_id,deleted_at)
-         VALUES ('sales',$1,now())
-         ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now(),updated_at=now()`,
-          [id],
-        );
-      }
-      await client.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
-      await client.query("COMMIT");
-      res.json({ deleted: id, source, snapshot: await readSnapshot() });
-    } catch (error) {
-      await client.query("ROLLBACK");
-      req.log.error({ err: error }, "Unable to delete canje");
-      res.status(500).json({ message: "No se pudo eliminar el canje." });
-    } finally {
-      client.release();
-    }
+  async (_req, res): Promise<void> => {
+    res.status(409).json({
+      message:
+        "Los canjes asociados a una venta se retiran editando la Venta. Esta ruta legado está deshabilitada para evitar borrar ventas o alterar stock fuera del flujo de Almacén.",
+    });
   },
 );
 
