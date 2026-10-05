@@ -158,6 +158,7 @@ try {
     mode: "PLANCHAS", planchas: 80, units: 480, amountSoles: 5760,
     mix: { "PANETON LEGACY": 480 },
     bonus: "144 Avena + 100 Spaghetti",
+    finalClientName: "CLIENTE FINAL HISTORICO E2E",
     redemptionCount: 1,
     redemptionItems: { AVENA: 144, BATEA: 0, MANDIL: 0, SPAGHETTI: 100 },
     receiptPhoto: "/api/e2e-legacy.jpg", exchangePhoto: "/api/e2e-legacy-canje.jpg",
