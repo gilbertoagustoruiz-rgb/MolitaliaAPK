@@ -665,6 +665,36 @@ try {
   });
   if (invalidAttendanceCoverage.ok)
     throw new Error("Attendance outside promoter coverage was accepted.");
+  const isolatedSale = {
+    id: "VTA-E2E-INDEPENDENT-SYNC",
+    promoterId: promoter.id,
+    clientId: client.id,
+    marketId: market.id,
+    mode: "UNIDADES",
+    units: 1,
+    amountSoles: 24,
+    unitPrices: { "E2E-UNIT": 24 },
+    mix: { E2E: 1 },
+    receiptPhoto: "/api/e2e-independent-sale.jpg",
+    date: new Date(offlineBase + 90_000).toISOString(),
+    updatedAt: new Date(offlineBase + 90_000).toISOString(),
+    status: "PENDIENTE",
+  };
+  await request("/app-storage/sync", {
+    method: "POST",
+    body: JSON.stringify({ snapshot: { sales: [isolatedSale] } }),
+  });
+  const isolatedSaleRow = await pool.query(
+    "SELECT status,data FROM sales WHERE id='VTA-E2E-INDEPENDENT-SYNC'",
+  );
+  if (
+    isolatedSaleRow.rows[0]?.status !== "SINCRONIZADA" ||
+    isolatedSaleRow.rows[0]?.data?.status !== "SINCRONIZADA"
+  )
+    throw new Error(
+      "A valid sale did not synchronize independently after an invalid attendance record.",
+    );
+
 
     const now = new Date().toISOString();
   await request("/app-storage/sync", {
@@ -1041,7 +1071,7 @@ try {
   }
 
   const itemRows = await pool.query("SELECT sale_id,sku,quantity FROM sale_items WHERE sale_id LIKE 'VTA-E2E-%' ORDER BY sale_id,line_no");
-  if (itemRows.rows.length !== 4) throw new Error(`Expected 4 normalized sale_items rows, found ${itemRows.rows.length}.`);
+  if (itemRows.rows.length !== 5) throw new Error(`Expected 5 normalized sale_items rows, found ${itemRows.rows.length}.`);
 
   await request("/app-storage/admin/catalog/products", {
     method: "POST",
