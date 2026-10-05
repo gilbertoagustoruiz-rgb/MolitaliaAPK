@@ -1443,11 +1443,14 @@ async function validateTradeSale(
     throw new Error("La venta Trade no contiene SKU válidos de Marcas.");
   const skuList = [...new Set(drafts.map((line) => line.sku))];
   const catalog = await db.query(
-    "SELECT sku,status FROM product_prices WHERE sku = ANY($1::text[])",
+    "SELECT sku,data FROM product_prices WHERE sku = ANY($1::text[])",
     [skuList],
   );
   const catalogBySku = new Map(
-    catalog.rows.map((row) => [String(row.sku), String(row.status || row.data?.status || "ACTIVO")]),
+    catalog.rows.map((row) => [
+      String(row.sku),
+      String(isRecord(row.data) ? row.data.status || "ACTIVO" : "ACTIVO"),
+    ]),
   );
   const invalidSku = skuList.find(
     (sku) => !catalogBySku.has(sku) || catalogBySku.get(sku) === "INACTIVO",
