@@ -10337,13 +10337,11 @@ function PromoterApp({
         if (!confirmedItem || confirmedItem.status !== "SINCRONIZADA")
           throw new Error("PostgreSQL no confirmó la marcación.");
 
-        setAttendance((current) => {
-          const nextAttendance = current.map((currentItem) =>
-            currentItem.id === item.id ? confirmedItem! : currentItem,
-          );
-          writeStore("bt-attendance", nextAttendance);
-          return nextAttendance;
-        });
+        const confirmedAttendance = next.map((currentItem) =>
+          currentItem.id === item.id ? confirmedItem! : currentItem,
+        );
+        setAttendance(confirmedAttendance);
+        writeStore("bt-attendance", confirmedAttendance);
       } catch (error) {
         notify(
           error instanceof Error
