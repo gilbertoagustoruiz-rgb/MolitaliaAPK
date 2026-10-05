@@ -1598,10 +1598,10 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
   const assignment = isRecord(req.body?.assignment) ? req.body.assignment : {};
   const promoterId = value(assignment, "promoterId");
   const marketIds = Array.isArray(assignment.marketIds)
-    ? [...new Set(assignment.marketIds.map((item) => String(item).trim()).filter(Boolean))]
+    ? [...new Set(assignment.marketIds.map((item: unknown) => String(item).trim()).filter(Boolean))]
     : [];
   const clientIds = Array.isArray(assignment.clientIds)
-    ? [...new Set(assignment.clientIds.map((item) => String(item).trim()).filter(Boolean))]
+    ? [...new Set(assignment.clientIds.map((item: unknown) => String(item).trim()).filter(Boolean))]
     : [];
   if (!promoterId) {
     res.status(400).json({ message: "La asignación requiere promoterId." });
