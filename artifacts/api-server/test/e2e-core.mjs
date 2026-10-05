@@ -43,7 +43,10 @@ async function waitForHealth() {
 const admin = { id: "USR-E2E-ADMIN", dni: "99999991", name: "E2E Admin", role: "ADMIN", status: "ACTIVO", password: "E2E-admin-2026" };
 const promoter = { id: "USR-E2E-PROM", dni: "99999992", name: "E2E Promotor", role: "PROMOTOR PERMANENTE", status: "ACTIVO", password: "E2E-prom-2026" };
 const market = { id: "MKT-E2E", name: "MERCADO E2E", region: "LIMA", department: "LIMA", province: "LIMA", district: "LIMA", status: "ACTIVO", warehouseId: "ALM-E2E" };
-const client = { id: "CLI-E2E", code: "E2E001", name: "CLIENTE E2E", marketId: market.id, status: "ACTIVO" };
+const client = { id: "CLI-E2E", code: "E2E001", name: "CLIENTE E2E", category: "MIXTO", marketId: market.id, status: "ACTIVO" };
+const categories = [
+  { id: "MIXTO", name: "MIXTO", status: "ACTIVO", updatedAt: new Date().toISOString() },
+];
 const products = [
   { sku: "E2E-UNIT", product: "PANETON E2E UNIDAD", brand: "TODINNO", presentation: "BOLSA", unitsPerPackage: 1, unitsPerPlancha: 6, unitPrice: 10, totalPrice: 10, status: "ACTIVO", updatedAt: new Date().toISOString() },
   { sku: "E2E-PLANCHA", product: "PANETON E2E PLANCHA", brand: "COSTA", presentation: "CAJA", unitsPerPackage: 1, unitsPerPlancha: 6, unitPrice: 12, totalPrice: 12, status: "ACTIVO", updatedAt: new Date().toISOString() },
@@ -61,6 +64,7 @@ try {
         clients: [client],
         assignments: [{ promoterId: promoter.id, promoterDni: promoter.dni, marketIds: [market.id], clientIds: [client.id], updatedAt: new Date().toISOString() }],
         productPrices: products,
+        categories,
       },
     }),
   });
@@ -72,6 +76,73 @@ try {
   if (login.user?.id !== promoter.id) throw new Error("Login E2E did not return the promoter.");
 
   const adminHeaders = { "x-admin-dni": admin.dni, "x-admin-key": admin.password };
+
+  await request("/app-storage/admin/clients", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      client: {
+        id: "CLI-E2E-TEMP",
+        code: "E2ETEMP",
+        name: "CLIENTE TEMPORAL",
+        phone: "999888777",
+        category: "MIXTO",
+        marketId: market.id,
+        status: "ACTIVO",
+      },
+    }),
+  });
+  await request("/app-storage/admin/clients", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      client: {
+        id: "CLI-E2E-TEMP",
+        code: "E2ETEMP2",
+        name: "CLIENTE TEMPORAL EDITADO",
+        phone: "999111222",
+        category: "MIXTO",
+        marketId: market.id,
+        status: "ACTIVO",
+      },
+    }),
+  });
+  const editedClient = await pool.query(
+    "SELECT code,name,data FROM clients WHERE id='CLI-E2E-TEMP'",
+  );
+  if (
+    editedClient.rows[0]?.code !== "E2ETEMP2" ||
+    editedClient.rows[0]?.name !== "CLIENTE TEMPORAL EDITADO"
+  )
+    throw new Error("Client edit did not persist.");
+
+  const duplicateClientCode = await fetch(base + "/app-storage/admin/clients", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...adminHeaders },
+    body: JSON.stringify({
+      client: {
+        id: "CLI-E2E-TEMP-2",
+        code: "E2ETEMP2",
+        name: "CLIENTE DUPLICADO",
+        category: "MIXTO",
+        marketId: market.id,
+        status: "ACTIVO",
+      },
+    }),
+  });
+  if (duplicateClientCode.status !== 409)
+    throw new Error("Duplicate client code was not rejected.");
+
+  await request("/app-storage/admin/clients/CLI-E2E-TEMP", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const deletedTempClient = await pool.query(
+    "SELECT id FROM clients WHERE id='CLI-E2E-TEMP'",
+  );
+  if (deletedTempClient.rows.length)
+    throw new Error("Unused client was not deleted.");
+
 
   await request("/app-storage/admin/users", {
     method: "POST",
@@ -373,6 +444,22 @@ try {
   await pool.query(
     "UPDATE sales SET data=jsonb_set(data,'{status}','\"PENDIENTE\"'::jsonb) WHERE id='VTA-E2E-PLANCHA'",
   );
+  const deleteClientWithHistory = await fetch(
+    base + "/app-storage/admin/clients/" + client.id,
+    {
+      method: "DELETE",
+      headers: adminHeaders,
+    },
+  );
+  const deleteClientWithHistoryBody = await deleteClientWithHistory.json().catch(() => ({}));
+  if (deleteClientWithHistory.status !== 409)
+    throw new Error(
+      `Client with history deletion was not blocked: ${deleteClientWithHistory.status} ${JSON.stringify(deleteClientWithHistoryBody)}`,
+    );
+  const clientStillExists = await pool.query("SELECT id FROM clients WHERE id=$1", [client.id]);
+  if (!clientStillExists.rows.length)
+    throw new Error("Client with historical records was deleted.");
+
   const deletePromoterWithHistory = await fetch(
     base + "/app-storage/admin/records/users/" + promoter.id,
     {
