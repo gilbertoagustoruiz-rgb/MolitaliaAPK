@@ -2214,6 +2214,10 @@ router.delete(
 );
 
 router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
+  if (!(await authorizedCatalogActor(req))) {
+    res.status(403).json({ message: "Solo Analista y Admin pueden administrar clientes." });
+    return;
+  }
   const input = req.body?.client;
   const category = isRecord(input)
     ? value(input, "category").toUpperCase()
@@ -2230,10 +2234,11 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
     return;
   }
   const id = value(input, "id") || randomUUID();
+  const code = value(input, "code") || `CLI-${id.slice(0, 8).toUpperCase()}`;
   const clientRecord: StoredRecord = {
     id,
-    code: value(input, "code") || `CLI-${id.slice(0, 8).toUpperCase()}`,
-    name: value(input, "name"),
+    code,
+    name: value(input, "name").trim(),
     phone: value(input, "phone") || undefined,
     category,
     marketId: value(input, "marketId"),
@@ -2243,24 +2248,43 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
         : "ACTIVO",
     updatedAt: new Date().toISOString(),
   };
+  const db = await pool.connect();
   try {
-    const categoryExists = await pool.query(
-      "SELECT id FROM client_categories WHERE id=$1 AND status='ACTIVO'",
+    await db.query("BEGIN");
+    const marketExists = await db.query(
+      "SELECT id FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1",
+      [clientRecord.marketId],
+    );
+    if (!marketExists.rows.length)
+      throw new Error("Selecciona un Mercado activo.");
+
+    const categoryExists = await db.query(
+      "SELECT id FROM client_categories WHERE id=$1 AND status='ACTIVO' LIMIT 1",
       [category],
     );
-    if (!categoryExists.rows.length) {
-      res
-        .status(400)
-        .json({ message: "Selecciona una categoría activa del catálogo." });
-      return;
-    }
-    await upsertRecord(pool as unknown as QueryClient, "clients", clientRecord);
+    if (!categoryExists.rows.length)
+      throw new Error("Selecciona una categoría activa del catálogo.");
+
+    const duplicateCode = await db.query(
+      "SELECT id FROM clients WHERE UPPER(code)=UPPER($1) AND id<>$2 LIMIT 1",
+      [code, id],
+    );
+    if (duplicateCode.rows.length)
+      throw new Error("Ya existe otro cliente con este código.");
+
+    await upsertRecord(db as unknown as QueryClient, "clients", clientRecord);
+    await db.query("COMMIT");
     res
       .status(201)
       .json({ client: clientRecord, snapshot: await readSnapshot() });
   } catch (error) {
-    req.log.error({ err: error }, "Unable to create client");
-    res.status(500).json({ message: "No se pudo crear el cliente." });
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to save client");
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo guardar el cliente.",
+    });
+  } finally {
+    db.release();
   }
 });
 
@@ -2452,21 +2476,78 @@ router.delete(
 router.delete(
   "/app-storage/admin/clients/:id",
   async (req, res): Promise<void> => {
+    if (!(await authorizedCatalogActor(req))) {
+      res.status(403).json({ message: "Solo Analista y Admin pueden eliminar clientes." });
+      return;
+    }
     const id = String(req.params.id || "").trim();
     if (!id) {
       res.status(400).json({ message: "El cliente es obligatorio." });
       return;
     }
+    const db = await pool.connect();
     try {
-      await pool.query(
+      await db.query("BEGIN");
+      const found = await db.query(
+        "SELECT id FROM clients WHERE id=$1 FOR UPDATE",
+        [id],
+      );
+      if (!found.rows.length) {
+        await db.query("ROLLBACK");
+        res.status(404).json({ message: "El cliente no existe." });
+        return;
+      }
+
+      const directRelations = [
+        ["sales", "client_id"],
+        ["attendance", "client_id"],
+        ["trade_approvals", "client_id"],
+        ["session_closures", "client_id"],
+      ] as const;
+      for (const [table, column] of directRelations) {
+        const related = await db.query(
+          `SELECT 1 FROM ${table} WHERE ${column}=$1 LIMIT 1`,
+          [id],
+        );
+        if (related.rows.length)
+          throw new Error(
+            "El cliente tiene historial operativo. Cámbialo a INACTIVO en lugar de eliminarlo.",
+          );
+      }
+
+      const linkedUser = await db.query(
+        "SELECT 1 FROM users WHERE data->>'clientId'=$1 LIMIT 1",
+        [id],
+      );
+      if (linkedUser.rows.length)
+        throw new Error(
+          "El cliente está vinculado a una cuenta de usuario. Desvincúlala antes de eliminarlo.",
+        );
+
+      const linkedAssignment = await db.query(
+        "SELECT 1 FROM assignments WHERE $1 = ANY(client_ids) LIMIT 1",
+        [id],
+      );
+      if (linkedAssignment.rows.length)
+        throw new Error(
+          "El cliente está incluido en una asignación. Retíralo de Asignaciones antes de eliminarlo.",
+        );
+
+      await db.query(
         "INSERT INTO app_storage_tombstones (collection,record_id,deleted_at) VALUES ('clients',$1,now()) ON CONFLICT (collection,record_id) DO UPDATE SET deleted_at=now()",
         [id],
       );
-      await pool.query("DELETE FROM clients WHERE id=$1", [id]);
+      await db.query("DELETE FROM clients WHERE id=$1", [id]);
+      await db.query("COMMIT");
       res.json({ deleted: id, snapshot: await readSnapshot() });
     } catch (error) {
+      await db.query("ROLLBACK").catch(() => undefined);
       req.log.error({ err: error }, "Unable to delete client");
-      res.status(500).json({ message: "No se pudo eliminar el cliente." });
+      res.status(409).json({
+        message: error instanceof Error ? error.message : "No se pudo eliminar el cliente.",
+      });
+    } finally {
+      db.release();
     }
   },
 );
