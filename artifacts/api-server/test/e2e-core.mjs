@@ -560,11 +560,98 @@ try {
 
   await request("/app-storage/sync", {
     method: "POST",
-    body: JSON.stringify({ snapshot: { movements: [{
-      id: "DEG-E2E", marketId: market.id, kind: "DEGUSTACION", degustacionProductId: "PANETON_85G",
-      quantity: 1, actorId: promoter.id, promoterId: promoter.id, date: now, updatedAt: now, status: "PENDIENTE",
-    }] } }),
+    body: JSON.stringify({
+      snapshot: {
+        movements: [{
+          id: "DEG-E2E",
+          marketId: market.id,
+          kind: "DEGUSTACION",
+          degustacionProductId: "PANETON_85G",
+          degustacionProductLabel: "Panetón 85 g",
+          quantity: 1,
+          actorId: promoter.id,
+          promoterId: promoter.id,
+          actorName: promoter.name,
+          date: now,
+          updatedAt: now,
+          status: "PENDIENTE",
+        }],
+        closures: [{
+          id: "CLOSE-E2E",
+          promoterId: promoter.id,
+          marketId: market.id,
+          clientId: client.id,
+          tastingUsed: 1,
+          tasting900g: 0,
+          tasting85g: 1,
+          leads: 10,
+          closureType: "MANUAL",
+          date: now,
+          updatedAt: now,
+          status: "PENDIENTE",
+        }],
+      },
+    }),
   });
+
+  const tastingStockAfter85 = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  const stock85AfterCreate = Number(tastingStockAfter85.rows[0].stock.PANETON_85G);
+  const stock900AfterCreate = Number(tastingStockAfter85.rows[0].stock.PANETON_900G);
+
+  await request("/app-storage/admin/degustaciones/movement/DEG-E2E", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      record: {
+        id: "DEG-E2E",
+        degustacionProductId: "PANETON_900G",
+        quantity: 2,
+      },
+    }),
+  });
+
+  const tastingStockAfterEdit = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  if (Number(tastingStockAfterEdit.rows[0].stock.PANETON_85G) !== stock85AfterCreate + 1)
+    throw new Error("Editing degustacion did not restore previous 85g stock.");
+  if (Number(tastingStockAfterEdit.rows[0].stock.PANETON_900G) !== stock900AfterCreate - 2)
+    throw new Error("Editing degustacion did not consume new 900g stock.");
+
+  const closureAfterTastingEdit = await pool.query(
+    "SELECT tasting_used,leads,data FROM session_closures WHERE id='CLOSE-E2E'",
+  );
+  if (
+    Number(closureAfterTastingEdit.rows[0]?.tasting_used) !== 2 ||
+    Number(closureAfterTastingEdit.rows[0]?.leads) !== 160 ||
+    Number(closureAfterTastingEdit.rows[0]?.data?.tasting900g) !== 2 ||
+    Number(closureAfterTastingEdit.rows[0]?.data?.tasting85g) !== 0
+  )
+    throw new Error("Degustacion edit did not recalculate closure/contact totals.");
+
+  await request("/app-storage/admin/degustaciones/movement/DEG-E2E", {
+    method: "DELETE",
+    headers: adminHeaders,
+  });
+  const tastingStockAfterDelete = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  if (Number(tastingStockAfterDelete.rows[0].stock.PANETON_900G) !== stock900AfterCreate)
+    throw new Error("Deleting degustacion did not restore 900g stock.");
+
+  const closureAfterTastingDelete = await pool.query(
+    "SELECT tasting_used,leads,data FROM session_closures WHERE id='CLOSE-E2E'",
+  );
+  if (
+    Number(closureAfterTastingDelete.rows[0]?.tasting_used) !== 0 ||
+    Number(closureAfterTastingDelete.rows[0]?.leads) !== 0 ||
+    Number(closureAfterTastingDelete.rows[0]?.data?.tasting900g) !== 0 ||
+    Number(closureAfterTastingDelete.rows[0]?.data?.tasting85g) !== 0
+  )
+    throw new Error("Deleting degustacion did not clear closure/contact totals.");
+
 
   await pool.query(
     "UPDATE sales SET data=jsonb_set(data,'{status}','\"PENDIENTE\"'::jsonb) WHERE id='VTA-E2E-PLANCHA'",
