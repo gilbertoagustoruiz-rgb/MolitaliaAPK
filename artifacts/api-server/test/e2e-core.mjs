@@ -910,7 +910,7 @@ try {
          'marketId',$3::text,
          'type','SALIDA',
          'photo','/api/e2e-linked-out.jpg',
-         'date',$4::text,
+         'date',($4::timestamptz)::text,
          'status','SINCRONIZADA'
        ),
        $4::timestamptz)`,
