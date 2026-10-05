@@ -468,6 +468,73 @@ try {
 
   await request("/app-storage/sync", { method: "POST", body: JSON.stringify({ snapshot: { sales: [unitSale] } }) });
 
+  const canjeEditSale = {
+    ...unitSale,
+    id: "VTA-E2E-CANJE-EDIT",
+    updatedAt: new Date(Date.now() + 1000).toISOString(),
+  };
+  await request("/app-storage/sync", {
+    method: "POST",
+    body: JSON.stringify({ snapshot: { sales: [canjeEditSale] } }),
+  });
+  const canjeEditStockBefore = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  const canjeEditAvenaBefore = Number(canjeEditStockBefore.rows[0].stock.AVENA);
+
+  const canjeRemovedSale = {
+    ...canjeEditSale,
+    bonus: "",
+    finalClientName: "",
+    redemptionCount: 0,
+    redemptionItems: {},
+    exchangePhoto: "",
+    updatedAt: new Date(Date.now() + 2000).toISOString(),
+  };
+  await request("/app-storage/admin/sales/VTA-E2E-CANJE-EDIT", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({ sale: canjeRemovedSale }),
+  });
+  const canjeEditStockAfter = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  const canjeEditAvenaAfter = Number(canjeEditStockAfter.rows[0].stock.AVENA);
+  if (canjeEditAvenaAfter !== canjeEditAvenaBefore + 1)
+    throw new Error("Removing only the canje did not restore warehouse stock exactly once.");
+
+  const canjeSaleStillExists = await pool.query(
+    "SELECT id,data FROM sales WHERE id='VTA-E2E-CANJE-EDIT'",
+  );
+  if (!canjeSaleStillExists.rows.length)
+    throw new Error("Removing a canje deleted the sale.");
+  if (String(canjeSaleStillExists.rows[0]?.data?.bonus || ""))
+    throw new Error("Canje remained attached after sale edit.");
+
+  await request("/app-storage/admin/sales/VTA-E2E-CANJE-EDIT", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      sale: {
+        ...canjeRemovedSale,
+        updatedAt: new Date(Date.now() + 3000).toISOString(),
+      },
+    }),
+  });
+  const canjeEditStockRepeated = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  if (Number(canjeEditStockRepeated.rows[0].stock.AVENA) !== canjeEditAvenaAfter)
+    throw new Error("Repeated canje removal restored warehouse stock more than once.");
+
+  const legacyCanjeDelete = await fetch(
+    base + "/app-storage/admin/canjes/sale/VTA-E2E-CANJE-EDIT",
+    { method: "DELETE", headers: adminHeaders },
+  );
+  if (legacyCanjeDelete.status !== 409)
+    throw new Error("Legacy canje deletion route is still active.");
+
+
   const planchaSale = {
     id: "VTA-E2E-PLANCHA", promoterId: promoter.id, clientId: client.id, marketId: market.id,
     mode: "PLANCHAS", planchas: 1, units: 6, amountSoles: 72,
@@ -547,7 +614,7 @@ try {
   }
 
   const itemRows = await pool.query("SELECT sale_id,sku,quantity FROM sale_items WHERE sale_id LIKE 'VTA-E2E-%' ORDER BY sale_id,line_no");
-  if (itemRows.rows.length !== 3) throw new Error(`Expected 3 normalized sale_items rows, found ${itemRows.rows.length}.`);
+  if (itemRows.rows.length !== 4) throw new Error(`Expected 4 normalized sale_items rows, found ${itemRows.rows.length}.`);
 
   await request("/app-storage/admin/catalog/products", {
     method: "POST",
