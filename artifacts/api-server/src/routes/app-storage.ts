@@ -733,7 +733,7 @@ async function syncSnapshot(
                 )
               : incoming.users,
           }
-        : incoming;
+        : { ...incoming, assignments: [] };
     const saleIdsToLock = new Set<string>();
     for (const sale of Array.isArray(guardedIncoming.sales)
       ? guardedIncoming.sales
@@ -1588,25 +1588,114 @@ router.get("/app-storage/assignments", async (req, res): Promise<void> => {
 });
 
 router.post("/app-storage/assignments", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) {
+    res.status(403).json({
+      message: "Solo Admin o Analista puede modificar asignaciones.",
+    });
+    return;
+  }
+  const assignment = isRecord(req.body?.assignment) ? req.body.assignment : {};
+  const promoterId = value(assignment, "promoterId");
+  const marketIds = Array.isArray(assignment.marketIds)
+    ? [...new Set(assignment.marketIds.map((item) => String(item).trim()).filter(Boolean))]
+    : [];
+  const clientIds = Array.isArray(assignment.clientIds)
+    ? [...new Set(assignment.clientIds.map((item) => String(item).trim()).filter(Boolean))]
+    : [];
+  if (!promoterId) {
+    res.status(400).json({ message: "La asignación requiere promoterId." });
+    return;
+  }
+
+  const db = await pool.connect();
   try {
-    const assignment = req.body?.assignment;
-    if (
-      !assignment ||
-      typeof assignment !== "object" ||
-      !value(assignment, "promoterId")
-    ) {
-      res.status(400).json({ message: "La asignación requiere promoterId." });
-      return;
-    }
-    await syncSnapshot(
-      { assignments: [assignment] },
-      await readCatalogRevision(),
+    await db.query("BEGIN");
+    const promoterResult = await db.query(
+      "SELECT id,dni,role,status,data FROM users WHERE id=$1 FOR UPDATE",
+      [promoterId],
     );
-    const { assignments } = await readSnapshot();
-    res.json({ storage: "digitalocean-postgresql", assignment, assignments });
+    const promoter = promoterResult.rows[0];
+    const role = String(promoter?.role || promoter?.data?.role || "");
+    if (
+      !promoter ||
+      promoter.status !== "ACTIVO" ||
+      !["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE", "COORDINADOR"].includes(role)
+    )
+      throw new Error("Selecciona un Promotor o Coordinador activo.");
+
+    if (marketIds.length) {
+      const marketResult = await db.query(
+        "SELECT id FROM markets WHERE id = ANY($1::text[]) AND status='ACTIVO'",
+        [marketIds],
+      );
+      if (marketResult.rows.length !== marketIds.length)
+        throw new Error("Una o más asignaciones apuntan a Mercados inactivos o inexistentes.");
+    }
+    if (!marketIds.length && clientIds.length)
+      throw new Error("No puedes asignar Clientes sin asignar al menos un Mercado.");
+
+    if (clientIds.length) {
+      const clientResult = await db.query(
+        "SELECT id,market_id FROM clients WHERE id = ANY($1::text[]) AND status='ACTIVO'",
+        [clientIds],
+      );
+      if (clientResult.rows.length !== clientIds.length)
+        throw new Error("Uno o más Clientes están inactivos o no existen.");
+      const invalidClient = clientResult.rows.find(
+        (row) => !marketIds.includes(String(row.market_id)),
+      );
+      if (invalidClient)
+        throw new Error("Todos los Clientes asignados deben pertenecer a los Mercados seleccionados.");
+    }
+
+    const updatedAt = new Date().toISOString();
+    const normalized = {
+      promoterId,
+      promoterDni: String(promoter.dni || ""),
+      marketIds,
+      clientIds,
+      updatedAt,
+    };
+    await db.query(
+      `INSERT INTO assignments
+        (promoter_id,promoter_dni,market_ids,client_ids,data,record_updated_at)
+       VALUES($1,$2,$3,$4,$5,$6)
+       ON CONFLICT(promoter_id) DO UPDATE SET
+         promoter_dni=EXCLUDED.promoter_dni,
+         market_ids=EXCLUDED.market_ids,
+         client_ids=EXCLUDED.client_ids,
+         data=EXCLUDED.data,
+         record_updated_at=EXCLUDED.record_updated_at,
+         updated_at=now()`,
+      [promoterId, normalized.promoterDni, marketIds, clientIds, normalized, updatedAt],
+    );
+
+    const currentData = isRecord(promoter.data) ? promoter.data : {};
+    const nextUserData = { ...currentData, updatedAt };
+    if (marketIds.length) nextUserData.marketId = marketIds[0];
+    else delete nextUserData.marketId;
+    await db.query(
+      "UPDATE users SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+      [promoterId, nextUserData, updatedAt],
+    );
+
+    await db.query("COMMIT");
+    const snapshot = await readSnapshot();
+    res.json({
+      storage: "digitalocean-postgresql",
+      assignment: normalized,
+      assignments: snapshot.assignments,
+      snapshot,
+    });
   } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to save assignment");
-    res.status(500).json({ message: "No se pudo guardar la asignación." });
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo guardar la asignación.",
+    });
+  } finally {
+    db.release();
   }
 });
 
