@@ -1397,7 +1397,8 @@ async function validateTradeSale(
     [promoterId],
   );
   const promoter = promoterResult.rows[0];
-  const promoterRole = String(promoter?.role || promoter?.data?.role || "");
+  const promoterData = isRecord(promoter?.data) ? promoter.data : {};
+  const promoterRole = String(promoter?.role || value(promoterData, "role") || "");
   if (
     !promoter ||
     promoter.status !== "ACTIVO" ||
@@ -1426,8 +1427,8 @@ async function validateTradeSale(
   const coverage = assignment.rows[0];
   const allowedMarkets = coverage
     ? Array.isArray(coverage.market_ids) ? coverage.market_ids.map(String) : []
-    : value(promoter.data as StoredRecord, "marketId")
-      ? [value(promoter.data as StoredRecord, "marketId")]
+    : value(promoterData, "marketId")
+      ? [value(promoterData, "marketId")]
       : [];
   const allowedClients = coverage && Array.isArray(coverage.client_ids)
     ? coverage.client_ids.map(String)
@@ -1462,7 +1463,7 @@ async function validateTradeSale(
   if (!saleId || !saleId.startsWith("VTA-"))
     throw new Error("Código de venta Trade no válido.");
 
-  return { promoter, promoterId, marketId, clientId, saleId };
+  return { promoter, promoterData, promoterId, marketId, clientId, saleId };
 }
 
 router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
@@ -1521,14 +1522,15 @@ router.post("/app-storage/trade-approvals", async (req, res): Promise<void> => {
     const approval = {
       id,
       promoterId: validated.promoterId,
-      promoterName: String(validated.promoter.data?.name || sale.promoterName || ""),
-      promoterRole: String(validated.promoter.data?.role || validated.promoter.role || ""),
-      promoterRoleLabel: String(
-        validated.promoter.data?.roleLabel ||
-          validated.promoter.data?.role ||
-          validated.promoter.role ||
-          "",
-      ),
+      promoterName:
+        value(validated.promoterData, "name") || value(sale, "promoterName"),
+      promoterRole:
+        value(validated.promoterData, "role") ||
+        String(validated.promoter.role || ""),
+      promoterRoleLabel:
+        value(validated.promoterData, "roleLabel") ||
+        value(validated.promoterData, "role") ||
+        String(validated.promoter.role || ""),
       clientId: validated.clientId,
       finalClientName: value(sale, "finalClientName") || undefined,
       marketId: validated.marketId,
