@@ -3076,10 +3076,22 @@ function RecordEditModal({
           <>
             {textField("dni", "DNI")}
             {textField("name", "Nombre completo")}
-            {select(
-              "role",
-              "Rol",
-              [
+            <SelectField
+              label="Rol"
+              value={String(draft.role || "")}
+              onChange={(value) =>
+                setDraft((current) => ({
+                  ...current,
+                  role: value,
+                  roleLabel: value,
+                  ...(isZoneManagerRole(value as Role)
+                    ? { clientId: undefined }
+                    : value === "CLIENTE"
+                      ? { marketId: undefined }
+                      : { marketId: undefined, clientId: undefined }),
+                }))
+              }
+              items={[
                 "PROMOTOR",
                 ...selectablePromoterRoles,
                 "COORDINADOR",
@@ -3088,13 +3100,16 @@ function RecordEditModal({
                 "TRADE",
                 "ADMIN",
                 "CLIENTE",
-              ].map((x) => ({ value: x, label: x })),
-            )}
-            {market}
-            {select("clientId", "Cliente vinculado", [
-              { value: "", label: "Sin cliente" },
-              ...clients.map((x) => ({ value: x.id, label: x.name })),
-            ])}
+              ].map((x) => ({ value: x, label: x }))}
+            />
+            {isZoneManagerRole(draft.role as Role) && market}
+            {draft.role === "CLIENTE" &&
+              select("clientId", "Cliente vinculado", [
+                { value: "", label: "Seleccionar cliente" },
+                ...clients
+                  .filter((x) => x.status === "ACTIVO")
+                  .map((x) => ({ value: x.id, label: x.name })),
+              ])}
             {status}
             {textField(
               "password",
@@ -3102,7 +3117,7 @@ function RecordEditModal({
               "password",
             )}
             <p className="modal-hint">
-              El stock se corrige desde los movimientos de Canjes y Degustación.
+              Los usuarios con historial operativo se desactivan en lugar de eliminarse.
             </p>
           </>
         )}
