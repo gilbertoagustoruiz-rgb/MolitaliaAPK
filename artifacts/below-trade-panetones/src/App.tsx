@@ -11754,6 +11754,95 @@ export default function App() {
     };
   }, [referencesReady, user?.id, user?.role]);
   useEffect(() => {
+    if (!cloudReady || !navigator.onLine) return;
+    let cancelled = false;
+    let running = false;
+
+    const syncPendingOperationalRecords = async () => {
+      if (running || cancelled || !navigator.onLine) return;
+      running = true;
+      const catalogRevision =
+        localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined;
+
+      const syncOne = async (
+        snapshot: Partial<CloudSnapshot>,
+      ): Promise<Partial<CloudSnapshot> | null> => {
+        const response = await fetch(APP_STORAGE_SYNC, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ snapshot, catalogRevision }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          message?: string;
+          snapshot?: Partial<CloudSnapshot>;
+        };
+        if (!response.ok)
+          throw new Error(payload.message || "No se pudo sincronizar el registro.");
+        return payload.snapshot || null;
+      };
+
+      try {
+        const pendingAttendance = attendance
+          .filter((item) => item.status !== "SINCRONIZADA")
+          .sort(
+            (first, second) =>
+              new Date(first.date).getTime() - new Date(second.date).getTime(),
+          );
+        for (const item of pendingAttendance) {
+          if (cancelled) break;
+          try {
+            const snapshot = await syncOne({ attendance: [item] });
+            if (!snapshot?.attendance) continue;
+            setAttendance((current) => {
+              const next = mergeAttendance(current, snapshot.attendance || []);
+              writeStore("bt-attendance", next);
+              return next;
+            });
+          } catch (error) {
+            console.error(
+              `No se pudo sincronizar marcación ${item.id}`,
+              error,
+            );
+          }
+        }
+
+        const pendingSales = sales.filter(
+          (sale) => sale.status !== "SINCRONIZADA",
+        );
+        for (const sale of pendingSales) {
+          if (cancelled) break;
+          try {
+            const snapshot = await syncOne({ sales: [sale] });
+            if (!snapshot?.sales) continue;
+            setSales((current) => {
+              const next = mergeSales(current, snapshot.sales || []);
+              writeStore("bt-sales", next);
+              return next;
+            });
+          } catch (error) {
+            console.error(
+              `No se pudo sincronizar venta ${sale.id}`,
+              error,
+            );
+          }
+        }
+      } finally {
+        running = false;
+      }
+    };
+
+    void syncPendingOperationalRecords();
+    const interval = window.setInterval(syncPendingOperationalRecords, 10_000);
+    const retry = () => void syncPendingOperationalRecords();
+    window.addEventListener("online", retry);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("online", retry);
+    };
+  }, [cloudReady, sales, attendance, cloudSyncTick]);
+
+  useEffect(() => {
     if (!cloudReady) return;
     const timeout = window.setTimeout(() => {
       const snapshot: CloudSnapshot = {
@@ -11762,8 +11851,8 @@ export default function App() {
           ({ password: _password, ...currentUser }) => currentUser,
         ),
         clients,
-        sales,
-        attendance,
+        sales: [],
+        attendance: [],
         inventory,
         movements,
         assignments,
