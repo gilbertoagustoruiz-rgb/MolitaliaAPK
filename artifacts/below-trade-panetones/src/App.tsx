@@ -665,13 +665,19 @@ function saleFreshness(sale: Sale) {
 }
 function mergeSales(local: Sale[], incoming: Sale[]) {
   const next = new Map(incoming.map((sale) => [sale.id, sale]));
+  const rescueCutoff = Date.now() - 48 * 60 * 60 * 1000;
   local.forEach((localSale) => {
     const cloudSale = next.get(localSale.id);
     if (!cloudSale) {
-      next.set(localSale.id, {
-        ...localSale,
-        status: "PENDIENTE",
-      });
+      const saleTime = new Date(localSale.updatedAt || localSale.date).getTime();
+      if (
+        localSale.status === "PENDIENTE" ||
+        (Number.isFinite(saleTime) && saleTime >= rescueCutoff)
+      )
+        next.set(localSale.id, {
+          ...localSale,
+          status: "PENDIENTE",
+        });
       return;
     }
     if (saleFreshness(localSale) > saleFreshness(cloudSale))
@@ -691,13 +697,19 @@ function attendanceFreshness(item: Attendance) {
 }
 function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
   const next = new Map(incoming.map((item) => [item.id, item]));
+  const rescueCutoff = Date.now() - 48 * 60 * 60 * 1000;
   local.forEach((localItem) => {
     const cloudItem = next.get(localItem.id);
     if (!cloudItem) {
-      next.set(localItem.id, {
-        ...localItem,
-        status: "PENDIENTE",
-      });
+      const itemTime = new Date(localItem.date).getTime();
+      if (
+        localItem.status === "PENDIENTE" ||
+        (Number.isFinite(itemTime) && itemTime >= rescueCutoff)
+      )
+        next.set(localItem.id, {
+          ...localItem,
+          status: "PENDIENTE",
+        });
       return;
     }
     if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
