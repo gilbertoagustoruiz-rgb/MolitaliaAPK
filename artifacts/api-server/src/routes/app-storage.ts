@@ -327,14 +327,21 @@ async function readSnapshot(
         : name === "closures"
           ? "closure_date DESC, created_at DESC"
           : "created_at";
-    const result = await client.query(
-      `SELECT data FROM ${table} ORDER BY ${orderBy}`,
-    );
-    snapshot[name] = result.rows.map((row) =>
-      name === "users"
-        ? publicUser(row.data as StoredRecord)
-        : (row.data as StoredRecord),
-    );
+    const select =
+      operationalCollections.has(name)
+        ? `SELECT data,status FROM ${table} ORDER BY ${orderBy}`
+        : `SELECT data FROM ${table} ORDER BY ${orderBy}`;
+    const result = await client.query(select);
+    snapshot[name] = result.rows.map((row) => {
+      const data = row.data as StoredRecord;
+      if (name === "users") return publicUser(data);
+      if (operationalCollections.has(name))
+        return {
+          ...data,
+          status: String(row.status || data.status || "SINCRONIZADA"),
+        };
+      return data;
+    });
   }
   return snapshot;
 }
