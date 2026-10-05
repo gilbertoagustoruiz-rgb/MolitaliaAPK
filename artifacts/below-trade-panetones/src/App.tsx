@@ -11677,6 +11677,77 @@ export default function App() {
       window.removeEventListener("online", refreshAssignments);
     };
   }, [referencesReady]);
+
+  useEffect(() => {
+    if (!referencesReady || !user || isPromoterRole(user.role) || user.role === "CLIENTE")
+      return;
+    let cancelled = false;
+    let refreshing = false;
+    const refreshOperationalSnapshot = async () => {
+      if (!navigator.onLine || refreshing || document.visibilityState === "hidden")
+        return;
+      refreshing = true;
+      try {
+        const response = await fetch(APP_STORAGE_READ, { cache: "no-store" });
+        if (!response.ok) throw new Error("Datos operativos no disponibles");
+        const payload = (await response.json()) as {
+          snapshot?: Partial<CloudSnapshot>;
+        };
+        if (cancelled || !payload.snapshot) return;
+        const cloudSales = Array.isArray(payload.snapshot.sales)
+          ? payload.snapshot.sales
+          : [];
+        const cloudAttendance = Array.isArray(payload.snapshot.attendance)
+          ? payload.snapshot.attendance
+          : [];
+        const cloudMovements = Array.isArray(payload.snapshot.movements)
+          ? payload.snapshot.movements
+          : [];
+
+        setSales((current) => {
+          const next = mergeSales(current, cloudSales);
+          if (JSON.stringify(next) === JSON.stringify(current)) return current;
+          writeStore("bt-sales", next);
+          return next;
+        });
+        setAttendance((current) => {
+          const next = mergeAttendance(current, cloudAttendance);
+          if (JSON.stringify(next) === JSON.stringify(current)) return current;
+          writeStore("bt-attendance", next);
+          return next;
+        });
+        setMovements((current) => {
+          const next = mergeMovements(current, cloudMovements);
+          if (JSON.stringify(next) === JSON.stringify(current)) return current;
+          writeStore("bt-inventory-movements", next);
+          return next;
+        });
+      } catch {
+        // Conserva la última vista válida; el siguiente ciclo reintentará.
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    const onFocus = () => void refreshOperationalSnapshot();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible")
+        void refreshOperationalSnapshot();
+    };
+
+    void refreshOperationalSnapshot();
+    const interval = window.setInterval(refreshOperationalSnapshot, 10_000);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [referencesReady, user?.id, user?.role]);
   useEffect(() => {
     if (!cloudReady) return;
     const timeout = window.setTimeout(() => {
