@@ -3495,7 +3495,7 @@ function WarehouseCatalog({
 
   const exportWarehouses=()=>{
     downloadCsv(
-      \`almacenes-\${new Date().toISOString().slice(0,10)}.csv\`,
+      `almacenes-${new Date().toISOString().slice(0,10)}.csv`,
       ["Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón 900 g","Panetón 85 g","Avena","Batea","Mandil","Spaghetti"],
       visibleWarehouses.map((w)=>[
         w.name,w.region,w.department,w.province,w.district,w.status,
@@ -3522,7 +3522,7 @@ function WarehouseCatalog({
   const loadStock=async(warehouse:Warehouse,quantities:Partial<WarehouseStock>,initial=false,quiet=false)=>{
     if(readOnly)return false;
     try{
-      const r=await fetch(\`/api/app-storage/warehouses/\${encodeURIComponent(warehouse.id)}/recharge\`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities,initial})});
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/recharge`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities,initial})});
       const p=await r.json();
       if(!r.ok)throw new Error(p.message||"No se pudo cargar el stock.");
       if(!quiet){await load();notify(initial?"Stock inicial cargado.":"Almacén reabastecido correctamente.");}
@@ -3534,13 +3534,13 @@ function WarehouseCatalog({
   };
   const remove=async(warehouse:Warehouse)=>{
     if(readOnly)return;
-    if(!window.confirm(\`¿Eliminar el almacén \${warehouse.name}? Solo será posible si no tiene mercados, stock ni historial.\`))return;
+    if(!window.confirm(`¿Eliminar el almacén ${warehouse.name}? Solo será posible si no tiene mercados, stock ni historial.`))return;
     try{
-      const r=await fetch(\`/api/app-storage/warehouses/\${encodeURIComponent(warehouse.id)}\`,{method:"DELETE",headers:{"x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}`,{method:"DELETE",headers:{"x-admin-dni":user.dni,"x-admin-key":user.password||""}});
       const p=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(p.message||"No se pudo eliminar el almacén.");
       await load();
-      notify(\`Almacén eliminado: \${warehouse.name}\`);
+      notify(`Almacén eliminado: ${warehouse.name}`);
     }catch(e){
       notify(e instanceof Error?e.message:"No se pudo eliminar el almacén.",true);
     }
@@ -3556,19 +3556,19 @@ function WarehouseCatalog({
         if(!name)continue;
         const number=(keys:string[])=>Math.max(0,Math.floor(Number(csvField(record,keys).replace(",", "."))||0));
         const existing=existingByName.get(normalizeCsvHeader(name));
-        const warehouse:Warehouse={id:existing?.id||csvField(record,["id","codigo","idalmacen"])||\`ALM-\${Date.now()}-\${count+1}\`,name:name.toUpperCase(),region:csvField(record,["region"]).toUpperCase(),department:csvField(record,["departamento"]).toUpperCase(),province:csvField(record,["provincia"]).toUpperCase(),district:csvField(record,["distrito"]).toUpperCase(),status:csvStatus(csvField(record,["estado","status"])),marketIds:existing?.marketIds||[],stock:existing?.stock||{},updatedAt:new Date().toISOString()};
-        if(!warehouse.region||!warehouse.department||!warehouse.province||!warehouse.district)throw new Error(\`Completa ubicación para \${name}.\`);
+        const warehouse:Warehouse={id:existing?.id||csvField(record,["id","codigo","idalmacen"])||`ALM-${Date.now()}-${count+1}`,name:name.toUpperCase(),region:csvField(record,["region"]).toUpperCase(),department:csvField(record,["departamento"]).toUpperCase(),province:csvField(record,["provincia"]).toUpperCase(),district:csvField(record,["distrito"]).toUpperCase(),status:csvStatus(csvField(record,["estado","status"])),marketIds:existing?.marketIds||[],stock:existing?.stock||{},updatedAt:new Date().toISOString()};
+        if(!warehouse.region||!warehouse.department||!warehouse.province||!warehouse.district)throw new Error(`Completa ubicación para ${name}.`);
         const ok=await save(warehouse,true);
-        if(!ok)throw new Error(\`No se pudo importar \${name}.\`);
+        if(!ok)throw new Error(`No se pudo importar ${name}.`);
         const quantities={PANETON_900G:number(["paneton900gr","paneton900g","paneton900"]),PANETON_85G:number(["paneton85gr","paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])};
         if(existing){
-          const r=await fetch(\`/api/app-storage/warehouses/\${encodeURIComponent(warehouse.id)}/import-stock\`,{method:"PUT",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities})});
+          const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/import-stock`,{method:"PUT",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities})});
           const p=await r.json();
-          if(!r.ok)throw new Error(p.message||\`No se pudo actualizar stock de \${name}.\`);
+          if(!r.ok)throw new Error(p.message||`No se pudo actualizar stock de ${name}.`);
           updated++;
         }else if(Object.values(quantities).some(v=>v>0)){
           const stockOk=await loadStock(warehouse,quantities,true,true);
-          if(!stockOk)throw new Error(\`No se pudo cargar stock de \${name}.\`);
+          if(!stockOk)throw new Error(`No se pudo cargar stock de ${name}.`);
           created++;
         }else created++;
         existingByName.set(normalizeCsvHeader(name),warehouse);
@@ -3576,7 +3576,7 @@ function WarehouseCatalog({
       }
       if(!count)throw new Error("No se encontraron almacenes válidos.");
       await load();
-      notify(\`\${count} almacén(es) procesado(s): \${updated} actualizado(s) y \${created} nuevo(s).\`);
+      notify(`${count} almacén(es) procesado(s): ${updated} actualizado(s) y ${created} nuevo(s).`);
     }catch(e){
       notify(e instanceof Error?e.message:"No se pudo importar el archivo.",true);
     }
@@ -3589,13 +3589,13 @@ function WarehouseCatalog({
       const r=await fetch("/api/app-storage/warehouses/regularize-history",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
-      if(!r.ok)throw new Error(p.message||\`Error HTTP \${r.status} al regularizar.\`);
+      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar.`);
       await load();
-      const message=\`Regularización completada: \${p.suppliesProcessed||0} abastecimientos incorporados, \${p.canjesProcessed||0} canjes y \${p.tastingsProcessed||0} degustaciones descontados. \${p.skipped||0} omitidos.\`;
+      const message=`Regularización completada: ${p.suppliesProcessed||0} abastecimientos incorporados, ${p.canjesProcessed||0} canjes y ${p.tastingsProcessed||0} degustaciones descontados. ${p.skipped||0} omitidos.`;
       setRegularizeResult(message);notify(message);
     }catch(e){
       const message=e instanceof Error?e.message:"No se pudo regularizar el stock.";
-      setRegularizeResult(\`ERROR: \${message}\`);notify(message,true);
+      setRegularizeResult(`ERROR: ${message}`);notify(message,true);
     }finally{setRegularizing(false);}
   };
   const regularizeSeptemberClosures=async()=>{
@@ -3607,10 +3607,10 @@ function WarehouseCatalog({
       const r=await fetch("/api/app-storage/warehouses/regularize-september-zero-closures",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
-      if(!r.ok)throw new Error(p.message||\`Error HTTP \${r.status} al regularizar cierres.\`);
+      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar cierres.`);
       await load();
-      const warehouseSummary=Object.entries(p.byWarehouse||{}).map(([name,count])=>\`\${name}: \${count}\`).join(" · ");
-      notify(\`\${p.regularized||0} cierre(s) regularizado(s) con 1 Panetón 900 g y 80 contactos.\${warehouseSummary?\` Descuento por almacén: \${warehouseSummary}.\`:""}\`);
+      const warehouseSummary=Object.entries(p.byWarehouse||{}).map(([name,count])=>`${name}: ${count}`).join(" · ");
+      notify(`${p.regularized||0} cierre(s) regularizado(s) con 1 Panetón 900 g y 80 contactos.${warehouseSummary?` Descuento por almacén: ${warehouseSummary}.`:""}`);
     }catch(e){
       notify(e instanceof Error?e.message:"No se pudieron regularizar los cierres de septiembre.",true);
     }finally{setSeptemberRegularizing(false);}
@@ -3640,12 +3640,12 @@ function WarehouseCatalog({
         {visibleWarehouses.length ? (
           <div className="module-table-wrap">
             <div className="module-table">
-              <div className={\`module-table-row module-table-header \${readOnly ? "cols-6" : "cols-7"}\`}>
+              <div className={`module-table-row module-table-header ${readOnly ? "cols-6" : "cols-7"}`}>
                 <span>Almacén</span><span>Ubicación</span><span>Panetón 900 g</span><span>Panetón 85 g</span><span>Canjes</span><span>Estado</span>
                 {!readOnly && <span>Acciones</span>}
               </div>
               {visibleWarehouses.map(w=>(
-                <article className={\`module-table-row \${readOnly ? "cols-6" : "cols-7"}\`} key={w.id}>
+                <article className={`module-table-row ${readOnly ? "cols-6" : "cols-7"}`} key={w.id}>
                   <span><strong>{w.name}</strong><small>{w.id}</small></span>
                   <span><strong>{w.department}</strong><small>{[w.region,w.province,w.district].filter(Boolean).join(" · ")}</small></span>
                   <span><strong>{w.stock?.PANETON_900G||0}</strong></span>
@@ -6466,7 +6466,7 @@ function CoordinatorApp({
 
   const exportMarkets = () => {
     downloadCsv(
-      \`mercados-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      `mercados-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Código", "Mercado", "Región", "Departamento", "Provincia", "Distrito", "Almacén"],
       allowedMarkets.map((market) => [
         market.id,
@@ -6482,7 +6482,7 @@ function CoordinatorApp({
   };
   const exportClients = () => {
     downloadCsv(
-      \`clientes-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      `clientes-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Código", "Cliente", "Categoría", "Mercado", "Estado"],
       allowedClients.map((client) => [
         client.code,
@@ -6496,7 +6496,7 @@ function CoordinatorApp({
   };
   const exportSales = () => {
     downloadCsv(
-      \`ventas-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      `ventas-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
       [
         "Código",
         "Fecha",
@@ -6539,7 +6539,7 @@ function CoordinatorApp({
   };
   const exportCanjes = () => {
     downloadCsv(
-      \`canjes-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      `canjes-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Canje", "Cantidad", "Foto"],
       allowedCanjes.map((sale) => [
         sale.id,
@@ -6556,7 +6556,7 @@ function CoordinatorApp({
   };
   const exportDegustacion = () => {
     downloadCsv(
-      \`degustacion-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      `degustacion-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Código", "Fecha", "Promotor", "Mercado", "Producto", "Cantidad", "Contactos"],
       allowedDegustaciones.map((movement) => {
         const productId = movement.degustacionProductId || "PANETON_900G";
@@ -6577,7 +6577,7 @@ function CoordinatorApp({
   };
   const exportAssignments = () => {
     downloadCsv(
-      \`asignaciones-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      `asignaciones-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Promotor", "DNI", "Rol", "Mercados", "Clientes"],
       allowedAssignments.map((item) => {
         const promoter = users.find((current) =>
@@ -6596,7 +6596,7 @@ function CoordinatorApp({
   };
   const exportAttendance = () => {
     downloadCsv(
-      \`marcaciones-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      `marcaciones-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Código", "Fecha", "Promotor", "DNI", "Tipo", "Mercado", "Cliente", "Estado", "Foto"],
       allowedAttendance.map((item) => {
         const promoter = userMap[item.promoterId];
@@ -6635,9 +6635,9 @@ function CoordinatorApp({
         {allowedTabs.map(([value, label]) => (
           <button
             key={value}
-            className={\`tab \${tab === value ? "active" : ""}\`}
+            className={`tab ${tab === value ? "active" : ""}`}
             onClick={() => setTab(value)}
-            data-testid={\`tab-coordinator-\${value}\`}
+            data-testid={`tab-coordinator-${value}`}
           >
             {label}
           </button>
