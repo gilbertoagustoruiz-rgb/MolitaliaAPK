@@ -3778,6 +3778,192 @@ router.put(
   },
 );
 
+
+router.post(
+  "/app-storage/admin/degustaciones/regularize-september-zero",
+  async (req, res): Promise<void> => {
+    const actor = await authorizedWarehouseActor(req);
+    if (!actor) {
+      res.status(403).json({
+        message: "Solo Admin o Analista puede regularizar degustaciones.",
+      });
+      return;
+    }
+
+    const startDate = String(req.body?.startDate || "2026-09-01");
+    const endDate = String(req.body?.endDate || "2026-09-30");
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(endDate) ||
+      startDate > endDate
+    ) {
+      res.status(400).json({ message: "Rango de fechas no válido." });
+      return;
+    }
+
+    const db = await pool.connect();
+    try {
+      await db.query("BEGIN");
+      await lockInventoryLedger(db as unknown as QueryClient);
+
+      const pending = await db.query(
+        `SELECT sc.id,
+                sc.promoter_id,
+                sc.market_id,
+                sc.client_id,
+                sc.closure_date,
+                sc.data,
+                COALESCE(u.data->>'name',u.name,u.dni,sc.promoter_id) AS promoter_name,
+                COALESCE(m.name,m.data->>'name',sc.market_id) AS market_name
+           FROM session_closures sc
+           LEFT JOIN users u ON u.id=sc.promoter_id
+           LEFT JOIN markets m ON m.id=sc.market_id
+          WHERE (sc.closure_date AT TIME ZONE 'America/Lima')::date
+                BETWEEN $1::date AND $2::date
+            AND COALESCE(sc.tasting_used,0)=0
+            AND COALESCE((sc.data->>'tasting900g')::numeric,0)=0
+            AND COALESCE((sc.data->>'tasting85g')::numeric,0)=0
+            AND NOT EXISTS (
+              SELECT 1
+                FROM inventory_movements im
+               WHERE im.kind='DEGUSTACION'
+                 AND im.market_id=sc.market_id
+                 AND COALESCE(im.data->>'promoterId',im.data->>'actorId','')=sc.promoter_id
+                 AND ABS(EXTRACT(EPOCH FROM (im.movement_date - sc.closure_date))) <= 43200
+            )
+          ORDER BY sc.closure_date,sc.id
+          FOR UPDATE OF sc`,
+        [startDate, endDate],
+      );
+
+      let processed = 0;
+      const details: Array<{
+        closureId: string;
+        promoterId: string;
+        promoterName: string;
+        marketId: string;
+        marketName: string;
+        warehouseId: string;
+        date: string;
+      }> = [];
+
+      for (const row of pending.rows) {
+        const closureId = String(row.id);
+        const promoterId = String(row.promoter_id || "");
+        const marketId = String(row.market_id || "");
+        const closureDate = new Date(String(row.closure_date)).toISOString();
+        if (!promoterId || !marketId) {
+          throw new Error(
+            `El cierre ${closureId} no tiene promotor o mercado válido.`,
+          );
+        }
+
+        const movementId = `DEG-REG-SEP-${closureId}`;
+        const existing = await db.query(
+          "SELECT id FROM inventory_movements WHERE id=$1 LIMIT 1",
+          [movementId],
+        );
+        if (existing.rows.length) continue;
+
+        const stockResult = await applyWarehouseStockMovement(
+          db as unknown as QueryClient,
+          marketId,
+          { PANETON_900G: 1 },
+          "DEGUSTACION",
+          promoterId,
+          `DEGUSTACION:${movementId}`,
+        );
+
+        const updatedAt = new Date().toISOString();
+        const movement: StoredRecord = {
+          id: movementId,
+          marketId,
+          kind: "DEGUSTACION",
+          itemId: undefined,
+          quantity: 1,
+          actorId: promoterId,
+          actorName: String(row.promoter_name || "Promotor"),
+          promoterId,
+          degustacionProductId: "PANETON_900G",
+          degustacionProductLabel: "Panetón 900 g",
+          date: closureDate,
+          status: "SINCRONIZADA",
+          regularizedFromClosureId: closureId,
+          regularizationReason:
+            "Cierre de septiembre 2026 sin degustación registrada",
+          updatedAt,
+        };
+        await db.query(
+          `INSERT INTO inventory_movements
+             (id,market_id,kind,item_id,quantity,actor_id,movement_date,status,data,record_updated_at)
+           VALUES ($1,$2,'DEGUSTACION',NULL,1,$3,$4,'SINCRONIZADA',$5,$6)`,
+          [movementId, marketId, promoterId, closureDate, movement, updatedAt],
+        );
+
+        const closureData = isRecord(row.data) ? row.data : {};
+        const nextClosureData: StoredRecord = {
+          ...closureData,
+          tastingUsed: 1,
+          tasting900g: 1,
+          tasting85g: 0,
+          leads: 80,
+          degustacionRegularized: true,
+          degustacionRegularizedAt: updatedAt,
+          degustacionRegularizedBy: actor.id,
+          updatedAt,
+        };
+        await db.query(
+          `UPDATE session_closures
+              SET tasting_used=1,
+                  leads=80,
+                  data=$2,
+                  record_updated_at=$3,
+                  updated_at=now()
+            WHERE id=$1`,
+          [closureId, nextClosureData, updatedAt],
+        );
+
+        details.push({
+          closureId,
+          promoterId,
+          promoterName: String(row.promoter_name || "Promotor"),
+          marketId,
+          marketName: String(row.market_name || marketId),
+          warehouseId: stockResult.warehouseId,
+          date: closureDate,
+        });
+        processed += 1;
+      }
+
+      await db.query("COMMIT");
+      res.json({
+        processed,
+        productId: "PANETON_900G",
+        quantityPerClosure: 1,
+        leadsPerClosure: 80,
+        startDate,
+        endDate,
+        details,
+        snapshot: await readSnapshot(),
+      });
+    } catch (error) {
+      await db.query("ROLLBACK").catch(() => undefined);
+      req.log.error(
+        { err: error },
+        "Unable to regularize September zero tasting closures",
+      );
+      res.status(409).json({
+        message:
+          error instanceof Error
+            ? error.message
+            : "No se pudieron regularizar los cierres de septiembre.",
+      });
+    } finally {
+      db.release();
+    }
+  },
+);
+
 router.delete(
   "/app-storage/admin/degustaciones/:source/:id",
   async (req, res): Promise<void> => {
