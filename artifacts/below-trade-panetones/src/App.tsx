@@ -6383,17 +6383,13 @@ function CoordinatorApp({
   const allowedMarkets = markets.filter((market) =>
     allowedMarketIds.has(market.id),
   );
-  const allowedClientIds = new Set(
-    assignment?.clientIds?.length
-      ? assignment.clientIds
-      : clients
-          .filter((client) => allowedMarketIds.has(client.marketId))
-          .map((client) => client.id),
+  // Para COORDINADOR, el mercado asignado define todo su alcance.
+  // Los clientIds de su asignación no restringen la visualización:
+  // ve todos los clientes pertenecientes a sus mercados.
+  const allowedClients = clients.filter((client) =>
+    allowedMarketIds.has(client.marketId),
   );
-  const allowedClients = clients.filter(
-    (client) =>
-      allowedMarketIds.has(client.marketId) && allowedClientIds.has(client.id),
-  );
+  const allowedClientIds = new Set(allowedClients.map((client) => client.id));
   const userMarketIds = (current: AppUser) => {
     const currentAssignment = assignments.find((item) =>
       assignmentMatchesUser(item, current),
