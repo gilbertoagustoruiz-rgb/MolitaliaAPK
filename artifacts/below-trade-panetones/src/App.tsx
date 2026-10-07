@@ -1363,6 +1363,14 @@ function mergeUsersByDni(current: AppUser[], incoming: AppUser[]) {
   });
   return Array.from(merged.values());
 }
+function sessionAdminKey(user: AppUser) {
+  const session = readStore<AppUser | null>("bt-session", null);
+  return (
+    user.password ||
+    (session?.dni === user.dni ? session.password : undefined) ||
+    ""
+  );
+}
 function formatDate(value: string) {
   return new Date(value).toLocaleString("es-PE", {
     dateStyle: "short",
@@ -3450,7 +3458,17 @@ function NewMarketModal({
     </Modal>
   );
 }
-function WarehouseCatalog({ notify, user }: { notify:(message:string,error?:boolean)=>void; user:AppUser }) {
+function WarehouseCatalog({
+  notify,
+  user,
+  readOnly = false,
+  allowedWarehouseIds,
+}: {
+  notify: (message: string, error?: boolean) => void;
+  user: AppUser;
+  readOnly?: boolean;
+  allowedWarehouseIds?: string[];
+}) {
   const [warehouses,setWarehouses]=useState<Warehouse[]>([]);
   const [modal,setModal]=useState(false);
   const [edit,setEdit]=useState<Warehouse|null>(null);
@@ -3459,35 +3477,200 @@ function WarehouseCatalog({ notify, user }: { notify:(message:string,error?:bool
   const [regularizing,setRegularizing]=useState(false);
   const [septemberRegularizing,setSeptemberRegularizing]=useState(false);
   const [regularizeResult,setRegularizeResult]=useState("");
-  const load=async()=>{try{const r=await fetch("/api/app-storage/warehouses");const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudieron cargar los almacenes.");setWarehouses(Array.isArray(p.warehouses)?p.warehouses:[]);}catch(e){notify(e instanceof Error?e.message:"No se pudieron cargar los almacenes.",true);}};
+  const visibleWarehouses = allowedWarehouseIds?.length
+    ? warehouses.filter((warehouse) => allowedWarehouseIds.includes(warehouse.id))
+    : warehouses;
+
+  const load=async()=>{
+    try{
+      const r=await fetch("/api/app-storage/warehouses");
+      const p=await r.json();
+      if(!r.ok)throw new Error(p.message||"No se pudieron cargar los almacenes.");
+      setWarehouses(Array.isArray(p.warehouses)?p.warehouses:[]);
+    }catch(e){
+      notify(e instanceof Error?e.message:"No se pudieron cargar los almacenes.",true);
+    }
+  };
   useEffect(()=>{void load();},[]);
-  const save=async(warehouse:Warehouse,quiet=false)=>{try{const r=await fetch("/api/app-storage/warehouses",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({warehouse})});const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudo guardar el almacén.");if(!quiet){await load();notify("Almacén actualizado.");}return true;}catch(e){if(!quiet)notify(e instanceof Error?e.message:"No se pudo guardar el almacén.",true);return false;}};
-  const loadStock=async(warehouse:Warehouse,quantities:Partial<WarehouseStock>,initial=false,quiet=false)=>{try{const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/recharge`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities,initial})});const p=await r.json();if(!r.ok)throw new Error(p.message||"No se pudo cargar el stock.");if(!quiet){await load();notify(initial?"Stock inicial cargado.":"Almacén reabastecido correctamente.");}return true;}catch(e){if(!quiet)notify(e instanceof Error?e.message:"No se pudo cargar el stock.",true);return false;}};
-  const remove=async(warehouse:Warehouse)=>{if(!window.confirm(`¿Eliminar el almacén ${warehouse.name}? Solo será posible si no tiene mercados, stock ni historial.`))return;try{const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}`,{method:"DELETE",headers:{"x-admin-dni":user.dni,"x-admin-key":user.password||""}});const p=await r.json().catch(()=>({}));if(!r.ok)throw new Error(p.message||"No se pudo eliminar el almacén.");await load();notify(`Almacén eliminado: ${warehouse.name}`);}catch(e){notify(e instanceof Error?e.message:"No se pudo eliminar el almacén.",true);}};
-  const importFile=async(file:File)=>{try{const records=await parseImportRecords(file);const existingByName=new Map(warehouses.map(w=>[normalizeCsvHeader(w.name),w]));let count=0;let updated=0;let created=0;for(const record of records){const name=csvField(record,["nombredealmacen","nombrealmacen","almacen","nombre"]);if(!name)continue;const number=(keys:string[])=>Math.max(0,Math.floor(Number(csvField(record,keys).replace(",", "."))||0));const existing=existingByName.get(normalizeCsvHeader(name));const warehouse:Warehouse={id:existing?.id||csvField(record,["id","codigo","idalmacen"])||`ALM-${Date.now()}-${count+1}`,name:name.toUpperCase(),region:csvField(record,["region"]).toUpperCase(),department:csvField(record,["departamento"]).toUpperCase(),province:csvField(record,["provincia"]).toUpperCase(),district:csvField(record,["distrito"]).toUpperCase(),status:csvStatus(csvField(record,["estado","status"])),marketIds:existing?.marketIds||[],stock:existing?.stock||{},updatedAt:new Date().toISOString()};if(!warehouse.region||!warehouse.department||!warehouse.province||!warehouse.district)throw new Error(`Completa ubicación para ${name}.`);const ok=await save(warehouse,true);if(!ok)throw new Error(`No se pudo importar ${name}.`);const quantities={PANETON_900G:number(["paneton900gr","paneton900g","paneton900"]),PANETON_85G:number(["paneton85gr","paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])};if(existing){const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/import-stock`,{method:"PUT",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities})});const p=await r.json();if(!r.ok)throw new Error(p.message||`No se pudo actualizar stock de ${name}.`);updated++;}else if(Object.values(quantities).some(v=>v>0)){const stockOk=await loadStock(warehouse,quantities,true,true);if(!stockOk)throw new Error(`No se pudo cargar stock de ${name}.`);created++;}else created++;existingByName.set(normalizeCsvHeader(name),warehouse);count++;}if(!count)throw new Error("No se encontraron almacenes válidos.");await load();notify(`${count} almacén(es) procesado(s): ${updated} actualizado(s) y ${created} nuevo(s).`);}catch(e){notify(e instanceof Error?e.message:"No se pudo importar el archivo.",true);}};
+
+  const exportWarehouses=()=>{
+    downloadCsv(
+      `almacenes-${new Date().toISOString().slice(0,10)}.csv`,
+      ["Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón 900 g","Panetón 85 g","Avena","Batea","Mandil","Spaghetti"],
+      visibleWarehouses.map((w)=>[
+        w.name,w.region,w.department,w.province,w.district,w.status,
+        w.stock?.PANETON_900G||0,w.stock?.PANETON_85G||0,w.stock?.AVENA||0,
+        w.stock?.BATEA||0,w.stock?.MANDIL||0,w.stock?.SPAGHETTI||0,
+      ]),
+    );
+    notify("Almacenes descargados");
+  };
+
+  const save=async(warehouse:Warehouse,quiet=false)=>{
+    if(readOnly)return false;
+    try{
+      const r=await fetch("/api/app-storage/warehouses",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({warehouse})});
+      const p=await r.json();
+      if(!r.ok)throw new Error(p.message||"No se pudo guardar el almacén.");
+      if(!quiet){await load();notify("Almacén actualizado.");}
+      return true;
+    }catch(e){
+      if(!quiet)notify(e instanceof Error?e.message:"No se pudo guardar el almacén.",true);
+      return false;
+    }
+  };
+  const loadStock=async(warehouse:Warehouse,quantities:Partial<WarehouseStock>,initial=false,quiet=false)=>{
+    if(readOnly)return false;
+    try{
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/recharge`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities,initial})});
+      const p=await r.json();
+      if(!r.ok)throw new Error(p.message||"No se pudo cargar el stock.");
+      if(!quiet){await load();notify(initial?"Stock inicial cargado.":"Almacén reabastecido correctamente.");}
+      return true;
+    }catch(e){
+      if(!quiet)notify(e instanceof Error?e.message:"No se pudo cargar el stock.",true);
+      return false;
+    }
+  };
+  const remove=async(warehouse:Warehouse)=>{
+    if(readOnly)return;
+    if(!window.confirm(`¿Eliminar el almacén ${warehouse.name}? Solo será posible si no tiene mercados, stock ni historial.`))return;
+    try{
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}`,{method:"DELETE",headers:{"x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const p=await r.json().catch(()=>({}));
+      if(!r.ok)throw new Error(p.message||"No se pudo eliminar el almacén.");
+      await load();
+      notify(`Almacén eliminado: ${warehouse.name}`);
+    }catch(e){
+      notify(e instanceof Error?e.message:"No se pudo eliminar el almacén.",true);
+    }
+  };
+  const importFile=async(file:File)=>{
+    if(readOnly)return;
+    try{
+      const records=await parseImportRecords(file);
+      const existingByName=new Map(warehouses.map(w=>[normalizeCsvHeader(w.name),w]));
+      let count=0,updated=0,created=0;
+      for(const record of records){
+        const name=csvField(record,["nombredealmacen","nombrealmacen","almacen","nombre"]);
+        if(!name)continue;
+        const number=(keys:string[])=>Math.max(0,Math.floor(Number(csvField(record,keys).replace(",", "."))||0));
+        const existing=existingByName.get(normalizeCsvHeader(name));
+        const warehouse:Warehouse={id:existing?.id||csvField(record,["id","codigo","idalmacen"])||`ALM-${Date.now()}-${count+1}`,name:name.toUpperCase(),region:csvField(record,["region"]).toUpperCase(),department:csvField(record,["departamento"]).toUpperCase(),province:csvField(record,["provincia"]).toUpperCase(),district:csvField(record,["distrito"]).toUpperCase(),status:csvStatus(csvField(record,["estado","status"])),marketIds:existing?.marketIds||[],stock:existing?.stock||{},updatedAt:new Date().toISOString()};
+        if(!warehouse.region||!warehouse.department||!warehouse.province||!warehouse.district)throw new Error(`Completa ubicación para ${name}.`);
+        const ok=await save(warehouse,true);
+        if(!ok)throw new Error(`No se pudo importar ${name}.`);
+        const quantities={PANETON_900G:number(["paneton900gr","paneton900g","paneton900"]),PANETON_85G:number(["paneton85gr","paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])};
+        if(existing){
+          const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/import-stock`,{method:"PUT",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities})});
+          const p=await r.json();
+          if(!r.ok)throw new Error(p.message||`No se pudo actualizar stock de ${name}.`);
+          updated++;
+        }else if(Object.values(quantities).some(v=>v>0)){
+          const stockOk=await loadStock(warehouse,quantities,true,true);
+          if(!stockOk)throw new Error(`No se pudo cargar stock de ${name}.`);
+          created++;
+        }else created++;
+        existingByName.set(normalizeCsvHeader(name),warehouse);
+        count++;
+      }
+      if(!count)throw new Error("No se encontraron almacenes válidos.");
+      await load();
+      notify(`${count} almacén(es) procesado(s): ${updated} actualizado(s) y ${created} nuevo(s).`);
+    }catch(e){
+      notify(e instanceof Error?e.message:"No se pudo importar el archivo.",true);
+    }
+  };
   const example=()=>downloadCsv("ejemplo-importacion-almacenes.csv",["Nombre de Almacén","Región","Departamento","Provincia","Distrito","Estado","Panetón 900 g","Panetón 85 g","Avena","Batea","Mandil","Spaghetti"],[["HUARAZ","CENTRO","ANCASH","HUARAZ","HUARAZ","ACTIVO",18,200,240,0,0,200]]);
-  const regularize=async()=>{setRegularizing(true);setRegularizeResult("Procesando consumos históricos...");try{const r=await fetch("/api/app-storage/warehouses/regularize-history",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});const text=await r.text();let p:any={};try{p=text?JSON.parse(text):{};}catch{p={message:text};}if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar.`);await load();const message=`Regularización completada: ${p.suppliesProcessed||0} abastecimientos incorporados, ${p.canjesProcessed||0} canjes y ${p.tastingsProcessed||0} degustaciones descontados. ${p.skipped||0} omitidos.`;setRegularizeResult(message);notify(message);}catch(e){const message=e instanceof Error?e.message:"No se pudo regularizar el stock.";setRegularizeResult(`ERROR: ${message}`);notify(message,true);}finally{setRegularizing(false);}};
+  const regularize=async()=>{
+    if(readOnly)return;
+    setRegularizing(true);setRegularizeResult("Procesando consumos históricos...");
+    try{
+      const r=await fetch("/api/app-storage/warehouses/regularize-history",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const text=await r.text();let p:any={};
+      try{p=text?JSON.parse(text):{};}catch{p={message:text};}
+      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar.`);
+      await load();
+      const message=`Regularización completada: ${p.suppliesProcessed||0} abastecimientos incorporados, ${p.canjesProcessed||0} canjes y ${p.tastingsProcessed||0} degustaciones descontados. ${p.skipped||0} omitidos.`;
+      setRegularizeResult(message);notify(message);
+    }catch(e){
+      const message=e instanceof Error?e.message:"No se pudo regularizar el stock.";
+      setRegularizeResult(`ERROR: ${message}`);notify(message,true);
+    }finally{setRegularizing(false);}
+  };
   const regularizeSeptemberClosures=async()=>{
+    if(readOnly)return;
     const confirmed=window.confirm("Se regularizarán únicamente los cierres del 14 al 30 de septiembre de 2026 que tengan consumo 0. Cada cierre recibirá 1 Panetón 900 g y se descontará 1 unidad del Almacén correspondiente. ¿Continuar?");
     if(!confirmed)return;
     setSeptemberRegularizing(true);
     try{
       const r=await fetch("/api/app-storage/warehouses/regularize-september-zero-closures",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
-      const text=await r.text();
-      let p:any={};
+      const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
       if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar cierres.`);
       await load();
       const warehouseSummary=Object.entries(p.byWarehouse||{}).map(([name,count])=>`${name}: ${count}`).join(" · ");
-      const message=`${p.regularized||0} cierre(s) regularizado(s) con 1 Panetón 900 g y 80 contactos.${warehouseSummary?` Descuento por almacén: ${warehouseSummary}.`:""}`;
-      notify(message);
+      notify(`${p.regularized||0} cierre(s) regularizado(s) con 1 Panetón 900 g y 80 contactos.${warehouseSummary?` Descuento por almacén: ${warehouseSummary}.`:""}`);
     }catch(e){
       notify(e instanceof Error?e.message:"No se pudieron regularizar los cierres de septiembre.",true);
-    }finally{
-      setSeptemberRegularizing(false);
-    }
+    }finally{setSeptemberRegularizing(false);}
   };
-  return <section className="panel"><div className="panel-header"><div><h2>Almacén</h2><p>Administra cada almacén, sus datos y el saldo disponible. Los reabastecimientos se suman al stock actual.</p></div><div className="panel-actions"><Btn variant="outline" disabled={septemberRegularizing} onClick={()=>void regularizeSeptemberClosures()}>{septemberRegularizing?"Regularizando Sep...":"Regularizar cierres 14–30 Sep"}</Btn><Btn variant="outline" onClick={()=>{setRegularizeResult("");setRegularizeOpen(true);}}>Regularizar consumos</Btn><CsvImportButton label="Importar almacenes" onImport={importFile} testId="button-import-warehouses"/><CsvExampleButton onDownload={example} testId="button-example-warehouses"/><Btn onClick={()=>setModal(true)}><Plus/> Nuevo almacén</Btn></div></div><div className="panel-body">{warehouses.length?<div className="module-table-wrap"><div className="module-table"><div className="module-table-row module-table-header cols-6"><span>Almacén</span><span>Ubicación</span><span>Panetón 900 g</span><span>Panetón 85 g</span><span>Canjes</span><span>Estado</span><span>Acciones</span></div>{warehouses.map(w=><article className="module-table-row cols-7" key={w.id}><span><strong>{w.name}</strong><small>{w.id}</small></span><span><strong>{w.department}</strong><small>{[w.region,w.province,w.district].filter(Boolean).join(" · ")}</small></span><span><strong>{w.stock?.PANETON_900G||0}</strong></span><span><strong>{w.stock?.PANETON_85G||0}</strong></span><span><strong>Avena {w.stock?.AVENA||0} · Batea {w.stock?.BATEA||0}</strong><small>Mandil {w.stock?.MANDIL||0} · Spaghetti {w.stock?.SPAGHETTI||0}</small></span><span><StatusPill status={w.status}/></span><span className="module-table-actions"><Btn variant="outline" onClick={()=>setEdit(w)}><Pencil/> Editar</Btn><Btn onClick={()=>setRecharge(w)}><Plus/> Reabastecer</Btn><Btn variant="danger" onClick={()=>void remove(w)}><Trash2/> Eliminar</Btn></span></article>)}</div></div>:<Empty title="Sin almacenes" detail="Crea o importa los almacenes para comenzar." />}</div>{modal&&<WarehouseCreateModal onSave={async(warehouse,quantities)=>{const saved=await save(warehouse,true);if(!saved)return false;const hasStock=Object.values(quantities).some(v=>Number(v)>0);if(hasStock){const stockSaved=await loadStock(warehouse,quantities,true,true);if(!stockSaved)return false;}await load();notify(hasStock?"Almacén y stock inicial guardados.":"Almacén guardado.");return true;}} close={()=>setModal(false)}/>} {edit&&<WarehouseEditModal warehouse={edit} onSave={async w=>{const ok=await save(w);if(ok)setEdit(null);return ok;}} close={()=>setEdit(null)}/>} {recharge&&<WarehouseRechargeModal warehouse={recharge} onSave={async(w,q)=>{const ok=await loadStock(w,q,false);if(ok)setRecharge(null);return ok;}} close={()=>setRecharge(null)}/>} {regularizeOpen&&<Modal title="Regularizar consumos" detail="Descontará del Almacén los Canjes y Degustaciones históricos que todavía no tengan movimiento de almacén." close={()=>{if(!regularizing)setRegularizeOpen(false);}}><div className="notice"><strong>Esta operación no vuelve a descontar registros ya regularizados.</strong><p>Si existe un Mercado sin Almacén, stock insuficiente o un registro histórico incompleto, se mostrará el error y no se aplicarán descuentos parciales.</p>{regularizeResult&&<p><strong>{regularizeResult}</strong></p>}</div><div className="modal-actions"><Btn variant="outline" disabled={regularizing} onClick={()=>setRegularizeOpen(false)}>Cerrar</Btn><Btn disabled={regularizing} onClick={()=>void regularize()}>{regularizing?"Procesando...":"Confirmar regularización"}</Btn></div></Modal>}</section>;
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2>Almacén</h2>
+          <p>{readOnly ? "Consulta de stock de almacenes. Este perfil no puede abastecer ni modificar." : "Administra cada almacén, sus datos y el saldo disponible. Los reabastecimientos se suman al stock actual."}</p>
+        </div>
+        <div className="panel-actions">
+          <Btn variant="outline" onClick={exportWarehouses}><Download /> Descargar</Btn>
+          {!readOnly && (
+            <>
+              <Btn variant="outline" disabled={septemberRegularizing} onClick={()=>void regularizeSeptemberClosures()}>{septemberRegularizing?"Regularizando Sep...":"Regularizar cierres 14–30 Sep"}</Btn>
+              <Btn variant="outline" onClick={()=>{setRegularizeResult("");setRegularizeOpen(true);}}>Regularizar consumos</Btn>
+              <CsvImportButton label="Importar almacenes" onImport={importFile} testId="button-import-warehouses"/>
+              <CsvExampleButton onDownload={example} testId="button-example-warehouses"/>
+              <Btn onClick={()=>setModal(true)}><Plus/> Nuevo almacén</Btn>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="panel-body">
+        {visibleWarehouses.length ? (
+          <div className="module-table-wrap">
+            <div className="module-table">
+              <div className={`module-table-row module-table-header ${readOnly ? "cols-6" : "cols-7"}`}>
+                <span>Almacén</span><span>Ubicación</span><span>Panetón 900 g</span><span>Panetón 85 g</span><span>Canjes</span><span>Estado</span>
+                {!readOnly && <span>Acciones</span>}
+              </div>
+              {visibleWarehouses.map(w=>(
+                <article className={`module-table-row ${readOnly ? "cols-6" : "cols-7"}`} key={w.id}>
+                  <span><strong>{w.name}</strong><small>{w.id}</small></span>
+                  <span><strong>{w.department}</strong><small>{[w.region,w.province,w.district].filter(Boolean).join(" · ")}</small></span>
+                  <span><strong>{w.stock?.PANETON_900G||0}</strong></span>
+                  <span><strong>{w.stock?.PANETON_85G||0}</strong></span>
+                  <span><strong>Avena {w.stock?.AVENA||0} · Batea {w.stock?.BATEA||0}</strong><small>Mandil {w.stock?.MANDIL||0} · Spaghetti {w.stock?.SPAGHETTI||0}</small></span>
+                  <span><StatusPill status={w.status}/></span>
+                  {!readOnly && (
+                    <span className="module-table-actions">
+                      <Btn variant="outline" onClick={()=>setEdit(w)}><Pencil/> Editar</Btn>
+                      <Btn onClick={()=>setRecharge(w)}><Plus/> Reabastecer</Btn>
+                      <Btn variant="danger" onClick={()=>void remove(w)}><Trash2/> Eliminar</Btn>
+                    </span>
+                  )}
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : <Empty title="Sin almacenes" detail="No hay almacenes visibles para este perfil." />}
+      </div>
+      {!readOnly && modal&&<WarehouseCreateModal onSave={async(warehouse,quantities)=>{const saved=await save(warehouse,true);if(!saved)return false;const hasStock=Object.values(quantities).some(v=>Number(v)>0);if(hasStock){const stockSaved=await loadStock(warehouse,quantities,true,true);if(!stockSaved)return false;}await load();notify(hasStock?"Almacén y stock inicial guardados.":"Almacén guardado.");return true;}} close={()=>setModal(false)}/>}
+      {!readOnly && edit&&<WarehouseEditModal warehouse={edit} onSave={async w=>{const ok=await save(w);if(ok)setEdit(null);return ok;}} close={()=>setEdit(null)}/>}
+      {!readOnly && recharge&&<WarehouseRechargeModal warehouse={recharge} onSave={async(w,q)=>{const ok=await loadStock(w,q,false);if(ok)setRecharge(null);return ok;}} close={()=>setRecharge(null)}/>}
+      {!readOnly && regularizeOpen&&<Modal title="Regularizar consumos" detail="Descontará del Almacén los Canjes y Degustaciones históricos que todavía no tengan movimiento de almacén." close={()=>{if(!regularizing)setRegularizeOpen(false);}}><div className="notice"><strong>Esta operación no vuelve a descontar registros ya regularizados.</strong><p>Si existe un Mercado sin Almacén, stock insuficiente o un registro histórico incompleto, se mostrará el error y no se aplicarán descuentos parciales.</p>{regularizeResult&&<p><strong>{regularizeResult}</strong></p>}</div><div className="modal-actions"><Btn variant="outline" disabled={regularizing} onClick={()=>setRegularizeOpen(false)}>Cerrar</Btn><Btn disabled={regularizing} onClick={()=>void regularize()}>{regularizing?"Procesando...":"Confirmar regularización"}</Btn></div></Modal>}
+    </section>
+  );
 }
 function WarehouseCreateModal({onSave,close}:{onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState("");const [region,setRegion]=useState("");const [department,setDepartment]=useState("");const [province,setProvince]=useState("");const [district,setDistrict]=useState("");const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});const saveModal=async()=>{if(!name.trim()||!region.trim()||!department.trim()||!province.trim()||!district.trim())return;const warehouse:Warehouse={id:`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status:"ACTIVO",marketIds:[],stock:{},updatedAt:new Date().toISOString()};const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(warehouse,quantities))close();};return <Modal title="Nuevo almacén" detail="Registra el almacén y su stock inicial." close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field>{items.map(([id,label])=><Field key={id} label={`Stock inicial - ${label}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={saveModal}>Guardar almacén</Btn></div></Modal>}
 function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,updatedAt:new Date().toISOString()})}>Guardar cambios</Btn></div></Modal>}
@@ -5191,7 +5374,7 @@ function AssignmentModule({
         headers: {
           "Content-Type": "application/json",
           "x-admin-dni": user.dni,
-          "x-admin-key": user.password || "",
+          "x-admin-key": sessionAdminKey(user),
         },
         body: JSON.stringify({ assignment }),
       });
@@ -5262,7 +5445,7 @@ function AssignmentModule({
         headers: {
           "Content-Type": "application/json",
           "x-admin-dni": user.dni,
-          "x-admin-key": user.password || "",
+          "x-admin-key": sessionAdminKey(user),
         },
         body: JSON.stringify({ assignment }),
       });
@@ -6167,7 +6350,8 @@ function CoordinatorApp({
   users,
   clients,
   sales,
-  inventory,
+  attendance,
+  closures,
   movements,
   assignments,
   productPrices,
@@ -6178,7 +6362,8 @@ function CoordinatorApp({
   users: AppUser[];
   clients: Client[];
   sales: Sale[];
-  inventory: MarketInventory[];
+  attendance: Attendance[];
+  closures: SessionClosure[];
   movements: InventoryMovement[];
   assignments: PromoterAssignment[];
   productPrices: ProductPrice[];
@@ -6222,27 +6407,93 @@ function CoordinatorApp({
   const allowedUsers = users.filter(
     (current) =>
       !isArchivedUser(current) &&
-      (current.id === user.id ||
-        userMarketIds(current).some((marketId) =>
-          allowedMarketIds.has(marketId),
-        )),
+      userMarketIds(current).some((marketId) => allowedMarketIds.has(marketId)),
   );
   const allowedSales = sales.filter(
     (sale) =>
       allowedMarketIds.has(sale.marketId) &&
       allowedClientIds.has(sale.clientId),
   );
+  const allowedAttendance = attendance.filter(
+    (item) =>
+      allowedMarketIds.has(item.marketId) &&
+      (!item.clientId || allowedClientIds.has(item.clientId)),
+  );
+  const allowedClosures = closures.filter((item) =>
+    allowedMarketIds.has(item.marketId),
+  );
+  const allowedMovements = movements.filter((item) =>
+    allowedMarketIds.has(item.marketId),
+  );
+  const allowedCanjes = allowedSales.filter((sale) => Boolean(sale.bonus));
+  const allowedDegustaciones = allowedMovements.filter(
+    (movement) => movement.kind === "DEGUSTACION",
+  );
+  const allowedAssignments = assignments.filter((item) => {
+    const promoter = users.find((current) =>
+      assignmentMatchesUser(item, current),
+    );
+    return Boolean(
+      promoter &&
+        isPromoterRole(promoter.role) &&
+        item.marketIds.some((marketId) => allowedMarketIds.has(marketId)),
+    );
+  });
   const marketMap = Object.fromEntries(
     allowedMarkets.map((market) => [market.id, market]),
   );
+  const clientMap = Object.fromEntries(
+    allowedClients.map((client) => [client.id, client]),
+  );
+  const userMap = Object.fromEntries(
+    users.map((current) => [current.id, current]),
+  );
+  const allowedWarehouseIds = allowedMarkets
+    .map((market) => market.warehouseId)
+    .filter((id): id is string => Boolean(id));
+
   const allowedTabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
-    ["clientes", "Clientes"],
-    ["usuarios", "Usuarios"],
-    ["ventas", "Ventas"],
     ["almacen", "Almacén"],
+    ["clientes", "Clientes"],
+    ["canjes", "Canjes"],
+    ["degustacion", "Degustación"],
+    ["asignaciones", "Asignaciones"],
+    ["ventas", "Ventas"],
+    ["marcaciones", "Marcaciones"],
   ];
+
+  const exportMarkets = () => {
+    downloadCsv(
+      `mercados-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Código", "Mercado", "Región", "Departamento", "Provincia", "Distrito", "Almacén"],
+      allowedMarkets.map((market) => [
+        market.id,
+        market.name,
+        market.region || "",
+        market.department,
+        market.province,
+        market.district,
+        market.warehouseId || "",
+      ]),
+    );
+    notify("Mercados descargados");
+  };
+  const exportClients = () => {
+    downloadCsv(
+      `clientes-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Código", "Cliente", "Categoría", "Mercado", "Estado"],
+      allowedClients.map((client) => [
+        client.code,
+        client.name,
+        client.category || "",
+        marketMap[client.marketId]?.name || "",
+        client.status,
+      ]),
+    );
+    notify("Clientes descargados");
+  };
   const exportSales = () => {
     downloadCsv(
       `ventas-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -6255,14 +6506,14 @@ function CoordinatorApp({
         "Nombre cliente final",
         "Mercado",
         "Unidades",
+        "Planchas",
         "Total",
+        "Canje",
         "Link foto boleta",
         "Link foto canje",
       ],
       allowedSales.map((sale) => {
-        const promoter = users.find(
-          (current) => current.id === sale.promoterId,
-        );
+        const promoter = userMap[sale.promoterId];
         return [
           sale.id,
           formatDate(sale.date),
@@ -6272,26 +6523,112 @@ function CoordinatorApp({
             sale.promoterRole ||
             promoter?.role ||
             "",
-          allowedClients.find((client) => client.id === sale.clientId)?.name ||
-            "",
+          clientMap[sale.clientId]?.name || "",
           sale.finalClientName || "",
           marketMap[sale.marketId]?.name || "",
           sale.units,
+          sale.planchas || 0,
           formatSoles(sale.amountSoles),
+          sale.bonus || "",
           photoExportLink(sale.receiptPhoto),
           photoExportLink(sale.exchangePhoto),
         ];
       }),
     );
-    notify("Reporte de ventas de las zonas descargado");
+    notify("Ventas descargadas");
   };
+  const exportCanjes = () => {
+    downloadCsv(
+      `canjes-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Canje", "Cantidad", "Foto"],
+      allowedCanjes.map((sale) => [
+        sale.id,
+        formatDate(sale.date),
+        userMap[sale.promoterId]?.name || "No identificado",
+        marketMap[sale.marketId]?.name || "",
+        clientMap[sale.clientId]?.name || "",
+        sale.bonus || "",
+        sale.redemptionCount || 1,
+        photoExportLink(sale.exchangePhoto),
+      ]),
+    );
+    notify("Canjes descargados");
+  };
+  const exportDegustacion = () => {
+    downloadCsv(
+      `degustacion-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Código", "Fecha", "Promotor", "Mercado", "Producto", "Cantidad", "Contactos"],
+      allowedDegustaciones.map((movement) => {
+        const productId = movement.degustacionProductId || "PANETON_900G";
+        const quantity = Math.max(0, Number(movement.quantity) || 0);
+        const leads = productId === "PANETON_85G" ? quantity * 10 : quantity * 80;
+        return [
+          movement.id,
+          formatDate(movement.date),
+          userMap[movement.promoterId || movement.actorId]?.name || "No identificado",
+          marketMap[movement.marketId]?.name || "",
+          productId === "PANETON_85G" ? "Panetón 85 g" : "Panetón 900 g",
+          quantity,
+          leads,
+        ];
+      }),
+    );
+    notify("Degustación descargada");
+  };
+  const exportAssignments = () => {
+    downloadCsv(
+      `asignaciones-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Promotor", "DNI", "Rol", "Mercados", "Clientes"],
+      allowedAssignments.map((item) => {
+        const promoter = users.find((current) =>
+          assignmentMatchesUser(item, current),
+        );
+        return [
+          promoter?.name || "No identificado",
+          promoter?.dni || item.promoterDni || "",
+          promoter?.roleLabel || promoter?.role || "",
+          item.marketIds.map((id) => marketMap[id]?.name || id).join(" | "),
+          item.clientIds.map((id) => clientMap[id]?.name || id).join(" | "),
+        ];
+      }),
+    );
+    notify("Asignaciones descargadas");
+  };
+  const exportAttendance = () => {
+    downloadCsv(
+      `marcaciones-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Código", "Fecha", "Promotor", "DNI", "Tipo", "Mercado", "Cliente", "Estado", "Foto"],
+      allowedAttendance.map((item) => {
+        const promoter = userMap[item.promoterId];
+        return [
+          item.id,
+          formatDate(item.date),
+          promoter?.name || "No identificado",
+          promoter?.dni || "",
+          item.type,
+          marketMap[item.marketId]?.name || "",
+          item.clientId ? clientMap[item.clientId]?.name || item.clientId : "",
+          item.status,
+          photoExportLink(item.photo),
+        ];
+      }),
+    );
+    notify("Marcaciones descargadas");
+  };
+
+  const DownloadAction = ({ onClick }: { onClick: () => void }) => (
+    <Btn variant="outline" onClick={onClick}>
+      <Download /> Descargar
+    </Btn>
+  );
+
   return (
     <main className="workspace">
       <div className="page-head">
         <div>
           <span className="eyebrow">PANEL DE COORDINACIÓN</span>
           <h1>Hola, {user.name}</h1>
-          <p>Consulta la información de tus mercados y clientes asignados.</p>
+          <p>Consulta y descarga la información de tus zonas. Este perfil es solo lectura.</p>
         </div>
       </div>
       <nav className="tabs" aria-label="Módulos">
@@ -6306,272 +6643,221 @@ function CoordinatorApp({
           </button>
         ))}
       </nav>
+
       {tab === "inicio" && (
         <SalesDashboard
           sales={allowedSales}
           markets={allowedMarkets}
           users={allowedUsers}
-          movements={movements}
+          movements={allowedMovements}
           productPrices={productPrices}
           onViewSales={() => setTab("ventas")}
           onExport={exportSales}
         />
       )}
-      {tab === "almacen" && <WarehouseCatalog notify={notify} user={user} />}
+
+      {tab === "almacen" && (
+        <WarehouseCatalog
+          notify={notify}
+          user={user}
+          readOnly
+          allowedWarehouseIds={allowedWarehouseIds}
+        />
+      )}
+
       {tab === "mercados" && (
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Mercados asignados</h2>
-              <p>Solo se muestran las zonas asociadas a este coordinador.</p>
+              <h2>Mercados</h2>
+              <p>Consulta de mercados asignados. Sin permisos de edición.</p>
             </div>
+            <DownloadAction onClick={exportMarkets} />
           </div>
           <div className="panel-body">
             <div className="data-table">
               <div className="table-row header">
-                <span>Mercado</span>
-                <span>Región</span>
-                <span>Departamento</span>
-                <span>Provincia</span>
-                <span>Distrito</span>
+                <span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span>
               </div>
-              {allowedMarkets.length ? (
-                allowedMarkets.map((market) => (
-                  <div className="table-row" key={market.id}>
-                    <span>
-                      <strong>{market.name}</strong>
-                      <small>{market.id}</small>
-                    </span>
-                    <span>{market.region || "—"}</span>
-                    <span>{market.department}</span>
-                    <span>{market.province}</span>
-                    <span>{market.district}</span>
-                  </div>
-                ))
-              ) : (
-                <Empty
-                  title="Sin mercados asignados"
-                  detail="Solicita al Analista una asignación de zonas."
-                />
-              )}
+              {allowedMarkets.map((market) => (
+                <div className="table-row" key={market.id}>
+                  <span><strong>{market.name}</strong><small>{market.id}</small></span>
+                  <span>{market.region || "—"}</span>
+                  <span>{market.department}</span>
+                  <span>{market.province}</span>
+                  <span>{market.district}</span>
+                </div>
+              ))}
             </div>
           </div>
         </section>
       )}
+
       {tab === "clientes" && (
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Clientes asignados</h2>
-              <p>Clientes activos dentro de tus mercados.</p>
+              <h2>Clientes</h2>
+              <p>Consulta de clientes de tus mercados.</p>
             </div>
+            <DownloadAction onClick={exportClients} />
           </div>
           <div className="panel-body">
             <div className="record-list">
-              {allowedClients.length ? (
-                allowedClients.map((client) => (
-                  <article className="record" key={client.id}>
-                    <span className="record-icon">
-                      <Store />
-                    </span>
-                    <div className="record-main">
-                      <strong>{client.name}</strong>
-                      <small>
-                        {client.code} · Categoría:{" "}
-                        {client.category || "SIN CATEGORÍA"}
-                      </small>
-                      <em>
-                        <MapPin />{" "}
-                        {marketMap[client.marketId]?.name || "Mercado"}
-                      </em>
-                    </div>
-                    <StatusPill status={client.status} />
-                  </article>
-                ))
-              ) : (
-                <Empty
-                  title="Sin clientes asignados"
-                  detail="No hay clientes registrados en tus zonas."
-                />
-              )}
+              {allowedClients.map((client) => (
+                <article className="record" key={client.id}>
+                  <span className="record-icon"><Store /></span>
+                  <div className="record-main">
+                    <strong>{client.name}</strong>
+                    <small>{client.code} · Categoría: {client.category || "SIN CATEGORÍA"}</small>
+                    <em><MapPin /> {marketMap[client.marketId]?.name || "Mercado"}</em>
+                  </div>
+                  <StatusPill status={client.status} />
+                </article>
+              ))}
             </div>
           </div>
         </section>
       )}
-      {tab === "usuarios" && (
+
+      {tab === "canjes" && (
         <section className="panel">
           <div className="panel-header">
-            <div>
-              <h2>Usuarios de tus zonas</h2>
-              <p>
-                Promotores y coordinadores vinculados a los mercados asignados.
-              </p>
-            </div>
+            <div><h2>Canjes</h2><p>Consulta de canjes registrados en tus zonas.</p></div>
+            <DownloadAction onClick={exportCanjes} />
           </div>
           <div className="panel-body">
             <div className="record-list">
-              {allowedUsers.length ? (
-                allowedUsers.map((current) => (
-                  <article className="record" key={current.id}>
-                    <span className="record-icon">
-                      <UserRound />
-                    </span>
-                    <div className="record-main">
-                      <strong>{current.name}</strong>
-                      <small>
-                        DNI {current.dni} · {current.roleLabel || current.role}
-                      </small>
-                      <em>
-                        <MapPin />{" "}
-                        {marketMap[current.marketId || ""]?.name ||
-                          "Mercado asignado"}
-                      </em>
-                    </div>
-                    <StatusPill status={current.status} />
-                  </article>
-                ))
-              ) : (
-                <Empty
-                  title="Sin usuarios asignados"
-                  detail="No hay usuarios vinculados a tus zonas."
-                />
-              )}
+              {allowedCanjes.map((sale) => (
+                <article className="record" key={sale.id}>
+                  <span className="record-icon"><Gift /></span>
+                  <div className="record-main">
+                    <strong>{sale.bonus}</strong>
+                    <small>{userMap[sale.promoterId]?.name || "Promotor"} · {clientMap[sale.clientId]?.name || "Cliente"}</small>
+                    <em>{marketMap[sale.marketId]?.name || "Mercado"} · {formatDate(sale.date)}</em>
+                  </div>
+                  <StatusPill status={sale.status} />
+                </article>
+              ))}
             </div>
           </div>
         </section>
       )}
+
+      {tab === "degustacion" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div><h2>Degustación</h2><p>Consulta de consumos registrados en tus zonas.</p></div>
+            <DownloadAction onClick={exportDegustacion} />
+          </div>
+          <div className="panel-body">
+            <div className="record-list">
+              {allowedDegustaciones.map((movement) => {
+                const productId = movement.degustacionProductId || "PANETON_900G";
+                const quantity = Math.max(0, Number(movement.quantity) || 0);
+                return (
+                  <article className="record" key={movement.id}>
+                    <span className="record-icon"><PackageCheck /></span>
+                    <div className="record-main">
+                      <strong>{productId === "PANETON_85G" ? "Panetón 85 g" : "Panetón 900 g"} · {quantity}</strong>
+                      <small>{userMap[movement.promoterId || movement.actorId]?.name || "Promotor"}</small>
+                      <em>{marketMap[movement.marketId]?.name || "Mercado"} · {formatDate(movement.date)}</em>
+                    </div>
+                    <StatusPill status={movement.status} />
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "asignaciones" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div><h2>Asignaciones</h2><p>Consulta de asignaciones de promotores en tus zonas.</p></div>
+            <DownloadAction onClick={exportAssignments} />
+          </div>
+          <div className="panel-body">
+            <div className="record-list">
+              {allowedAssignments.map((item) => {
+                const promoter = users.find((current) =>
+                  assignmentMatchesUser(item, current),
+                );
+                return (
+                  <article className="record" key={item.promoterId}>
+                    <span className="record-icon"><UserRound /></span>
+                    <div className="record-main">
+                      <strong>{promoter?.name || "Promotor no identificado"}</strong>
+                      <small>{promoter?.dni || item.promoterDni || ""} · {promoter?.roleLabel || promoter?.role || ""}</small>
+                      <em>{item.marketIds.map((id) => marketMap[id]?.name || id).join(" · ")}</em>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       {tab === "ventas" && (
         <section className="panel">
           <div className="panel-header">
-            <div>
-              <h2>Ventas de tus zonas</h2>
-              <p>Registros asociados a los mercados y clientes asignados.</p>
-            </div>
-            <Btn variant="outline" onClick={exportSales}>
-              <Download /> Descargar
-            </Btn>
+            <div><h2>Ventas</h2><p>Consulta de ventas de tus zonas.</p></div>
+            <DownloadAction onClick={exportSales} />
           </div>
           <div className="panel-body">
-            {allowedSales.length ? (
-              <div className="record-list">
-                {allowedSales.map((sale) => {
-                  const promoter = users.find(
-                    (current) => current.id === sale.promoterId,
-                  );
-                  return (
-                    <article className="record" key={sale.id}>
-                      <span className="record-icon">
-                        <ShoppingBag />
-                      </span>
-                      <div className="record-main">
-                        <strong>
-                          {allowedClients.find(
-                            (client) => client.id === sale.clientId,
-                          )?.name || "Cliente"}
-                        </strong>
-                        <small>
-                          {promoter?.name || "Promotor no identificado"} · Rol:{" "}
-                          {sale.promoterRoleLabel ||
-                            promoter?.roleLabel ||
-                            sale.promoterRole ||
-                            promoter?.role ||
-                            "—"}
-                        </small>
-                        <em>
-                          {marketMap[sale.marketId]?.name || "Mercado"} ·{" "}
-                          {sale.units} unidades ·{" "}
-                          {formatSoles(sale.amountSoles)} ·{" "}
-                          {formatDate(sale.date)}
-                        </em>
-                        <div className="record-photos">
-                          <PhotoThumbnail
-                            label="Boleta"
-                            src={sale.receiptPhoto}
-                          />
-                          {sale.exchangePhoto && (
-                            <PhotoThumbnail
-                              label="Canje"
-                              src={sale.exchangePhoto}
-                            />
-                          )}
-                        </div>
-                      </div>
-                      <StatusPill status={sale.status} />
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <Empty
-                title="Sin ventas en tus zonas"
-                detail="Los registros aparecerán cuando se registren ventas."
-              />
-            )}
+            <div className="record-list">
+              {allowedSales.map((sale) => (
+                <article className="record" key={sale.id}>
+                  <span className="record-icon"><ShoppingBag /></span>
+                  <div className="record-main">
+                    <strong>{clientMap[sale.clientId]?.name || "Cliente"}</strong>
+                    <small>{userMap[sale.promoterId]?.name || "Promotor"} · {sale.mode}</small>
+                    <em>{marketMap[sale.marketId]?.name || "Mercado"} · {formatSoles(sale.amountSoles)} · {formatDate(sale.date)}</em>
+                    <div className="record-photos">
+                      <PhotoThumbnail label="Boleta" src={sale.receiptPhoto} />
+                      {sale.exchangePhoto && <PhotoThumbnail label="Canje" src={sale.exchangePhoto} />}
+                    </div>
+                  </div>
+                  <StatusPill status={sale.status} />
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       )}
-      {tab === "inventario" && (
+
+      {tab === "marcaciones" && (
         <section className="panel">
           <div className="panel-header">
-            <div>
-              <h2>Stock de promotores</h2>
-              <p>
-                Consulta las existencias personales de los promotores de tus
-                zonas.
-              </p>
-            </div>
+            <div><h2>Marcaciones</h2><p>Consulta de entradas y salidas de tus zonas.</p></div>
+            <DownloadAction onClick={exportAttendance} />
           </div>
           <div className="panel-body">
-            {allowedUsers.filter((current) => isPromoterRole(current.role))
-              .length ? (
-              <div className="stock-reconciliation-table inventory-stock-table">
-                <div className="stock-reconciliation-row header">
-                  <span>Promotor</span>
-                  <span>Degustación personal</span>
-                  {redemptionItems.map((item) => (
-                    <span key={item.id}>{item.label}</span>
-                  ))}
-                </div>
-                {allowedUsers
-                  .filter((current) => isPromoterRole(current.role))
-                  .map((current) => {
-                    const stock = calculatedPromoterStock(
-                      current.id,
-                      sales,
-                      movements,
-                    );
-                    return (
-                      <div
-                        className="stock-reconciliation-row"
-                        key={current.id}
-                      >
-                        <div>
-                          <strong>{current.name}</strong>
-                          <small>
-                            DNI {current.dni} ·{" "}
-                            {current.roleLabel || current.role}
-                          </small>
-                        </div>
-                        <b>
-                          {stock.tastingStock}
-                          <small>panetones</small>
-                        </b>
-                        {redemptionItems.map((item) => (
-                          <span key={item.id}>
-                            {stock.redemptionStock[item.id]}
-                            <small>unidades</small>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-              </div>
-            ) : (
-              <Empty
-                title="Sin promotores asignados"
-                detail="No hay promotores vinculados a tus zonas."
-              />
-            )}
+            <div className="record-list">
+              {allowedAttendance.map((item) => (
+                <article className="record" key={item.id}>
+                  <span className="record-icon"><MapPin /></span>
+                  <div className="record-main">
+                    <strong>{item.type} · {userMap[item.promoterId]?.name || "Promotor"}</strong>
+                    <small>{item.clientId ? clientMap[item.clientId]?.name || "Cliente" : "Sin cliente"} · {marketMap[item.marketId]?.name || "Mercado"}</small>
+                    <em>{formatDate(item.date)}</em>
+                  </div>
+                  <StatusPill status={item.status} />
+                </article>
+              ))}
+              {allowedClosures.filter((closure) => closure.automatic || closure.closureType === "AUTOMATICO").map((closure) => (
+                <article className="record" key={closure.id}>
+                  <span className="record-icon"><CheckCircle2 /></span>
+                  <div className="record-main">
+                    <strong>Cierre automático · {userMap[closure.promoterId]?.name || "Promotor"}</strong>
+                    <small>{marketMap[closure.marketId]?.name || "Mercado"}</small>
+                    <em>{formatDate(closure.date)}</em>
+                  </div>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       )}
@@ -6696,7 +6982,7 @@ function AnalystApp({
         headers: {
           "Content-Type": "application/json",
           "x-admin-dni": user.dni,
-          "x-admin-key": user.password || "",
+          "x-admin-key": sessionAdminKey(user),
         },
         body: JSON.stringify({ decision }),
       });
@@ -6791,10 +7077,11 @@ function AnalystApp({
         users={users}
         clients={clients}
         sales={sales}
-        inventory={inventory}
         movements={movements}
         assignments={assignments}
         productPrices={productPrices}
+        attendance={attendance}
+        closures={closures}
         notify={notify}
       />
     );
@@ -7644,7 +7931,7 @@ function AnalystApp({
   const adminRequest = async (path: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     headers.set("X-Admin-Dni", user.dni);
-    headers.set("X-Admin-Key", user.password || "");
+    headers.set("X-Admin-Key", sessionAdminKey(user));
     const catalogRevision = localStorage.getItem(CATALOG_REVISION_STORE_KEY);
     if (catalogRevision) headers.set("X-Catalog-Revision", catalogRevision);
     const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, {
@@ -12166,10 +12453,15 @@ export default function App() {
         : current,
     );
   };
-  const activeUser = useMemo(
-    () => (user ? users.find((item) => item.dni === user.dni) || user : null),
-    [user, users],
-  );
+  const activeUser = useMemo(() => {
+    if (!user) return null;
+    const catalogUser = users.find((item) => item.dni === user.dni);
+    if (!catalogUser) return user;
+    return {
+      ...catalogUser,
+      password: user.password || catalogUser.password,
+    };
+  }, [user, users]);
   const logoutImmediately = () => {
     localStorage.removeItem("bt-session");
     setPromoterSession({ marketId: "", clientId: "" });
