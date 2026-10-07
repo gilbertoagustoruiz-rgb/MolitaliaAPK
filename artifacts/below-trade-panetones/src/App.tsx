@@ -6167,7 +6167,8 @@ function CoordinatorApp({
   users,
   clients,
   sales,
-  inventory,
+  attendance,
+  closures,
   movements,
   assignments,
   productPrices,
@@ -6178,7 +6179,8 @@ function CoordinatorApp({
   users: AppUser[];
   clients: Client[];
   sales: Sale[];
-  inventory: MarketInventory[];
+  attendance: Attendance[];
+  closures: SessionClosure[];
   movements: InventoryMovement[];
   assignments: PromoterAssignment[];
   productPrices: ProductPrice[];
@@ -6222,30 +6224,97 @@ function CoordinatorApp({
   const allowedUsers = users.filter(
     (current) =>
       !isArchivedUser(current) &&
-      (current.id === user.id ||
-        userMarketIds(current).some((marketId) =>
-          allowedMarketIds.has(marketId),
-        )),
+      userMarketIds(current).some((marketId) => allowedMarketIds.has(marketId)),
   );
+  const allowedUserIds = new Set(allowedUsers.map((current) => current.id));
   const allowedSales = sales.filter(
     (sale) =>
       allowedMarketIds.has(sale.marketId) &&
       allowedClientIds.has(sale.clientId),
   );
+  const allowedAttendance = attendance.filter(
+    (item) =>
+      allowedMarketIds.has(item.marketId) &&
+      (!item.clientId || allowedClientIds.has(item.clientId)),
+  );
+  const allowedClosures = closures.filter((item) =>
+    allowedMarketIds.has(item.marketId),
+  );
+  const allowedMovements = movements.filter((item) =>
+    allowedMarketIds.has(item.marketId),
+  );
+  const allowedCanjes = allowedSales.filter((sale) => Boolean(sale.bonus));
+  const allowedDegustaciones = allowedMovements.filter(
+    (movement) => movement.kind === "DEGUSTACION",
+  );
+  const allowedAssignments = assignments.filter((item) => {
+    const promoter = users.find((current) =>
+      assignmentMatchesUser(item, current),
+    );
+    return Boolean(
+      promoter &&
+        isPromoterRole(promoter.role) &&
+        item.marketIds.some((marketId) => allowedMarketIds.has(marketId)),
+    );
+  });
   const marketMap = Object.fromEntries(
     allowedMarkets.map((market) => [market.id, market]),
   );
+  const clientMap = Object.fromEntries(
+    allowedClients.map((client) => [client.id, client]),
+  );
+  const userMap = Object.fromEntries(
+    users.map((current) => [current.id, current]),
+  );
+  const allowedWarehouseIds = allowedMarkets
+    .map((market) => market.warehouseId)
+    .filter((id): id is string => Boolean(id));
+
   const allowedTabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
-    ["clientes", "Clientes"],
-    ["usuarios", "Usuarios"],
-    ["ventas", "Ventas"],
     ["almacen", "Almacén"],
+    ["clientes", "Clientes"],
+    ["canjes", "Canjes"],
+    ["degustacion", "Degustación"],
+    ["asignaciones", "Asignaciones"],
+    ["ventas", "Ventas"],
+    ["marcaciones", "Marcaciones"],
   ];
+
+  const exportMarkets = () => {
+    downloadCsv(
+      \`mercados-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      ["Código", "Mercado", "Región", "Departamento", "Provincia", "Distrito", "Almacén"],
+      allowedMarkets.map((market) => [
+        market.id,
+        market.name,
+        market.region || "",
+        market.department,
+        market.province,
+        market.district,
+        market.warehouseId || "",
+      ]),
+    );
+    notify("Mercados descargados");
+  };
+  const exportClients = () => {
+    downloadCsv(
+      \`clientes-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      ["Código", "Cliente", "Categoría", "Mercado", "Estado"],
+      allowedClients.map((client) => [
+        client.code,
+        client.name,
+        client.category || "",
+        marketMap[client.marketId]?.name || "",
+        client.status,
+      ]),
+    );
+    notify("Clientes descargados");
+  };
   const exportSales = () => {
     downloadCsv(
-      `ventas-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      \`ventas-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
       [
         "Código",
         "Fecha",
@@ -6255,14 +6324,14 @@ function CoordinatorApp({
         "Nombre cliente final",
         "Mercado",
         "Unidades",
+        "Planchas",
         "Total",
+        "Canje",
         "Link foto boleta",
         "Link foto canje",
       ],
       allowedSales.map((sale) => {
-        const promoter = users.find(
-          (current) => current.id === sale.promoterId,
-        );
+        const promoter = userMap[sale.promoterId];
         return [
           sale.id,
           formatDate(sale.date),
@@ -6272,306 +6341,341 @@ function CoordinatorApp({
             sale.promoterRole ||
             promoter?.role ||
             "",
-          allowedClients.find((client) => client.id === sale.clientId)?.name ||
-            "",
+          clientMap[sale.clientId]?.name || "",
           sale.finalClientName || "",
           marketMap[sale.marketId]?.name || "",
           sale.units,
+          sale.planchas || 0,
           formatSoles(sale.amountSoles),
+          sale.bonus || "",
           photoExportLink(sale.receiptPhoto),
           photoExportLink(sale.exchangePhoto),
         ];
       }),
     );
-    notify("Reporte de ventas de las zonas descargado");
+    notify("Ventas descargadas");
   };
+  const exportCanjes = () => {
+    downloadCsv(
+      \`canjes-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Canje", "Cantidad", "Foto"],
+      allowedCanjes.map((sale) => [
+        sale.id,
+        formatDate(sale.date),
+        userMap[sale.promoterId]?.name || "No identificado",
+        marketMap[sale.marketId]?.name || "",
+        clientMap[sale.clientId]?.name || "",
+        sale.bonus || "",
+        sale.redemptionCount || 1,
+        photoExportLink(sale.exchangePhoto),
+      ]),
+    );
+    notify("Canjes descargados");
+  };
+  const exportDegustacion = () => {
+    downloadCsv(
+      \`degustacion-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      ["Código", "Fecha", "Promotor", "Mercado", "Producto", "Cantidad", "Contactos"],
+      allowedDegustaciones.map((movement) => {
+        const productId = movement.degustacionProductId || "PANETON_900G";
+        const quantity = Math.max(0, Number(movement.quantity) || 0);
+        const leads = productId === "PANETON_85G" ? quantity * 10 : quantity * 80;
+        return [
+          movement.id,
+          formatDate(movement.date),
+          userMap[movement.promoterId || movement.actorId]?.name || "No identificado",
+          marketMap[movement.marketId]?.name || "",
+          productId === "PANETON_85G" ? "Panetón 85 g" : "Panetón 900 g",
+          quantity,
+          leads,
+        ];
+      }),
+    );
+    notify("Degustación descargada");
+  };
+  const exportAssignments = () => {
+    downloadCsv(
+      \`asignaciones-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      ["Promotor", "DNI", "Rol", "Mercados", "Clientes"],
+      allowedAssignments.map((item) => {
+        const promoter = users.find((current) =>
+          assignmentMatchesUser(item, current),
+        );
+        return [
+          promoter?.name || "No identificado",
+          promoter?.dni || item.promoterDni || "",
+          promoter?.roleLabel || promoter?.role || "",
+          item.marketIds.map((id) => marketMap[id]?.name || id).join(" | "),
+          item.clientIds.map((id) => clientMap[id]?.name || id).join(" | "),
+        ];
+      }),
+    );
+    notify("Asignaciones descargadas");
+  };
+  const exportAttendance = () => {
+    downloadCsv(
+      \`marcaciones-coordinador-\${new Date().toISOString().slice(0, 10)}.csv\`,
+      ["Código", "Fecha", "Promotor", "DNI", "Tipo", "Mercado", "Cliente", "Estado", "Foto"],
+      allowedAttendance.map((item) => {
+        const promoter = userMap[item.promoterId];
+        return [
+          item.id,
+          formatDate(item.date),
+          promoter?.name || "No identificado",
+          promoter?.dni || "",
+          item.type,
+          marketMap[item.marketId]?.name || "",
+          item.clientId ? clientMap[item.clientId]?.name || item.clientId : "",
+          item.status,
+          photoExportLink(item.photo),
+        ];
+      }),
+    );
+    notify("Marcaciones descargadas");
+  };
+
+  const DownloadAction = ({ onClick }: { onClick: () => void }) => (
+    <Btn variant="outline" onClick={onClick}>
+      <Download /> Descargar
+    </Btn>
+  );
+
   return (
     <main className="workspace">
       <div className="page-head">
         <div>
           <span className="eyebrow">PANEL DE COORDINACIÓN</span>
           <h1>Hola, {user.name}</h1>
-          <p>Consulta la información de tus mercados y clientes asignados.</p>
+          <p>Consulta y descarga la información de tus zonas. Este perfil es solo lectura.</p>
         </div>
       </div>
       <nav className="tabs" aria-label="Módulos">
         {allowedTabs.map(([value, label]) => (
           <button
             key={value}
-            className={`tab ${tab === value ? "active" : ""}`}
+            className={\`tab \${tab === value ? "active" : ""}\`}
             onClick={() => setTab(value)}
-            data-testid={`tab-coordinator-${value}`}
+            data-testid={\`tab-coordinator-\${value}\`}
           >
             {label}
           </button>
         ))}
       </nav>
+
       {tab === "inicio" && (
         <SalesDashboard
           sales={allowedSales}
           markets={allowedMarkets}
           users={allowedUsers}
-          movements={movements}
+          movements={allowedMovements}
           productPrices={productPrices}
           onViewSales={() => setTab("ventas")}
           onExport={exportSales}
         />
       )}
-      {tab === "almacen" && <WarehouseCatalog notify={notify} user={user} />}
+
+      {tab === "almacen" && (
+        <WarehouseCatalog
+          notify={notify}
+          user={user}
+          readOnly
+          allowedWarehouseIds={allowedWarehouseIds}
+        />
+      )}
+
       {tab === "mercados" && (
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Mercados asignados</h2>
-              <p>Solo se muestran las zonas asociadas a este coordinador.</p>
+              <h2>Mercados</h2>
+              <p>Consulta de mercados asignados. Sin permisos de edición.</p>
             </div>
+            <DownloadAction onClick={exportMarkets} />
           </div>
           <div className="panel-body">
             <div className="data-table">
               <div className="table-row header">
-                <span>Mercado</span>
-                <span>Región</span>
-                <span>Departamento</span>
-                <span>Provincia</span>
-                <span>Distrito</span>
+                <span>Mercado</span><span>Región</span><span>Departamento</span><span>Provincia</span><span>Distrito</span>
               </div>
-              {allowedMarkets.length ? (
-                allowedMarkets.map((market) => (
-                  <div className="table-row" key={market.id}>
-                    <span>
-                      <strong>{market.name}</strong>
-                      <small>{market.id}</small>
-                    </span>
-                    <span>{market.region || "—"}</span>
-                    <span>{market.department}</span>
-                    <span>{market.province}</span>
-                    <span>{market.district}</span>
-                  </div>
-                ))
-              ) : (
-                <Empty
-                  title="Sin mercados asignados"
-                  detail="Solicita al Analista una asignación de zonas."
-                />
-              )}
+              {allowedMarkets.map((market) => (
+                <div className="table-row" key={market.id}>
+                  <span><strong>{market.name}</strong><small>{market.id}</small></span>
+                  <span>{market.region || "—"}</span>
+                  <span>{market.department}</span>
+                  <span>{market.province}</span>
+                  <span>{market.district}</span>
+                </div>
+              ))}
             </div>
           </div>
         </section>
       )}
+
       {tab === "clientes" && (
         <section className="panel">
           <div className="panel-header">
             <div>
-              <h2>Clientes asignados</h2>
-              <p>Clientes activos dentro de tus mercados.</p>
+              <h2>Clientes</h2>
+              <p>Consulta de clientes de tus mercados.</p>
             </div>
+            <DownloadAction onClick={exportClients} />
           </div>
           <div className="panel-body">
             <div className="record-list">
-              {allowedClients.length ? (
-                allowedClients.map((client) => (
-                  <article className="record" key={client.id}>
-                    <span className="record-icon">
-                      <Store />
-                    </span>
-                    <div className="record-main">
-                      <strong>{client.name}</strong>
-                      <small>
-                        {client.code} · Categoría:{" "}
-                        {client.category || "SIN CATEGORÍA"}
-                      </small>
-                      <em>
-                        <MapPin />{" "}
-                        {marketMap[client.marketId]?.name || "Mercado"}
-                      </em>
-                    </div>
-                    <StatusPill status={client.status} />
-                  </article>
-                ))
-              ) : (
-                <Empty
-                  title="Sin clientes asignados"
-                  detail="No hay clientes registrados en tus zonas."
-                />
-              )}
+              {allowedClients.map((client) => (
+                <article className="record" key={client.id}>
+                  <span className="record-icon"><Store /></span>
+                  <div className="record-main">
+                    <strong>{client.name}</strong>
+                    <small>{client.code} · Categoría: {client.category || "SIN CATEGORÍA"}</small>
+                    <em><MapPin /> {marketMap[client.marketId]?.name || "Mercado"}</em>
+                  </div>
+                  <StatusPill status={client.status} />
+                </article>
+              ))}
             </div>
           </div>
         </section>
       )}
-      {tab === "usuarios" && (
+
+      {tab === "canjes" && (
         <section className="panel">
           <div className="panel-header">
-            <div>
-              <h2>Usuarios de tus zonas</h2>
-              <p>
-                Promotores y coordinadores vinculados a los mercados asignados.
-              </p>
-            </div>
+            <div><h2>Canjes</h2><p>Consulta de canjes registrados en tus zonas.</p></div>
+            <DownloadAction onClick={exportCanjes} />
           </div>
           <div className="panel-body">
             <div className="record-list">
-              {allowedUsers.length ? (
-                allowedUsers.map((current) => (
-                  <article className="record" key={current.id}>
-                    <span className="record-icon">
-                      <UserRound />
-                    </span>
-                    <div className="record-main">
-                      <strong>{current.name}</strong>
-                      <small>
-                        DNI {current.dni} · {current.roleLabel || current.role}
-                      </small>
-                      <em>
-                        <MapPin />{" "}
-                        {marketMap[current.marketId || ""]?.name ||
-                          "Mercado asignado"}
-                      </em>
-                    </div>
-                    <StatusPill status={current.status} />
-                  </article>
-                ))
-              ) : (
-                <Empty
-                  title="Sin usuarios asignados"
-                  detail="No hay usuarios vinculados a tus zonas."
-                />
-              )}
+              {allowedCanjes.map((sale) => (
+                <article className="record" key={sale.id}>
+                  <span className="record-icon"><Gift /></span>
+                  <div className="record-main">
+                    <strong>{sale.bonus}</strong>
+                    <small>{userMap[sale.promoterId]?.name || "Promotor"} · {clientMap[sale.clientId]?.name || "Cliente"}</small>
+                    <em>{marketMap[sale.marketId]?.name || "Mercado"} · {formatDate(sale.date)}</em>
+                  </div>
+                  <StatusPill status={sale.status} />
+                </article>
+              ))}
             </div>
           </div>
         </section>
       )}
+
+      {tab === "degustacion" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div><h2>Degustación</h2><p>Consulta de consumos registrados en tus zonas.</p></div>
+            <DownloadAction onClick={exportDegustacion} />
+          </div>
+          <div className="panel-body">
+            <div className="record-list">
+              {allowedDegustaciones.map((movement) => {
+                const productId = movement.degustacionProductId || "PANETON_900G";
+                const quantity = Math.max(0, Number(movement.quantity) || 0);
+                return (
+                  <article className="record" key={movement.id}>
+                    <span className="record-icon"><PackageCheck /></span>
+                    <div className="record-main">
+                      <strong>{productId === "PANETON_85G" ? "Panetón 85 g" : "Panetón 900 g"} · {quantity}</strong>
+                      <small>{userMap[movement.promoterId || movement.actorId]?.name || "Promotor"}</small>
+                      <em>{marketMap[movement.marketId]?.name || "Mercado"} · {formatDate(movement.date)}</em>
+                    </div>
+                    <StatusPill status={movement.status} />
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "asignaciones" && (
+        <section className="panel">
+          <div className="panel-header">
+            <div><h2>Asignaciones</h2><p>Consulta de asignaciones de promotores en tus zonas.</p></div>
+            <DownloadAction onClick={exportAssignments} />
+          </div>
+          <div className="panel-body">
+            <div className="record-list">
+              {allowedAssignments.map((item) => {
+                const promoter = users.find((current) =>
+                  assignmentMatchesUser(item, current),
+                );
+                return (
+                  <article className="record" key={item.promoterId}>
+                    <span className="record-icon"><UserRound /></span>
+                    <div className="record-main">
+                      <strong>{promoter?.name || "Promotor no identificado"}</strong>
+                      <small>{promoter?.dni || item.promoterDni || ""} · {promoter?.roleLabel || promoter?.role || ""}</small>
+                      <em>{item.marketIds.map((id) => marketMap[id]?.name || id).join(" · ")}</em>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       {tab === "ventas" && (
         <section className="panel">
           <div className="panel-header">
-            <div>
-              <h2>Ventas de tus zonas</h2>
-              <p>Registros asociados a los mercados y clientes asignados.</p>
-            </div>
-            <Btn variant="outline" onClick={exportSales}>
-              <Download /> Descargar
-            </Btn>
+            <div><h2>Ventas</h2><p>Consulta de ventas de tus zonas.</p></div>
+            <DownloadAction onClick={exportSales} />
           </div>
           <div className="panel-body">
-            {allowedSales.length ? (
-              <div className="record-list">
-                {allowedSales.map((sale) => {
-                  const promoter = users.find(
-                    (current) => current.id === sale.promoterId,
-                  );
-                  return (
-                    <article className="record" key={sale.id}>
-                      <span className="record-icon">
-                        <ShoppingBag />
-                      </span>
-                      <div className="record-main">
-                        <strong>
-                          {allowedClients.find(
-                            (client) => client.id === sale.clientId,
-                          )?.name || "Cliente"}
-                        </strong>
-                        <small>
-                          {promoter?.name || "Promotor no identificado"} · Rol:{" "}
-                          {sale.promoterRoleLabel ||
-                            promoter?.roleLabel ||
-                            sale.promoterRole ||
-                            promoter?.role ||
-                            "—"}
-                        </small>
-                        <em>
-                          {marketMap[sale.marketId]?.name || "Mercado"} ·{" "}
-                          {sale.units} unidades ·{" "}
-                          {formatSoles(sale.amountSoles)} ·{" "}
-                          {formatDate(sale.date)}
-                        </em>
-                        <div className="record-photos">
-                          <PhotoThumbnail
-                            label="Boleta"
-                            src={sale.receiptPhoto}
-                          />
-                          {sale.exchangePhoto && (
-                            <PhotoThumbnail
-                              label="Canje"
-                              src={sale.exchangePhoto}
-                            />
-                          )}
-                        </div>
-                      </div>
-                      <StatusPill status={sale.status} />
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <Empty
-                title="Sin ventas en tus zonas"
-                detail="Los registros aparecerán cuando se registren ventas."
-              />
-            )}
+            <div className="record-list">
+              {allowedSales.map((sale) => (
+                <article className="record" key={sale.id}>
+                  <span className="record-icon"><ShoppingBag /></span>
+                  <div className="record-main">
+                    <strong>{clientMap[sale.clientId]?.name || "Cliente"}</strong>
+                    <small>{userMap[sale.promoterId]?.name || "Promotor"} · {sale.mode}</small>
+                    <em>{marketMap[sale.marketId]?.name || "Mercado"} · {formatSoles(sale.amountSoles)} · {formatDate(sale.date)}</em>
+                    <div className="record-photos">
+                      <PhotoThumbnail label="Boleta" src={sale.receiptPhoto} />
+                      {sale.exchangePhoto && <PhotoThumbnail label="Canje" src={sale.exchangePhoto} />}
+                    </div>
+                  </div>
+                  <StatusPill status={sale.status} />
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       )}
-      {tab === "inventario" && (
+
+      {tab === "marcaciones" && (
         <section className="panel">
           <div className="panel-header">
-            <div>
-              <h2>Stock de promotores</h2>
-              <p>
-                Consulta las existencias personales de los promotores de tus
-                zonas.
-              </p>
-            </div>
+            <div><h2>Marcaciones</h2><p>Consulta de entradas y salidas de tus zonas.</p></div>
+            <DownloadAction onClick={exportAttendance} />
           </div>
           <div className="panel-body">
-            {allowedUsers.filter((current) => isPromoterRole(current.role))
-              .length ? (
-              <div className="stock-reconciliation-table inventory-stock-table">
-                <div className="stock-reconciliation-row header">
-                  <span>Promotor</span>
-                  <span>Degustación personal</span>
-                  {redemptionItems.map((item) => (
-                    <span key={item.id}>{item.label}</span>
-                  ))}
-                </div>
-                {allowedUsers
-                  .filter((current) => isPromoterRole(current.role))
-                  .map((current) => {
-                    const stock = calculatedPromoterStock(
-                      current.id,
-                      sales,
-                      movements,
-                    );
-                    return (
-                      <div
-                        className="stock-reconciliation-row"
-                        key={current.id}
-                      >
-                        <div>
-                          <strong>{current.name}</strong>
-                          <small>
-                            DNI {current.dni} ·{" "}
-                            {current.roleLabel || current.role}
-                          </small>
-                        </div>
-                        <b>
-                          {stock.tastingStock}
-                          <small>panetones</small>
-                        </b>
-                        {redemptionItems.map((item) => (
-                          <span key={item.id}>
-                            {stock.redemptionStock[item.id]}
-                            <small>unidades</small>
-                          </span>
-                        ))}
-                      </div>
-                    );
-                  })}
-              </div>
-            ) : (
-              <Empty
-                title="Sin promotores asignados"
-                detail="No hay promotores vinculados a tus zonas."
-              />
-            )}
+            <div className="record-list">
+              {allowedAttendance.map((item) => (
+                <article className="record" key={item.id}>
+                  <span className="record-icon"><MapPin /></span>
+                  <div className="record-main">
+                    <strong>{item.type} · {userMap[item.promoterId]?.name || "Promotor"}</strong>
+                    <small>{item.clientId ? clientMap[item.clientId]?.name || "Cliente" : "Sin cliente"} · {marketMap[item.marketId]?.name || "Mercado"}</small>
+                    <em>{formatDate(item.date)}</em>
+                  </div>
+                  <StatusPill status={item.status} />
+                </article>
+              ))}
+              {allowedClosures.filter((closure) => closure.automatic || closure.closureType === "AUTOMATICO").map((closure) => (
+                <article className="record" key={closure.id}>
+                  <span className="record-icon"><CheckCircle2 /></span>
+                  <div className="record-main">
+                    <strong>Cierre automático · {userMap[closure.promoterId]?.name || "Promotor"}</strong>
+                    <small>{marketMap[closure.marketId]?.name || "Mercado"}</small>
+                    <em>{formatDate(closure.date)}</em>
+                  </div>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       )}
@@ -6795,6 +6899,8 @@ function AnalystApp({
         movements={movements}
         assignments={assignments}
         productPrices={productPrices}
+        attendance={attendance}
+        closures={closures}
         notify={notify}
       />
     );
@@ -12166,10 +12272,15 @@ export default function App() {
         : current,
     );
   };
-  const activeUser = useMemo(
-    () => (user ? users.find((item) => item.dni === user.dni) || user : null),
-    [user, users],
-  );
+  const activeUser = useMemo(() => {
+    if (!user) return null;
+    const catalogUser = users.find((item) => item.dni === user.dni);
+    if (!catalogUser) return user;
+    return {
+      ...catalogUser,
+      password: user.password || catalogUser.password,
+    };
+  }, [user, users]);
   const logoutImmediately = () => {
     localStorage.removeItem("bt-session");
     setPromoterSession({ marketId: "", clientId: "" });
