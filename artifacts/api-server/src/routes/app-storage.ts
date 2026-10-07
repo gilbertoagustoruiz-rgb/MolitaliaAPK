@@ -1311,6 +1311,135 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
     res.status(409).json({message:error instanceof Error?error.message:"No se pudo reconstruir el stock histórico."});
   } finally { db.release(); }
 });
+
+router.post("/app-storage/warehouses/regularize-september-zero-closures", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) {
+    res.status(403).json({
+      message: "Solo Admin o Analista puede regularizar cierres históricos.",
+    });
+    return;
+  }
+
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    await lockInventoryLedger(db as unknown as QueryClient);
+
+    const closures = await db.query(
+      `SELECT sc.id,sc.promoter_id,sc.market_id,sc.client_id,sc.closure_date,sc.data
+         FROM session_closures sc
+        WHERE sc.closure_date >= '2026-09-14T00:00:00.000-05:00'::timestamptz
+          AND sc.closure_date <= '2026-09-30T23:59:59.999-05:00'::timestamptz
+          AND COALESCE(sc.tasting_used,0)=0
+          AND NOT EXISTS (
+            SELECT 1
+              FROM inventory_movements im
+             WHERE im.kind='DEGUSTACION'
+               AND im.market_id=sc.market_id
+               AND COALESCE(im.data->>'promoterId',im.data->>'actorId','')=sc.promoter_id
+               AND im.movement_date BETWEEN sc.closure_date - interval '1 minute'
+                                        AND sc.closure_date + interval '1 minute'
+          )
+        ORDER BY sc.closure_date,sc.id
+        FOR UPDATE`,
+    );
+
+    let regularized = 0;
+    const byWarehouse: Record<string, number> = {};
+
+    for (const row of closures.rows) {
+      const closureId = String(row.id || "");
+      const promoterId = String(row.promoter_id || "");
+      const marketId = String(row.market_id || "");
+      const closureDate = new Date(String(row.closure_date)).toISOString();
+      if (!closureId || !promoterId || !marketId || !closureDate) {
+        throw new Error(`Cierre histórico incompleto: ${closureId || "sin id"}.`);
+      }
+
+      const warehouse = await warehouseForMarket(
+        db as unknown as QueryClient,
+        marketId,
+      );
+      const warehouseId = String(warehouse.id || "");
+      const warehouseName = String(warehouse.name || warehouseId);
+      byWarehouse[warehouseName] = (byWarehouse[warehouseName] || 0) + 1;
+
+      const movementId = `REG-SEP26-${closureId}`;
+      const existingMovement = await db.query(
+        "SELECT 1 FROM inventory_movements WHERE id=$1 LIMIT 1",
+        [movementId],
+      );
+      if (existingMovement.rows.length) continue;
+
+      await applyWarehouseStockMovement(
+        db as unknown as QueryClient,
+        marketId,
+        { PANETON_900G: 1 },
+        "DEGUSTACION",
+        promoterId,
+        `DEGUSTACION:${movementId}`,
+      );
+
+      const movement: StoredRecord = {
+        id: movementId,
+        marketId,
+        kind: "DEGUSTACION",
+        degustacionProductId: "PANETON_900G",
+        degustacionProductLabel: "Panetón 900 g",
+        quantity: 1,
+        actorId: promoterId,
+        promoterId,
+        date: closureDate,
+        status: "SINCRONIZADA",
+        regularization: "CIERRES_0_2026-09-14_2026-09-30",
+        regularizedBy: actor.id,
+        closureId,
+        updatedAt: new Date().toISOString(),
+      };
+      await upsertRecord(
+        db as unknown as QueryClient,
+        "movements",
+        movement,
+      );
+
+      await recalculateDegustacionClosure(
+        db as unknown as QueryClient,
+        promoterId,
+        marketId,
+        closureDate,
+      );
+      regularized += 1;
+    }
+
+    await db.query("COMMIT");
+    res.json({
+      regularized,
+      startDate: "2026-09-14",
+      endDate: "2026-09-30",
+      productId: "PANETON_900G",
+      quantityPerClosure: 1,
+      leadsPerClosure: 80,
+      byWarehouse,
+      snapshot: await readSnapshot(),
+    });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error(
+      { err: error },
+      "Unable to regularize September closures with zero tasting",
+    );
+    res.status(409).json({
+      message:
+        error instanceof Error
+          ? error.message
+          : "No se pudieron regularizar los cierres de septiembre.",
+    });
+  } finally {
+    db.release();
+  }
+});
+
 router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
   try {
     const warehouses = await pool.query("SELECT data,stock,market_ids FROM warehouses ORDER BY name");
