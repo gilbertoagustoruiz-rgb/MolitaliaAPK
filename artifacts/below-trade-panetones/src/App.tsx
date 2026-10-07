@@ -1363,6 +1363,14 @@ function mergeUsersByDni(current: AppUser[], incoming: AppUser[]) {
   });
   return Array.from(merged.values());
 }
+function sessionAdminKey(user: AppUser) {
+  const session = readStore<AppUser | null>("bt-session", null);
+  return (
+    user.password ||
+    (session?.dni === user.dni ? session.password : undefined) ||
+    ""
+  );
+}
 function formatDate(value: string) {
   return new Date(value).toLocaleString("es-PE", {
     dateStyle: "short",
@@ -5366,7 +5374,7 @@ function AssignmentModule({
         headers: {
           "Content-Type": "application/json",
           "x-admin-dni": user.dni,
-          "x-admin-key": user.password || "",
+          "x-admin-key": sessionAdminKey(user),
         },
         body: JSON.stringify({ assignment }),
       });
@@ -5437,7 +5445,7 @@ function AssignmentModule({
         headers: {
           "Content-Type": "application/json",
           "x-admin-dni": user.dni,
-          "x-admin-key": user.password || "",
+          "x-admin-key": sessionAdminKey(user),
         },
         body: JSON.stringify({ assignment }),
       });
@@ -6401,7 +6409,6 @@ function CoordinatorApp({
       !isArchivedUser(current) &&
       userMarketIds(current).some((marketId) => allowedMarketIds.has(marketId)),
   );
-  const allowedUserIds = new Set(allowedUsers.map((current) => current.id));
   const allowedSales = sales.filter(
     (sale) =>
       allowedMarketIds.has(sale.marketId) &&
@@ -6975,7 +6982,7 @@ function AnalystApp({
         headers: {
           "Content-Type": "application/json",
           "x-admin-dni": user.dni,
-          "x-admin-key": user.password || "",
+          "x-admin-key": sessionAdminKey(user),
         },
         body: JSON.stringify({ decision }),
       });
@@ -7070,7 +7077,6 @@ function AnalystApp({
         users={users}
         clients={clients}
         sales={sales}
-        inventory={inventory}
         movements={movements}
         assignments={assignments}
         productPrices={productPrices}
@@ -7925,7 +7931,7 @@ function AnalystApp({
   const adminRequest = async (path: string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
     headers.set("X-Admin-Dni", user.dni);
-    headers.set("X-Admin-Key", user.password || "");
+    headers.set("X-Admin-Key", sessionAdminKey(user));
     const catalogRevision = localStorage.getItem(CATALOG_REVISION_STORE_KEY);
     if (catalogRevision) headers.set("X-Catalog-Revision", catalogRevision);
     const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, {
