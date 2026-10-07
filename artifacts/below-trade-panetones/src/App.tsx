@@ -5232,6 +5232,7 @@ function AssignmentModule({
   const selectedPromoter = promoters.find(
     (promoter) => promoter.id === selectedPromoterId,
   );
+  const selectedIsCoordinator = selectedPromoter?.role === "COORDINADOR";
   const filteredPromoters = promoters.filter((promoter) =>
     `${promoter.name} ${promoter.dni}`
       .toLowerCase()
@@ -5264,11 +5265,12 @@ function AssignmentModule({
           ? [promoter.marketId]
           : [];
       return marketIds.flatMap<AssignmentRelationship>((marketId) => {
+        const isCoordinator = promoter.role === "COORDINADOR";
         const marketClients = clients.filter(
           (client) =>
             client.marketId === marketId &&
             client.status === "ACTIVO" &&
-            (!saved || saved.clientIds.includes(client.id)),
+            (isCoordinator || !saved || saved.clientIds.includes(client.id)),
         );
         return marketClients.length
           ? marketClients.map((client) => ({
@@ -5299,15 +5301,19 @@ function AssignmentModule({
         activeMarkets.some((market) => market.id === marketId),
       ),
     );
-    setSelectedClientIds(
-      saved?.clientIds ||
-        clients
-          .filter(
-            (client) =>
-              marketIds.includes(client.marketId) && client.status === "ACTIVO",
-          )
-          .map((client) => client.id),
-    );
+    if (promoter?.role === "COORDINADOR") {
+      setSelectedClientIds([]);
+    } else {
+      setSelectedClientIds(
+        saved?.clientIds ||
+          clients
+            .filter(
+              (client) =>
+                marketIds.includes(client.marketId) && client.status === "ACTIVO",
+            )
+            .map((client) => client.id),
+      );
+    }
   };
   const toggleMarket = (marketId: string) => {
     const enabled = selectedMarketIds.includes(marketId);
@@ -5357,7 +5363,7 @@ function AssignmentModule({
       notify("Selecciona al menos un mercado", true);
       return;
     }
-    if (!selectedClientIds.length) {
+    if (!selectedIsCoordinator && !selectedClientIds.length) {
       notify("Selecciona al menos un cliente", true);
       return;
     }
@@ -5365,7 +5371,7 @@ function AssignmentModule({
       promoterId: selectedPromoterId,
       promoterDni: selectedPromoter?.dni,
       marketIds: selectedMarketIds,
-      clientIds: selectedClientIds,
+      clientIds: selectedIsCoordinator ? [] : selectedClientIds,
       updatedAt: new Date().toISOString(),
     };
     try {
@@ -5658,13 +5664,55 @@ function AssignmentModule({
         <section className="panel assignment-card">
           <div className="panel-header">
             <div>
-              <h2>2. Elige sus clientes</h2>
-              <p>{selectedClientIds.length} clientes seleccionados.</p>
+              <h2>2. {selectedIsCoordinator ? "Clientes del mercado" : "Elige sus clientes"}</h2>
+              <p>
+                {selectedIsCoordinator
+                  ? "Para Coordinador, los clientes se habilitan automáticamente según sus mercados."
+                  : `${selectedClientIds.length} clientes seleccionados.`}
+              </p>
             </div>
             <Store />
           </div>
-          <div className="panel-body">
-            {selectedMarketIds.length ? (
+          <div className="panel-body assignment-client-panel-body">
+            {selectedIsCoordinator ? (
+              selectedMarketIds.length ? (
+                <div className="assignment-coordinator-scope">
+                  <div className="notice">
+                    <strong>Coordinador: asignación por mercado</strong>
+                    <p>
+                      No necesitas seleccionar clientes. Al guardar, podrá visualizar automáticamente
+                      todos los clientes, usuarios, ventas, marcaciones, canjes y degustaciones
+                      relacionados con los mercados seleccionados.
+                    </p>
+                  </div>
+                  <div className="assignment-client-groups">
+                    {selectedMarketIds.map((marketId) => {
+                      const market = markets.find((item) => item.id === marketId);
+                      const marketClients = clients.filter(
+                        (client) =>
+                          client.marketId === marketId &&
+                          client.status === "ACTIVO",
+                      );
+                      return (
+                        <div className="assignment-client-group" key={marketId}>
+                          <div className="assignment-group-head">
+                            <div>
+                              <strong>{market?.name || "Mercado"}</strong>
+                              <small>{marketClients.length} clientes activos incluidos automáticamente</small>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <Empty
+                  title="Selecciona un mercado"
+                  detail="El Coordinador tendrá acceso automático a todos los clientes de los mercados seleccionados."
+                />
+              )
+            ) : selectedMarketIds.length ? (
               <div className="assignment-client-groups">
                 {selectedMarketIds.map((marketId) => {
                   const market = markets.find((item) => item.id === marketId);
@@ -5749,7 +5797,7 @@ function AssignmentModule({
           disabled={
             !selectedPromoterId ||
             !selectedMarketIds.length ||
-            !selectedClientIds.length
+            (!selectedIsCoordinator && !selectedClientIds.length)
           }
           testId="button-save-assignment"
         >
