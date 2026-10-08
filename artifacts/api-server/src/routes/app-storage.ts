@@ -1402,6 +1402,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       if(warehouseId) warehouseByMarket.set(String(row.id),warehouseId);
     }
     const baseByWarehouse=new Map<string,Record<string,number>>();
+    const baseDateByWarehouse=new Map<string,string|null>();
     for(const warehouse of warehouses.rows){
       const warehouseId=String(warehouse.id);
       const correction=await db.query("SELECT data,movement_date FROM warehouse_movements WHERE warehouse_id=$1 AND kind='CORRECCION_IMPORTACION' ORDER BY movement_date DESC,created_at DESC LIMIT 1",[warehouseId]);
@@ -1424,6 +1425,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
         for(const row of recargas.rows) if(Object.prototype.hasOwnProperty.call(stock,String(row.item_id))) stock[String(row.item_id)]+=Math.max(0,Number(row.quantity)||0);
       }
       baseByWarehouse.set(warehouseId,stock);
+      baseDateByWarehouse.set(warehouseId,baseDate);
     }
     const normalizeWarehouseName=(input:unknown)=>String(input||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toUpperCase();
     const explicitAdjustments:Record<string,Record<string,number>>={
@@ -1444,6 +1446,33 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       }
       explicitAdjustmentsApplied++;
     }
+    const activeTransfers=await db.query(
+      "SELECT id,source_warehouse_id,destination_warehouse_id,items,transfer_date FROM transfers WHERE status='ACTIVO' ORDER BY transfer_date,id",
+    );
+    let transfersProcessed=0;
+    for(const transfer of activeTransfers.rows){
+      const transferDate=new Date(transfer.transfer_date).toISOString();
+      const sourceId=String(transfer.source_warehouse_id||"");
+      const destinationId=String(transfer.destination_warehouse_id||"");
+      const items=normalizeTransferItems(transfer.items);
+      const sourceStock=baseByWarehouse.get(sourceId);
+      const destinationStock=baseByWarehouse.get(destinationId);
+      const sourceBaseDate=baseDateByWarehouse.get(sourceId);
+      const destinationBaseDate=baseDateByWarehouse.get(destinationId);
+      const applySource=Boolean(sourceStock)&&(!sourceBaseDate||new Date(transferDate).getTime()>new Date(sourceBaseDate).getTime());
+      const applyDestination=Boolean(destinationStock)&&(!destinationBaseDate||new Date(transferDate).getTime()>new Date(destinationBaseDate).getTime());
+      for(const [itemId,quantity] of Object.entries(items)){
+        if(applySource&&sourceStock){
+          if((Number(sourceStock[itemId])||0)<quantity)
+            throw new Error(`Stock insuficiente de ${itemId} al reconstruir traslado ${transfer.id} desde almacén origen.`);
+          sourceStock[itemId]=(Number(sourceStock[itemId])||0)-quantity;
+        }
+        if(applyDestination&&destinationStock)
+          destinationStock[itemId]=(Number(destinationStock[itemId])||0)+quantity;
+      }
+      transfersProcessed++;
+    }
+
     const canjes=await db.query("SELECT id,market_id,item_id,quantity,data FROM inventory_movements WHERE kind='CANJE' ORDER BY movement_date,id");
     const saleIdsWithCanje=new Set<string>();
     let canjesProcessed=0,tastingsProcessed=0,skipped=0;
@@ -1502,7 +1531,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,warehouseId,movement.kind,"MULTI",0,actor.id,now,movement]);
     }
     await db.query("COMMIT");
-    res.json({warehousesRebuilt:baseByWarehouse.size,explicitAdjustmentsApplied,canjesProcessed,tastingsProcessed,skipped});
+    res.json({warehousesRebuilt:baseByWarehouse.size,explicitAdjustmentsApplied,transfersProcessed,canjesProcessed,tastingsProcessed,skipped});
   } catch(error) {
     await db.query("ROLLBACK").catch(()=>undefined);
     req.log.error({err:error},"Unable to rebuild warehouse consumption history");
