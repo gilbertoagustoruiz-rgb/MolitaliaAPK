@@ -10474,10 +10474,12 @@ function PromoterApp({
   const weightPerPlanchaKg =
     mode === "PLANCHAS" && planchas > 0 ? orderWeightKg / planchas : 0;
   const pricesValid =
-    mode === "UNIDADES"
-      ? unitPrice > 0
-      : normalizedPlanchaLines.length > 0 &&
-        normalizedPlanchaLines.every((line) => line.units > 0 && line.unitPrice > 0);
+    administrative
+      ? true
+      : mode === "UNIDADES"
+        ? unitPrice > 0
+        : normalizedPlanchaLines.length > 0 &&
+          normalizedPlanchaLines.every((line) => line.units > 0 && line.unitPrice > 0);
   const selectedWarehouse = warehouses.find(
     (warehouse) =>
       warehouse.id === selectedMarket?.warehouseId ||
@@ -10604,7 +10606,7 @@ function PromoterApp({
     receipt &&
     pricesValid &&
     Number.isFinite(saleAmount) &&
-    saleAmount > 0 &&
+    (administrative ? saleAmount >= 0 : saleAmount > 0) &&
     validUnitQty &&
     validMix &&
     (!exchangeEvidenceRequired ||
@@ -10814,7 +10816,7 @@ function PromoterApp({
       );
       return;
     }
-    if (!pricesValid) {
+    if (!administrative && !pricesValid) {
       notify(
         mode === "UNIDADES"
           ? "Ingresa un precio unitario mayor a S/ 0.00."
@@ -10836,9 +10838,11 @@ function PromoterApp({
             ? "Para registrar 3 canjes, agrega el comentario de la excepción."
             : bonus && missingRedemption
               ? `Stock insuficiente de ${redemptionLabel(missingRedemption[0])} para este canje`
-              : Number.isFinite(saleAmount) && saleAmount > 0
+              : Number.isFinite(saleAmount) && (administrative ? saleAmount >= 0 : saleAmount > 0)
                 ? "Completa venta y evidencias"
-                : "Ingresa un precio unitario mayor a S/ 0.00",
+                : administrative
+                  ? "Completa la información obligatoria de la venta."
+                  : "Ingresa un precio unitario mayor a S/ 0.00",
         true,
       );
       return;
@@ -11318,12 +11322,12 @@ function PromoterApp({
                 testId="input-sale-units"
               />
             </Field>
-            <Field label="Precio unitario (S/) *" className="full-field">
+            <Field label={administrative ? "Precio unitario (S/) · opcional" : "Precio unitario (S/) *"} className="full-field">
               <Input
                 type="number"
                 value={unitPriceSoles}
                 onChange={setUnitPriceSoles}
-                min={0.01}
+                min={administrative ? 0 : 0.01}
                 step={0.01}
                 placeholder="0.00"
                 testId="input-unit-price"
@@ -11449,7 +11453,7 @@ function PromoterApp({
                         min={1}
                       />
                     </Field>
-                    <Field label="Precio unitario (S/) *">
+                    <Field label={administrative ? "Precio unitario (S/) · opcional" : "Precio unitario (S/) *"}>
                       <Input
                         type="number"
                         value={line.unitPrice}
@@ -11458,7 +11462,7 @@ function PromoterApp({
                             current.map((item) => item.id === line.id ? { ...item, unitPrice: value } : item),
                           )
                         }
-                        min={0.01}
+                        min={administrative ? 0 : 0.01}
                         step={0.01}
                         placeholder="0.00"
                       />

@@ -3761,23 +3761,9 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error(
         "La cantidad no corresponde a la plancha. En minis de 80/85 g se permiten 24 und (1/2 plancha) o 48 und (1 plancha).",
       );
-    const amount =
-      mode === "PLANCHAS"
-        ? Object.entries(mix).reduce(
-            (sum, [brand, n]) => sum + Number(n) * Number(prices[brand] || 0),
-            0,
-          )
-        : units * Number(Object.values(prices)[0]);
-    if (
-      !(amount > 0) ||
-      !Number.isFinite(amount) ||
-      Math.abs(amount - Number(input.amountSoles)) > 0.01 ||
-      (mode === "PLANCHAS" &&
-        Object.entries(mix).some(
-          ([brand, n]) => Number(n) > 0 && !(Number(prices[brand]) > 0),
-        ))
-    )
-      throw new Error("Verifica los precios unitarios y el total.");
+    const amount = Number(input.amountSoles);
+    if (!Number.isFinite(amount) || amount < 0)
+      throw new Error("El importe de la venta no puede ser negativo.");
     const photoValid = (photo: string) => /^(https:\/\/|\/api\/)/.test(photo);
     const bonus = value(input, "bonus");
     if (
@@ -3931,12 +3917,12 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     !isRecord(input) ||
     !value(input, "clientId") ||
     !Number.isFinite(amountSoles) ||
-    amountSoles <= 0 ||
+    amountSoles < 0 ||
     Number.isNaN(saleDate.getTime())
   ) {
     res.status(400).json({
       message:
-        "La venta requiere cliente, fecha válida e importe mayor a cero.",
+        "La venta requiere cliente, fecha válida e importe no negativo.",
     });
     return;
   }
