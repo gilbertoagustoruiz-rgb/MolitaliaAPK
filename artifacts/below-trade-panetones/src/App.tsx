@@ -23,6 +23,7 @@ import {
   Store,
   Sun,
   Trash2,
+  Truck,
   Upload,
   UserRound,
   Users,
