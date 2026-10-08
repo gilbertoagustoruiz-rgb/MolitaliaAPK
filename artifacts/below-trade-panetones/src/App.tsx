@@ -3754,7 +3754,7 @@ function WarehouseTransfersModule({
     try {
       const isEdit = Boolean(editing);
       const url = isEdit
-        ? \`/api/app-storage/transfers/\${encodeURIComponent(editing!.id)}\`
+        ? `/api/app-storage/transfers/${encodeURIComponent(editing!.id)}`
         : "/api/app-storage/transfers";
       const response = await fetch(url, {
         method: isEdit ? "PUT" : "POST",
@@ -3783,14 +3783,14 @@ function WarehouseTransfersModule({
   const remove = async (transfer: WarehouseTransfer) => {
     if (
       !window.confirm(
-        \`¿Eliminar el traslado \${transfer.id}? El stock será revertido: volverá al almacén origen y se descontará del destino.\`,
+        `¿Eliminar el traslado ${transfer.id}? El stock será revertido: volverá al almacén origen y se descontará del destino.`,
       )
     )
       return;
     setLoading(true);
     try {
       const response = await fetch(
-        \`/api/app-storage/transfers/\${encodeURIComponent(transfer.id)}\`,
+        `/api/app-storage/transfers/${encodeURIComponent(transfer.id)}`,
         {
           method: "DELETE",
           headers: authHeaders(),
@@ -3815,7 +3815,7 @@ function WarehouseTransfersModule({
     warehouseTransferItems
       .map(([itemId, label]) => {
         const quantity = Math.max(0, Number(transfer.items?.[itemId]) || 0);
-        return quantity ? \`\${label}: \${quantity}\` : "";
+        return quantity ? `${label}: ${quantity}` : "";
       })
       .filter(Boolean)
       .join(" · ");
@@ -4034,7 +4034,7 @@ function WarehouseTransferModal({
         {warehouseTransferItems.map(([itemId, label]) => (
           <Field
             key={itemId}
-            label={\`\${label} · disponible origen: \${Number(source?.stock?.[itemId]) || 0}\`}
+            label={`${label} · disponible origen: ${Number(source?.stock?.[itemId]) || 0}`}
           >
             <Input
               type="number"
