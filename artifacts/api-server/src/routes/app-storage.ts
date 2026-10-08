@@ -1016,6 +1016,204 @@ async function authorizedWarehouseActor(req: Request) {
   return authorizedTradeActor(req);
 }
 
+
+const warehouseTransferItemIds = [
+  "PANETON_900G",
+  "PANETON_85G",
+  "AVENA",
+  "BATEA",
+  "MANDIL",
+  "SPAGHETTI",
+] as const;
+
+function normalizeTransferItems(input: unknown) {
+  const record = isRecord(input) ? input : {};
+  const items: Record<string, number> = {};
+  for (const itemId of warehouseTransferItemIds) {
+    const quantity = Math.max(0, Math.floor(Number(record[itemId]) || 0));
+    if (quantity > 0) items[itemId] = quantity;
+  }
+  return items;
+}
+
+async function lockTransferWarehouses(
+  db: QueryClient,
+  sourceWarehouseId: string,
+  destinationWarehouseId: string,
+) {
+  if (!sourceWarehouseId || !destinationWarehouseId)
+    throw new Error("Selecciona almacén origen y destino.");
+  if (sourceWarehouseId === destinationWarehouseId)
+    throw new Error("El almacén origen y destino deben ser diferentes.");
+  const ids = [sourceWarehouseId, destinationWarehouseId].sort();
+  const result = await db.query(
+    "SELECT id,name,status,stock,data FROM warehouses WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE",
+    [ids],
+  );
+  if (result.rows.length !== 2)
+    throw new Error("Uno de los almacenes no existe.");
+  const byId = new Map(result.rows.map((row) => [String(row.id), row]));
+  const source = byId.get(sourceWarehouseId);
+  const destination = byId.get(destinationWarehouseId);
+  if (!source || !destination)
+    throw new Error("No se pudieron identificar los almacenes del traslado.");
+  if (source.status !== "ACTIVO" || destination.status !== "ACTIVO")
+    throw new Error("Origen y destino deben estar activos.");
+  return { source, destination };
+}
+
+async function applyWarehouseTransfer(
+  db: QueryClient,
+  transferId: string,
+  sourceWarehouseId: string,
+  destinationWarehouseId: string,
+  items: Record<string, number>,
+  actorId: string,
+  movementDate: string,
+) {
+  const { source, destination } = await lockTransferWarehouses(
+    db,
+    sourceWarehouseId,
+    destinationWarehouseId,
+  );
+  const sourceStock = isRecord(source.stock) ? { ...source.stock } : {};
+  const destinationStock = isRecord(destination.stock) ? { ...destination.stock } : {};
+  const entries = Object.entries(items).filter(([, quantity]) => quantity > 0);
+  if (!entries.length) throw new Error("Ingresa al menos un producto para trasladar.");
+
+  for (const [itemId, quantity] of entries) {
+    const available = Math.max(0, Number(sourceStock[itemId]) || 0);
+    if (available < quantity)
+      throw new Error(
+        `Stock insuficiente de ${itemId} en ${source.name}. Disponible: ${available}.`,
+      );
+  }
+
+  for (const [itemId, quantity] of entries) {
+    sourceStock[itemId] = Math.max(0, Number(sourceStock[itemId]) || 0) - quantity;
+    destinationStock[itemId] =
+      Math.max(0, Number(destinationStock[itemId]) || 0) + quantity;
+
+    const outMovement = {
+      id: `TRS-OUT-${transferId}-${itemId}-${randomUUID()}`,
+      warehouseId: sourceWarehouseId,
+      kind: "TRASLADO_SALIDA",
+      itemId,
+      quantity: -quantity,
+      actorId,
+      transferId,
+      referenceId: `TRANSFER:${transferId}`,
+      date: movementDate,
+      destinationWarehouseId,
+    };
+    const inMovement = {
+      id: `TRS-IN-${transferId}-${itemId}-${randomUUID()}`,
+      warehouseId: destinationWarehouseId,
+      kind: "TRASLADO_ENTRADA",
+      itemId,
+      quantity,
+      actorId,
+      transferId,
+      referenceId: `TRANSFER:${transferId}`,
+      date: movementDate,
+      sourceWarehouseId,
+    };
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [outMovement.id, sourceWarehouseId, outMovement.kind, itemId, -quantity, actorId, movementDate, outMovement],
+    );
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [inMovement.id, destinationWarehouseId, inMovement.kind, itemId, quantity, actorId, movementDate, inMovement],
+    );
+  }
+
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [sourceWarehouseId, sourceStock],
+  );
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [destinationWarehouseId, destinationStock],
+  );
+}
+
+async function reverseWarehouseTransfer(
+  db: QueryClient,
+  transfer: {
+    id: string;
+    source_warehouse_id: string;
+    destination_warehouse_id: string;
+    items: unknown;
+  },
+  actorId: string,
+) {
+  const items = normalizeTransferItems(transfer.items);
+  const { source, destination } = await lockTransferWarehouses(
+    db,
+    String(transfer.source_warehouse_id),
+    String(transfer.destination_warehouse_id),
+  );
+  const sourceStock = isRecord(source.stock) ? { ...source.stock } : {};
+  const destinationStock = isRecord(destination.stock) ? { ...destination.stock } : {};
+  const entries = Object.entries(items).filter(([, quantity]) => quantity > 0);
+
+  for (const [itemId, quantity] of entries) {
+    const destinationAvailable = Math.max(0, Number(destinationStock[itemId]) || 0);
+    if (destinationAvailable < quantity) {
+      throw new Error(
+        `No se puede editar/eliminar el traslado porque ${destination.name} ya no tiene suficientes unidades de ${itemId} para revertirlo. Disponible: ${destinationAvailable}.`,
+      );
+    }
+  }
+
+  const movementDate = new Date().toISOString();
+  for (const [itemId, quantity] of entries) {
+    sourceStock[itemId] = Math.max(0, Number(sourceStock[itemId]) || 0) + quantity;
+    destinationStock[itemId] =
+      Math.max(0, Number(destinationStock[itemId]) || 0) - quantity;
+    const sourceMovement = {
+      id: `TRS-REV-SRC-${transfer.id}-${itemId}-${randomUUID()}`,
+      warehouseId: String(transfer.source_warehouse_id),
+      kind: "TRASLADO_REVERSION_ORIGEN",
+      itemId,
+      quantity,
+      actorId,
+      transferId: transfer.id,
+      referenceId: `TRANSFER:${transfer.id}`,
+      date: movementDate,
+    };
+    const destinationMovement = {
+      id: `TRS-REV-DST-${transfer.id}-${itemId}-${randomUUID()}`,
+      warehouseId: String(transfer.destination_warehouse_id),
+      kind: "TRASLADO_REVERSION_DESTINO",
+      itemId,
+      quantity: -quantity,
+      actorId,
+      transferId: transfer.id,
+      referenceId: `TRANSFER:${transfer.id}`,
+      date: movementDate,
+    };
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [sourceMovement.id, transfer.source_warehouse_id, sourceMovement.kind, itemId, quantity, actorId, movementDate, sourceMovement],
+    );
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [destinationMovement.id, transfer.destination_warehouse_id, destinationMovement.kind, itemId, -quantity, actorId, movementDate, destinationMovement],
+    );
+  }
+
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [transfer.source_warehouse_id, sourceStock],
+  );
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [transfer.destination_warehouse_id, destinationStock],
+  );
+}
+
 async function warehouseForMarket(db: QueryClient, marketId: string) {
   const marketResult = await db.query("SELECT data FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1", [marketId]);
   const marketData = isRecord(marketResult.rows[0]?.data) ? marketResult.rows[0].data : {};
@@ -1204,6 +1402,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       if(warehouseId) warehouseByMarket.set(String(row.id),warehouseId);
     }
     const baseByWarehouse=new Map<string,Record<string,number>>();
+    const baseDateByWarehouse=new Map<string,string|null>();
     for(const warehouse of warehouses.rows){
       const warehouseId=String(warehouse.id);
       const correction=await db.query("SELECT data,movement_date FROM warehouse_movements WHERE warehouse_id=$1 AND kind='CORRECCION_IMPORTACION' ORDER BY movement_date DESC,created_at DESC LIMIT 1",[warehouseId]);
@@ -1226,6 +1425,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
         for(const row of recargas.rows) if(Object.prototype.hasOwnProperty.call(stock,String(row.item_id))) stock[String(row.item_id)]+=Math.max(0,Number(row.quantity)||0);
       }
       baseByWarehouse.set(warehouseId,stock);
+      baseDateByWarehouse.set(warehouseId,baseDate);
     }
     const normalizeWarehouseName=(input:unknown)=>String(input||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toUpperCase();
     const explicitAdjustments:Record<string,Record<string,number>>={
@@ -1246,6 +1446,33 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       }
       explicitAdjustmentsApplied++;
     }
+    const activeTransfers=await db.query(
+      "SELECT id,source_warehouse_id,destination_warehouse_id,items,transfer_date FROM transfers WHERE status='ACTIVO' ORDER BY transfer_date,id",
+    );
+    let transfersProcessed=0;
+    for(const transfer of activeTransfers.rows){
+      const transferDate=new Date(transfer.transfer_date).toISOString();
+      const sourceId=String(transfer.source_warehouse_id||"");
+      const destinationId=String(transfer.destination_warehouse_id||"");
+      const items=normalizeTransferItems(transfer.items);
+      const sourceStock=baseByWarehouse.get(sourceId);
+      const destinationStock=baseByWarehouse.get(destinationId);
+      const sourceBaseDate=baseDateByWarehouse.get(sourceId);
+      const destinationBaseDate=baseDateByWarehouse.get(destinationId);
+      const applySource=Boolean(sourceStock)&&(!sourceBaseDate||new Date(transferDate).getTime()>new Date(sourceBaseDate).getTime());
+      const applyDestination=Boolean(destinationStock)&&(!destinationBaseDate||new Date(transferDate).getTime()>new Date(destinationBaseDate).getTime());
+      for(const [itemId,quantity] of Object.entries(items)){
+        if(applySource&&sourceStock){
+          if((Number(sourceStock[itemId])||0)<quantity)
+            throw new Error(`Stock insuficiente de ${itemId} al reconstruir traslado ${transfer.id} desde almacén origen.`);
+          sourceStock[itemId]=(Number(sourceStock[itemId])||0)-quantity;
+        }
+        if(applyDestination&&destinationStock)
+          destinationStock[itemId]=(Number(destinationStock[itemId])||0)+quantity;
+      }
+      transfersProcessed++;
+    }
+
     const canjes=await db.query("SELECT id,market_id,item_id,quantity,data FROM inventory_movements WHERE kind='CANJE' ORDER BY movement_date,id");
     const saleIdsWithCanje=new Set<string>();
     let canjesProcessed=0,tastingsProcessed=0,skipped=0;
@@ -1304,7 +1531,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,warehouseId,movement.kind,"MULTI",0,actor.id,now,movement]);
     }
     await db.query("COMMIT");
-    res.json({warehousesRebuilt:baseByWarehouse.size,explicitAdjustmentsApplied,canjesProcessed,tastingsProcessed,skipped});
+    res.json({warehousesRebuilt:baseByWarehouse.size,explicitAdjustmentsApplied,transfersProcessed,canjesProcessed,tastingsProcessed,skipped});
   } catch(error) {
     await db.query("ROLLBACK").catch(()=>undefined);
     req.log.error({err:error},"Unable to rebuild warehouse consumption history");
@@ -1434,6 +1661,212 @@ router.post("/app-storage/warehouses/regularize-september-zero-closures", async 
         error instanceof Error
           ? error.message
           : "No se pudieron regularizar los cierres de septiembre.",
+    });
+  } finally {
+    db.release();
+  }
+});
+
+
+router.get("/app-storage/transfers", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) {
+    res.status(403).json({ message: "Solo Admin o Analista puede consultar traslados." });
+    return;
+  }
+  try {
+    const result = await pool.query(
+      `SELECT t.id,t.source_warehouse_id,t.destination_warehouse_id,t.items,t.note,t.status,
+              t.actor_id,t.transfer_date,t.data,t.created_at,t.updated_at,
+              ws.name AS source_warehouse_name,wd.name AS destination_warehouse_name
+         FROM transfers t
+         JOIN warehouses ws ON ws.id=t.source_warehouse_id
+         JOIN warehouses wd ON wd.id=t.destination_warehouse_id
+        ORDER BY t.transfer_date DESC,t.created_at DESC`,
+    );
+    res.json({
+      transfers: result.rows.map((row) => ({
+        id: String(row.id),
+        sourceWarehouseId: String(row.source_warehouse_id),
+        sourceWarehouseName: String(row.source_warehouse_name),
+        destinationWarehouseId: String(row.destination_warehouse_id),
+        destinationWarehouseName: String(row.destination_warehouse_name),
+        items: isRecord(row.items) ? row.items : {},
+        note: row.note || "",
+        status: row.status,
+        actorId: row.actor_id,
+        date: new Date(row.transfer_date).toISOString(),
+        createdAt: new Date(row.created_at).toISOString(),
+        updatedAt: new Date(row.updated_at).toISOString(),
+      })),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to read transfers");
+    res.status(500).json({ message: "No se pudieron leer los traslados." });
+  }
+});
+
+router.post("/app-storage/transfers", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) {
+    res.status(403).json({ message: "Solo Admin o Analista puede registrar traslados." });
+    return;
+  }
+  const input = isRecord(req.body?.transfer) ? req.body.transfer : {};
+  const sourceWarehouseId = value(input, "sourceWarehouseId");
+  const destinationWarehouseId = value(input, "destinationWarehouseId");
+  const items = normalizeTransferItems(input.items);
+  const note = value(input, "note");
+  const transferDateRaw = value(input, "date");
+  const transferDate = transferDateRaw
+    ? new Date(transferDateRaw).toISOString()
+    : new Date().toISOString();
+  const id = value(input, "id") || `TRS-${randomUUID()}`;
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const duplicate = await db.query("SELECT 1 FROM transfers WHERE id=$1 LIMIT 1", [id]);
+    if (duplicate.rows.length) throw new Error("Ya existe un traslado con ese código.");
+    await applyWarehouseTransfer(
+      db as unknown as QueryClient,
+      id,
+      sourceWarehouseId,
+      destinationWarehouseId,
+      items,
+      actor.id,
+      transferDate,
+    );
+    const data = {
+      id,
+      sourceWarehouseId,
+      destinationWarehouseId,
+      items,
+      note,
+      status: "ACTIVO",
+      actorId: actor.id,
+      date: transferDate,
+    };
+    await db.query(
+      `INSERT INTO transfers(id,source_warehouse_id,destination_warehouse_id,items,note,status,actor_id,transfer_date,data)
+       VALUES($1,$2,$3,$4,$5,'ACTIVO',$6,$7,$8)`,
+      [id, sourceWarehouseId, destinationWarehouseId, items, note || null, actor.id, transferDate, data],
+    );
+    await db.query("COMMIT");
+    res.status(201).json({ transfer: data });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to create transfer");
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo registrar el traslado.",
+    });
+  } finally {
+    db.release();
+  }
+});
+
+router.put("/app-storage/transfers/:id", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) {
+    res.status(403).json({ message: "Solo Admin o Analista puede editar traslados." });
+    return;
+  }
+  const id = String(req.params.id || "").trim();
+  const input = isRecord(req.body?.transfer) ? req.body.transfer : {};
+  const sourceWarehouseId = value(input, "sourceWarehouseId");
+  const destinationWarehouseId = value(input, "destinationWarehouseId");
+  const items = normalizeTransferItems(input.items);
+  const note = value(input, "note");
+  const transferDateRaw = value(input, "date");
+  const transferDate = transferDateRaw
+    ? new Date(transferDateRaw).toISOString()
+    : new Date().toISOString();
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const currentResult = await db.query(
+      "SELECT id,source_warehouse_id,destination_warehouse_id,items,status FROM transfers WHERE id=$1 FOR UPDATE",
+      [id],
+    );
+    const current = currentResult.rows[0];
+    if (!current) throw new Error("El traslado no existe.");
+    if (current.status !== "ACTIVO") throw new Error("Un traslado anulado no puede editarse.");
+    await reverseWarehouseTransfer(db as unknown as QueryClient, current, actor.id);
+    await applyWarehouseTransfer(
+      db as unknown as QueryClient,
+      id,
+      sourceWarehouseId,
+      destinationWarehouseId,
+      items,
+      actor.id,
+      transferDate,
+    );
+    const data = {
+      id,
+      sourceWarehouseId,
+      destinationWarehouseId,
+      items,
+      note,
+      status: "ACTIVO",
+      actorId: actor.id,
+      date: transferDate,
+      editedAt: new Date().toISOString(),
+    };
+    await db.query(
+      `UPDATE transfers
+          SET source_warehouse_id=$2,destination_warehouse_id=$3,items=$4,note=$5,
+              actor_id=$6,transfer_date=$7,data=$8,updated_at=now()
+        WHERE id=$1`,
+      [id, sourceWarehouseId, destinationWarehouseId, items, note || null, actor.id, transferDate, data],
+    );
+    await db.query("COMMIT");
+    res.json({ transfer: data });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to update transfer");
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo editar el traslado.",
+    });
+  } finally {
+    db.release();
+  }
+});
+
+router.delete("/app-storage/transfers/:id", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) {
+    res.status(403).json({ message: "Solo Admin o Analista puede eliminar traslados." });
+    return;
+  }
+  const id = String(req.params.id || "").trim();
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const currentResult = await db.query(
+      "SELECT id,source_warehouse_id,destination_warehouse_id,items,status,data FROM transfers WHERE id=$1 FOR UPDATE",
+      [id],
+    );
+    const current = currentResult.rows[0];
+    if (!current) throw new Error("El traslado no existe.");
+    if (current.status !== "ACTIVO") throw new Error("El traslado ya está anulado.");
+    await reverseWarehouseTransfer(db as unknown as QueryClient, current, actor.id);
+    const currentData = isRecord(current.data) ? current.data : {};
+    const data = {
+      ...currentData,
+      status: "ANULADO",
+      cancelledAt: new Date().toISOString(),
+      cancelledBy: actor.id,
+    };
+    await db.query(
+      "UPDATE transfers SET status='ANULADO',data=$2,updated_at=now() WHERE id=$1",
+      [id, data],
+    );
+    await db.query("COMMIT");
+    res.json({ id, status: "ANULADO" });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to cancel transfer");
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo eliminar el traslado.",
     });
   } finally {
     db.release();

@@ -197,6 +197,39 @@ export const warehouseMovementsTable = pgTable(
   ],
 );
 
+export const transfersTable = pgTable(
+  "transfers",
+  {
+    id: text("id").primaryKey(),
+    sourceWarehouseId: text("source_warehouse_id")
+      .notNull()
+      .references(() => warehousesTable.id, { onDelete: "restrict" }),
+    destinationWarehouseId: text("destination_warehouse_id")
+      .notNull()
+      .references(() => warehousesTable.id, { onDelete: "restrict" }),
+    items: jsonb("items").$type<Record<string, number>>().notNull().default({}),
+    note: text("note"),
+    status: text("status").notNull().default("ACTIVO"),
+    actorId: text("actor_id").notNull().default(""),
+    transferDate: timestamp("transfer_date", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    ...timestamps,
+  },
+  (table) => [
+    index("idx_transfers_source_date").on(
+      table.sourceWarehouseId,
+      table.transferDate,
+    ),
+    index("idx_transfers_destination_date").on(
+      table.destinationWarehouseId,
+      table.transferDate,
+    ),
+  ],
+);
+
+
 // LEGACY/HISTÓRICO: se conserva para lectura y trazabilidad.
 // El stock operativo actual vive únicamente en warehouses.stock + warehouse_movements.
 export const inventoryTable = pgTable("inventory", {

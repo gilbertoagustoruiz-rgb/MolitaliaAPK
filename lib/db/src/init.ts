@@ -141,6 +141,21 @@ export async function ensureDatabaseSchema() {
       created_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS transfers (
+      id text PRIMARY KEY,
+      source_warehouse_id text NOT NULL REFERENCES warehouses(id) ON DELETE RESTRICT,
+      destination_warehouse_id text NOT NULL REFERENCES warehouses(id) ON DELETE RESTRICT,
+      items jsonb NOT NULL DEFAULT '{}',
+      note text,
+      status text NOT NULL DEFAULT 'ACTIVO',
+      actor_id text NOT NULL DEFAULT '',
+      transfer_date timestamptz NOT NULL DEFAULT now(),
+      data jsonb NOT NULL DEFAULT '{}',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT transfers_distinct_warehouses CHECK (source_warehouse_id <> destination_warehouse_id)
+    );
+
     -- LEGACY/HISTÓRICO. No es fuente de saldo operativo.
     CREATE TABLE IF NOT EXISTS inventory (
       market_id text PRIMARY KEY,
@@ -301,6 +316,8 @@ export async function ensureDatabaseSchema() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_name ON warehouses(upper(name));
     CREATE INDEX IF NOT EXISTS idx_warehouse_movements_warehouse_date ON warehouse_movements(warehouse_id,movement_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_transfers_source_date ON transfers(source_warehouse_id,transfer_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_transfers_destination_date ON transfers(destination_warehouse_id,transfer_date DESC);
     CREATE INDEX IF NOT EXISTS idx_trade_approvals_status_requested ON trade_approvals(status,requested_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date DESC);
     CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(event_date DESC);

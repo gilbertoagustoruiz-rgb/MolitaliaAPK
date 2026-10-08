@@ -23,6 +23,7 @@ import {
   Store,
   Sun,
   Trash2,
+  Truck,
   Upload,
   UserRound,
   Users,
@@ -298,6 +299,20 @@ type DegustacionProductId = "PANETON" | "PANETON_900G" | "PANETON_85G";
 type RedemptionStock = Record<RedemptionItemId, number>;
 type WarehouseStock = Record<"PANETON_900G" | "PANETON_85G" | RedemptionItemId, number>;
 type Warehouse = { id:string; name:string; region:string; department:string; province:string; district:string; status:Status; marketIds:string[]; stock:Partial<WarehouseStock>; updatedAt:string };
+type WarehouseTransfer = {
+  id: string;
+  sourceWarehouseId: string;
+  sourceWarehouseName?: string;
+  destinationWarehouseId: string;
+  destinationWarehouseName?: string;
+  items: Partial<WarehouseStock>;
+  note?: string;
+  status: "ACTIVO" | "ANULADO";
+  actorId?: string;
+  date: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 type MarketInventory = {
   marketId: string;
@@ -3672,6 +3687,388 @@ function WarehouseCatalog({
     </section>
   );
 }
+
+const warehouseTransferItems: Array<[keyof WarehouseStock, string]> = [
+  ["PANETON_900G", "Panetón 900 g"],
+  ["PANETON_85G", "Panetón 85 g"],
+  ["AVENA", "Avena"],
+  ["BATEA", "Batea"],
+  ["MANDIL", "Mandil"],
+  ["SPAGHETTI", "Spaghetti"],
+];
+
+function WarehouseTransfersModule({
+  user,
+  notify,
+}: {
+  user: AppUser;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [transfers, setTransfers] = useState<WarehouseTransfer[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<WarehouseTransfer | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const authHeaders = () => ({
+    "Content-Type": "application/json",
+    "x-admin-dni": user.dni,
+    "x-admin-key": sessionAdminKey(user),
+  });
+
+  const load = async () => {
+    try {
+      const [warehouseResponse, transferResponse] = await Promise.all([
+        fetch("/api/app-storage/warehouses"),
+        fetch("/api/app-storage/transfers", { headers: authHeaders() }),
+      ]);
+      const warehousePayload = await warehouseResponse.json();
+      const transferPayload = await transferResponse.json();
+      if (!warehouseResponse.ok)
+        throw new Error(warehousePayload.message || "No se pudieron cargar los almacenes.");
+      if (!transferResponse.ok)
+        throw new Error(transferPayload.message || "No se pudieron cargar los traslados.");
+      setWarehouses(
+        (Array.isArray(warehousePayload.warehouses)
+          ? warehousePayload.warehouses
+          : []
+        ).filter((warehouse: Warehouse) => warehouse.status === "ACTIVO"),
+      );
+      setTransfers(
+        Array.isArray(transferPayload.transfers) ? transferPayload.transfers : [],
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudieron cargar los traslados.",
+        true,
+      );
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const save = async (transfer: WarehouseTransfer) => {
+    setLoading(true);
+    try {
+      const isEdit = Boolean(editing);
+      const url = isEdit
+        ? `/api/app-storage/transfers/${encodeURIComponent(editing!.id)}`
+        : "/api/app-storage/transfers";
+      const response = await fetch(url, {
+        method: isEdit ? "PUT" : "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ transfer }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo guardar el traslado.");
+      await load();
+      setModalOpen(false);
+      setEditing(null);
+      notify(isEdit ? "Traslado actualizado correctamente." : "Traslado registrado correctamente.");
+      return true;
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo guardar el traslado.",
+        true,
+      );
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const remove = async (transfer: WarehouseTransfer) => {
+    if (
+      !window.confirm(
+        `¿Eliminar el traslado ${transfer.id}? El stock será revertido: volverá al almacén origen y se descontará del destino.`,
+      )
+    )
+      return;
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `/api/app-storage/transfers/${encodeURIComponent(transfer.id)}`,
+        {
+          method: "DELETE",
+          headers: authHeaders(),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo eliminar el traslado.");
+      await load();
+      notify("Traslado anulado y stock revertido correctamente.");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo eliminar el traslado.",
+        true,
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const transferText = (transfer: WarehouseTransfer) =>
+    warehouseTransferItems
+      .map(([itemId, label]) => {
+        const quantity = Math.max(0, Number(transfer.items?.[itemId]) || 0);
+        return quantity ? `${label}: ${quantity}` : "";
+      })
+      .filter(Boolean)
+      .join(" · ");
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2>Traslados</h2>
+          <p>
+            Mueve stock entre almacenes y conserva el historial del movimiento.
+          </p>
+        </div>
+        <div className="panel-actions">
+          <Btn
+            onClick={() => {
+              setEditing(null);
+              setModalOpen(true);
+            }}
+            disabled={warehouses.length < 2 || loading}
+          >
+            <Truck /> Trasladar stock
+          </Btn>
+        </div>
+      </div>
+      <div className="panel-body">
+        {transfers.length ? (
+          <div className="module-table-wrap">
+            <div className="module-table">
+              <div className="module-table-row module-table-header cols-7">
+                <span>Fecha</span>
+                <span>Origen</span>
+                <span>Destino</span>
+                <span>Productos</span>
+                <span>Comentario</span>
+                <span>Estado</span>
+                <span>Acciones</span>
+              </div>
+              {transfers.map((transfer) => (
+                <article className="module-table-row cols-7" key={transfer.id}>
+                  <span>
+                    <strong>{formatDate(transfer.date)}</strong>
+                    <small>{transfer.id}</small>
+                  </span>
+                  <span>
+                    <strong>{transfer.sourceWarehouseName || transfer.sourceWarehouseId}</strong>
+                  </span>
+                  <span>
+                    <strong>{transfer.destinationWarehouseName || transfer.destinationWarehouseId}</strong>
+                  </span>
+                  <span>
+                    <strong>{transferText(transfer) || "Sin productos"}</strong>
+                  </span>
+                  <span>{transfer.note || "—"}</span>
+                  <span><StatusPill status={transfer.status === "ACTIVO" ? "ACTIVO" : "INACTIVO"} /></span>
+                  <span className="module-table-actions">
+                    {transfer.status === "ACTIVO" && (
+                      <>
+                        <Btn
+                          variant="outline"
+                          onClick={() => {
+                            setEditing(transfer);
+                            setModalOpen(true);
+                          }}
+                          disabled={loading}
+                        >
+                          <Pencil /> Editar
+                        </Btn>
+                        <Btn
+                          variant="danger"
+                          onClick={() => void remove(transfer)}
+                          disabled={loading}
+                        >
+                          <Trash2 /> Eliminar
+                        </Btn>
+                      </>
+                    )}
+                  </span>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <Empty
+            title="Sin traslados"
+            detail="Registra el primer movimiento de stock entre almacenes."
+          />
+        )}
+      </div>
+      {modalOpen && (
+        <WarehouseTransferModal
+          warehouses={warehouses}
+          transfer={editing || undefined}
+          loading={loading}
+          onSave={save}
+          close={() => {
+            if (!loading) {
+              setModalOpen(false);
+              setEditing(null);
+            }
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function WarehouseTransferModal({
+  warehouses,
+  transfer,
+  loading,
+  onSave,
+  close,
+}: {
+  warehouses: Warehouse[];
+  transfer?: WarehouseTransfer;
+  loading: boolean;
+  onSave: (transfer: WarehouseTransfer) => Promise<boolean>;
+  close: () => void;
+}) {
+  const [sourceWarehouseId, setSourceWarehouseId] = useState(
+    transfer?.sourceWarehouseId || "",
+  );
+  const [destinationWarehouseId, setDestinationWarehouseId] = useState(
+    transfer?.destinationWarehouseId || "",
+  );
+  const [note, setNote] = useState(transfer?.note || "");
+  const [date, setDate] = useState(
+    transfer?.date
+      ? new Date(transfer.date).toISOString().slice(0, 16)
+      : new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 16),
+  );
+  const [quantities, setQuantities] = useState<Record<string, string>>(
+    Object.fromEntries(
+      warehouseTransferItems.map(([itemId]) => [
+        itemId,
+        transfer?.items?.[itemId]
+          ? String(transfer.items[itemId])
+          : "",
+      ]),
+    ),
+  );
+
+  const source = warehouses.find((warehouse) => warehouse.id === sourceWarehouseId);
+  const destination = warehouses.find(
+    (warehouse) => warehouse.id === destinationWarehouseId,
+  );
+
+  const submit = async () => {
+    if (!sourceWarehouseId || !destinationWarehouseId) return;
+    if (sourceWarehouseId === destinationWarehouseId) return;
+    const items = Object.fromEntries(
+      warehouseTransferItems.map(([itemId]) => [
+        itemId,
+        Math.max(0, Math.floor(Number(quantities[itemId]) || 0)),
+      ]),
+    ) as Partial<WarehouseStock>;
+    if (!Object.values(items).some((quantity) => Number(quantity) > 0)) return;
+    await onSave({
+      id: transfer?.id || "",
+      sourceWarehouseId,
+      destinationWarehouseId,
+      items,
+      note: note.trim(),
+      status: "ACTIVO",
+      date: new Date(date).toISOString(),
+    });
+  };
+
+  return (
+    <Modal
+      title={transfer ? "Editar traslado" : "Trasladar stock"}
+      detail={
+        transfer
+          ? "El traslado anterior será revertido antes de aplicar la corrección."
+          : "El stock saldrá del almacén origen e ingresará al almacén destino."
+      }
+      close={close}
+    >
+      <div className="form-grid">
+        <SelectField
+          label="Almacén origen *"
+          value={sourceWarehouseId}
+          onChange={(value) => {
+            setSourceWarehouseId(value);
+            if (destinationWarehouseId === value) setDestinationWarehouseId("");
+          }}
+          items={warehouses.map((warehouse) => ({
+            value: warehouse.id,
+            label: warehouse.name,
+          }))}
+          placeholder="Seleccionar origen"
+        />
+        <SelectField
+          label="Almacén destino *"
+          value={destinationWarehouseId}
+          onChange={setDestinationWarehouseId}
+          items={warehouses
+            .filter((warehouse) => warehouse.id !== sourceWarehouseId)
+            .map((warehouse) => ({
+              value: warehouse.id,
+              label: warehouse.name,
+            }))}
+          placeholder="Seleccionar destino"
+        />
+        <Field label="Fecha y hora *">
+          <Input type="datetime-local" value={date} onChange={setDate} />
+        </Field>
+        <Field label="Comentario">
+          <Input
+            value={note}
+            onChange={setNote}
+            placeholder="Motivo o referencia del traslado"
+          />
+        </Field>
+        {warehouseTransferItems.map(([itemId, label]) => (
+          <Field
+            key={itemId}
+            label={`${label} · disponible origen: ${Number(source?.stock?.[itemId]) || 0}`}
+          >
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              value={quantities[itemId] || ""}
+              onChange={(value) =>
+                setQuantities((current) => ({ ...current, [itemId]: value }))
+              }
+            />
+          </Field>
+        ))}
+      </div>
+      {source && destination && (
+        <div className="notice">
+          <strong>{source.name} → {destination.name}</strong>
+          <p>
+            Al guardar se actualizarán ambos almacenes y se registrarán movimientos
+            de salida y entrada vinculados a este traslado.
+          </p>
+        </div>
+      )}
+      <div className="modal-actions">
+        <Btn variant="outline" onClick={close} disabled={loading}>
+          Cancelar
+        </Btn>
+        <Btn onClick={() => void submit()} disabled={loading || !sourceWarehouseId || !destinationWarehouseId}>
+          <CheckCircle2 /> {loading ? "Guardando..." : "Guardar traslado"}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function WarehouseCreateModal({onSave,close}:{onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState("");const [region,setRegion]=useState("");const [department,setDepartment]=useState("");const [province,setProvince]=useState("");const [district,setDistrict]=useState("");const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});const saveModal=async()=>{if(!name.trim()||!region.trim()||!department.trim()||!province.trim()||!district.trim())return;const warehouse:Warehouse={id:`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status:"ACTIVO",marketIds:[],stock:{},updatedAt:new Date().toISOString()};const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(warehouse,quantities))close();};return <Modal title="Nuevo almacén" detail="Registra el almacén y su stock inicial." close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field>{items.map(([id,label])=><Field key={id} label={`Stock inicial - ${label}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={saveModal}>Guardar almacén</Btn></div></Modal>}
 function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,updatedAt:new Date().toISOString()})}>Guardar cambios</Btn></div></Modal>}
 function WarehouseRechargeModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});return <Modal title="Reabastecer almacén" detail={`${warehouse.name} · Las cantidades se sumarán al saldo actual.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(!Object.values(quantities).some(v=>Number(v)>0))return;await onSave(warehouse,quantities);}}><Plus/> Reabastecer</Btn></div></Modal>}
@@ -8510,7 +8907,12 @@ function AnalystApp({
   const tabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
-    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["almacen", "Almacén"]] : []),
+    ...(["ADMIN", "ANALISTA"].includes(user.role)
+      ? [
+          ["almacen", "Almacén"],
+          ["traslados", "Traslados"],
+        ]
+      : []),
     ["usuarios", "Usuarios"],
     ["clientes", "Clientes"],
     ...(canManageCatalogs
@@ -8559,6 +8961,9 @@ function AnalystApp({
         />
       )}
       {tab === "almacen" && <WarehouseCatalog notify={notify} user={user} />}
+      {tab === "traslados" && (
+        <WarehouseTransfersModule user={user} notify={notify} />
+      )}
       {tab === "mercados" && (
         <section className="panel">
           <div className="panel-header">
