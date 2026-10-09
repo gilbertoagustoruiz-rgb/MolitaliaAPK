@@ -5541,7 +5541,7 @@ function TastingExitModal({
     Number.isInteger(paneton900g) && paneton900g >= 0 && paneton900g <= 2 && paneton900g <= available900g;
   const valid85g =
     Number.isInteger(paneton85g) && paneton85g >= 0 && paneton85g <= 8 && paneton85g <= available85g;
-  const valid = valid900g && valid85g && paneton900g + paneton85g > 0;
+  const valid = valid900g && valid85g;
   return (
     <Modal
       title="Registrar salida del cliente"
@@ -5596,7 +5596,9 @@ function TastingExitModal({
           <p className="modal-error">85 g: máximo 8 y no puede superar el stock disponible ({available85g}).</p>
         )}
         {valid900g && valid85g && paneton900g + paneton85g === 0 && (
-          <p className="modal-error">Registra al menos un Panetón utilizado para cerrar la sesión.</p>
+          <p className="modal-hint">
+            No se registró degustación. Puedes cerrar la sesión con 0 panetones y 0 contactos.
+          </p>
         )}
       </div>
       <div className="modal-actions">
