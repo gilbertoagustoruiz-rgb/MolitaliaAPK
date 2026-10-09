@@ -1423,6 +1423,13 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
       if(baseDate){
         const recargas=await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='RECARGA' AND movement_date>$2 GROUP BY item_id",[warehouseId,baseDate]);
         for(const row of recargas.rows) if(Object.prototype.hasOwnProperty.call(stock,String(row.item_id))) stock[String(row.item_id)]+=Math.max(0,Number(row.quantity)||0);
+        const manualSubtractions=await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='AJUSTE_RESTA' AND movement_date>$2 GROUP BY item_id",[warehouseId,baseDate]);
+        for(const row of manualSubtractions.rows){
+          const itemId=String(row.item_id);
+          if(!Object.prototype.hasOwnProperty.call(stock,itemId)) continue;
+          const quantity=Number(row.quantity)||0;
+          stock[itemId]=Math.max(0,(Number(stock[itemId])||0)+quantity);
+        }
       }
       baseByWarehouse.set(warehouseId,stock);
       baseDateByWarehouse.set(warehouseId,baseDate);
@@ -2033,6 +2040,60 @@ router.put("/app-storage/warehouses/:id/import-stock", async (req, res): Promise
     await db.query("ROLLBACK").catch(()=>undefined);
     res.status(409).json({message:error instanceof Error?error.message:"No se pudo corregir el stock importado."});
   } finally { db.release(); }
+});
+
+router.post("/app-storage/warehouses/:id/subtract-stock", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede restar stock." });
+  const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
+  const note = String(req.body?.note || "").trim().slice(0, 300);
+  if (!note) return void res.status(400).json({ message: "Indica el motivo de la corrección de stock." });
+  const allowed = ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"];
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const found = await db.query("SELECT stock,data FROM warehouses WHERE id=$1 FOR UPDATE", [req.params.id]);
+    if (!found.rows[0]) throw new Error("El almacén no existe.");
+    const stock = isRecord(found.rows[0].stock) ? { ...found.rows[0].stock } : {};
+    const now = new Date().toISOString();
+    let subtracted = 0;
+    for (const itemId of allowed) {
+      const quantity = Math.floor(Math.max(0, Number(quantities[itemId]) || 0));
+      if (!quantity) continue;
+      const current = Math.max(0, Number(stock[itemId]) || 0);
+      if (quantity > current)
+        throw new Error(`No puedes restar ${quantity} de ${itemId}. Stock disponible: ${current}.`);
+      stock[itemId] = current - quantity;
+      const movement = {
+        id: `ALM-RESTOCK-${randomUUID()}`,
+        warehouseId: req.params.id,
+        kind: "AJUSTE_RESTA",
+        itemId,
+        quantity: -quantity,
+        actorId: actor.id,
+        date: now,
+        note,
+        reason: "CORRECCION_MANUAL_STOCK",
+      };
+      await db.query(
+        "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+        [movement.id, req.params.id, movement.kind, itemId, -quantity, actor.id, now, movement],
+      );
+      subtracted += quantity;
+    }
+    if (!subtracted) throw new Error("Ingresa al menos una cantidad mayor a cero para restar.");
+    const data = isRecord(found.rows[0].data)
+      ? { ...found.rows[0].data, stock, updatedAt: now }
+      : { id: req.params.id, stock, updatedAt: now };
+    await db.query("UPDATE warehouses SET stock=$2,data=$3,updated_at=now() WHERE id=$1", [req.params.id, stock, data]);
+    await db.query("COMMIT");
+    res.json({ stock, subtracted });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo restar el stock." });
+  } finally {
+    db.release();
+  }
 });
 
 router.post("/app-storage/warehouses/:id/recharge", async (req, res): Promise<void> => {
