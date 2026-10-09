@@ -4661,16 +4661,21 @@ function SaleEditModal({
           )
         : emptyRedemptionStock();
   const effectiveRequirements: Partial<RedemptionStock> =
-    sale.mode === "PLANCHAS" && manualCanje
-      ? manualCanje
-      : calculatedRequirements;
+    sale.mode === "UNIDADES" && !selectedCanje
+      ? emptyRedemptionStock()
+      : sale.mode === "PLANCHAS" && manualCanje
+        ? manualCanje
+        : calculatedRequirements;
   const editedBonus =
     sale.mode === "PLANCHAS"
       ? canjeRequirementsLabel(effectiveRequirements) || undefined
       : selectedCanje?.label;
-  const missingStock = requiredRedemptionEntries(effectiveRequirements).find(
-    ([itemId, quantity]) => restoredStock[itemId] < quantity,
-  );
+  const missingStock =
+    sale.mode === "UNIDADES" && !selectedCanje
+      ? undefined
+      : requiredRedemptionEntries(effectiveRequirements).find(
+          ([itemId, quantity]) => restoredStock[itemId] < quantity,
+        );
   const updateManualCanje = (itemId: RedemptionItemId, rawValue: string) => {
     const quantity = Math.max(0, Math.floor(Number(rawValue) || 0));
     setManualCanje((current) => {
@@ -4718,7 +4723,10 @@ function SaleEditModal({
           amountSoles: parsedAmount,
           date: parsedDate.toISOString(),
           comment: comment.trim() || undefined,
-          bonus: editedBonus,
+          bonus:
+            sale.mode === "UNIDADES" && !selectedCanje
+              ? undefined
+              : editedBonus,
           redemptionCount:
             sale.mode === "PLANCHAS"
               ? editedBonus
@@ -4727,7 +4735,12 @@ function SaleEditModal({
               : selectedCanje
                 ? redemptionCount
                 : 0,
-          redemptionItems: editedBonus ? effectiveRequirements : undefined,
+          redemptionItems:
+            sale.mode === "UNIDADES" && !selectedCanje
+              ? undefined
+              : editedBonus
+                ? effectiveRequirements
+                : undefined,
           planchaAccessory:
             sale.mode === "PLANCHAS" ? planchaAccessory : undefined,
           planchaMultiplier:
@@ -4915,13 +4928,15 @@ function SaleEditModal({
           />
         </Field>
       </div>
-      {missingStock && (
+      {sale.mode !== "UNIDADES" || selectedCanje ? (
+        missingStock && (
         <div className="stock-warning">
           <PackageCheck /> Stock insuficiente de{" "}
           {redemptionLabel(missingStock[0])}. El canje anterior se devuelve
           antes de aplicar el nuevo.
         </div>
-      )}
+        )
+      ) : null}
       <div className="evidence-grid">
         <div>
           <PhotoThumbnail label="Boleta actual" src={sale.receiptPhoto} />
