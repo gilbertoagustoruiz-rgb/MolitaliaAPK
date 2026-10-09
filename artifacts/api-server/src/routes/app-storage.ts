@@ -2047,6 +2047,7 @@ router.post("/app-storage/warehouses/:id/subtract-stock", async (req, res): Prom
   if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede restar stock." });
   const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
   const note = String(req.body?.note || "").trim().slice(0, 300);
+  if (!note) return void res.status(400).json({ message: "Indica el motivo de la corrección de stock." });
   const allowed = ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"];
   const db = await pool.connect();
   try {
