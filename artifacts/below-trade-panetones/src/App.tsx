@@ -3490,6 +3490,7 @@ function WarehouseCatalog({
   const [edit,setEdit]=useState<Warehouse|null>(null);
   const [recharge,setRecharge]=useState<Warehouse|null>(null);
   const [subtract,setSubtract]=useState<Warehouse|null>(null);
+  const [initialStockEdit,setInitialStockEdit]=useState<{warehouse:Warehouse;quantities:Partial<WarehouseStock>}|null>(null);
   const [regularizeOpen,setRegularizeOpen]=useState(false);
   const [regularizing,setRegularizing]=useState(false);
   const [septemberRegularizing,setSeptemberRegularizing]=useState(false);
@@ -3546,6 +3547,37 @@ function WarehouseCatalog({
       return true;
     }catch(e){
       if(!quiet)notify(e instanceof Error?e.message:"No se pudo cargar el stock.",true);
+      return false;
+    }
+  };
+  const openInitialStock=async(warehouse:Warehouse)=>{
+    if(readOnly)return;
+    try{
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/initial-stock`,{
+        headers:{"x-admin-dni":user.dni,"x-admin-key":user.password||""},
+      });
+      const p=await r.json();
+      if(!r.ok)throw new Error(p.message||"No se pudo consultar el stock inicial.");
+      setInitialStockEdit({warehouse,quantities:p.quantities||{}});
+    }catch(e){
+      notify(e instanceof Error?e.message:"No se pudo consultar el stock inicial.",true);
+    }
+  };
+  const saveInitialStock=async(warehouse:Warehouse,quantities:Partial<WarehouseStock>,note:string)=>{
+    if(readOnly)return false;
+    try{
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/initial-stock`,{
+        method:"PUT",
+        headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},
+        body:JSON.stringify({quantities,note}),
+      });
+      const p=await r.json();
+      if(!r.ok)throw new Error(p.message||"No se pudo modificar el stock inicial.");
+      await load();
+      notify("Stock inicial corregido correctamente.");
+      return true;
+    }catch(e){
+      notify(e instanceof Error?e.message:"No se pudo modificar el stock inicial.",true);
       return false;
     }
   };
@@ -3690,6 +3722,7 @@ function WarehouseCatalog({
                   {!readOnly && (
                     <span className="module-table-actions">
                       <Btn variant="outline" onClick={()=>setEdit(w)}><Pencil/> Editar</Btn>
+                      <Btn variant="outline" onClick={()=>void openInitialStock(w)}><Pencil/> Stock inicial</Btn>
                       <Btn onClick={()=>setRecharge(w)}><Plus/> Reabastecer</Btn>
                       <Btn variant="outline" onClick={()=>setSubtract(w)}><Minus/> Restar stock</Btn>
                       <Btn variant="danger" onClick={()=>void remove(w)}><Trash2/> Eliminar</Btn>
@@ -3704,6 +3737,7 @@ function WarehouseCatalog({
       {!readOnly && modal&&<WarehouseCreateModal onSave={async(warehouse,quantities)=>{const saved=await save(warehouse,true);if(!saved)return false;const hasStock=Object.values(quantities).some(v=>Number(v)>0);if(hasStock){const stockSaved=await loadStock(warehouse,quantities,true,true);if(!stockSaved)return false;}await load();notify(hasStock?"Almacén y stock inicial guardados.":"Almacén guardado.");return true;}} close={()=>setModal(false)}/>}
       {!readOnly && edit&&<WarehouseEditModal warehouse={edit} onSave={async w=>{const ok=await save(w);if(ok)setEdit(null);return ok;}} close={()=>setEdit(null)}/>}
       {!readOnly && recharge&&<WarehouseRechargeModal warehouse={recharge} onSave={async(w,q)=>{const ok=await loadStock(w,q,false);if(ok)setRecharge(null);return ok;}} close={()=>setRecharge(null)}/>}
+      {!readOnly && initialStockEdit&&<WarehouseInitialStockModal warehouse={initialStockEdit.warehouse} initialQuantities={initialStockEdit.quantities} onSave={async(w,q,note)=>{const ok=await saveInitialStock(w,q,note);if(ok)setInitialStockEdit(null);return ok;}} close={()=>setInitialStockEdit(null)}/>}
       {!readOnly && subtract&&<WarehouseSubtractModal warehouse={subtract} onSave={async(w,q,note)=>{const ok=await subtractStock(w,q,note);if(ok)setSubtract(null);return ok;}} close={()=>setSubtract(null)}/>}
       {!readOnly && regularizeOpen&&<Modal title="Regularizar consumos" detail="Descontará del Almacén los Canjes y Degustaciones históricos que todavía no tengan movimiento de almacén." close={()=>{if(!regularizing)setRegularizeOpen(false);}}><div className="notice"><strong>Esta operación no vuelve a descontar registros ya regularizados.</strong><p>Si existe un Mercado sin Almacén, stock insuficiente o un registro histórico incompleto, se mostrará el error y no se aplicarán descuentos parciales.</p>{regularizeResult&&<p><strong>{regularizeResult}</strong></p>}</div><div className="modal-actions"><Btn variant="outline" disabled={regularizing} onClick={()=>setRegularizeOpen(false)}>Cerrar</Btn><Btn disabled={regularizing} onClick={()=>void regularize()}>{regularizing?"Procesando...":"Confirmar regularización"}</Btn></div></Modal>}
     </section>
@@ -4094,6 +4128,8 @@ function WarehouseTransferModal({
 function WarehouseCreateModal({onSave,close}:{onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState("");const [region,setRegion]=useState("");const [department,setDepartment]=useState("");const [province,setProvince]=useState("");const [district,setDistrict]=useState("");const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});const saveModal=async()=>{if(!name.trim()||!region.trim()||!department.trim()||!province.trim()||!district.trim())return;const warehouse:Warehouse={id:`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status:"ACTIVO",marketIds:[],stock:{},updatedAt:new Date().toISOString()};const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(await onSave(warehouse,quantities))close();};return <Modal title="Nuevo almacén" detail="Registra el almacén y su stock inicial." close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field>{items.map(([id,label])=><Field key={id} label={`Stock inicial - ${label}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={saveModal}>Guardar almacén</Btn></div></Modal>}
 function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,updatedAt:new Date().toISOString()})}>Guardar cambios</Btn></div></Modal>}
 function WarehouseRechargeModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});return <Modal title="Reabastecer almacén" detail={`${warehouse.name} · Las cantidades se sumarán al saldo actual.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(!Object.values(quantities).some(v=>Number(v)>0))return;await onSave(warehouse,quantities);}}><Plus/> Reabastecer</Btn></div></Modal>}
+
+function WarehouseInitialStockModal({warehouse,initialQuantities,onSave,close}:{warehouse:Warehouse;initialQuantities:Partial<WarehouseStock>;onSave:(w:Warehouse,q:Partial<WarehouseStock>,note:string)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>(()=>Object.fromEntries(items.map(([id])=>[id,String(Math.max(0,Number(initialQuantities[id])||0))])));const [note,setNote]=useState("");const [saving,setSaving]=useState(false);const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;const changed=items.some(([id])=>(Number(quantities[id])||0)!==(Number(initialQuantities[id])||0));return <Modal title="Modificar stock inicial" detail={`${warehouse.name} · Corrige únicamente las cantidades con las que inició el almacén.`} close={close}><div className="notice"><strong>Se conservarán ventas, canjes, degustaciones, recargas, traslados y demás movimientos.</strong><p>El saldo actual se ajustará solo por la diferencia entre el stock inicial anterior y el nuevo. La corrección quedará registrada para futuras regularizaciones.</p></div><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · inicial actual: ${Number(initialQuantities[id])||0}`}><Input type="number" min={0} step={1} value={q[id]||"0"} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}<Field label="Motivo de la corrección *" className="full-field"><textarea className="input textarea" value={note} onChange={e=>setNote(e.target.value)} maxLength={300} rows={3} placeholder="Ej.: El stock inicial de Avena fue registrado como 500 y debía ser 450."/></Field></div><div className="modal-actions"><Btn variant="outline" disabled={saving} onClick={close}>Cancelar</Btn><Btn disabled={!changed||!note.trim()||saving} onClick={async()=>{setSaving(true);try{await onSave(warehouse,quantities,note.trim());}finally{setSaving(false);}}}><Pencil/> {saving?"Guardando...":"Guardar stock inicial"}</Btn></div></Modal>}
 
 function WarehouseSubtractModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse,q:Partial<WarehouseStock>,note:string)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});const [note,setNote]=useState("");const [saving,setSaving]=useState(false);const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;const hasQuantity=Object.values(quantities).some(v=>Number(v)>0);const exceedsStock=items.some(([id])=>(Number(quantities[id])||0)>(Number(warehouse.stock?.[id])||0));return <Modal title="Restar stock" detail={`${warehouse.name} · Corrección manual del saldo disponible.`} close={close}><div className="notice"><strong>Esta acción no elimina movimientos históricos.</strong><p>Solo corrige el saldo actual y deja trazabilidad del ajuste. Nunca permitirá que el stock quede negativo.</p></div><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} max={Number(warehouse.stock?.[id])||0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}<Field label="Motivo del ajuste *" className="full-field"><textarea className="input textarea" value={note} onChange={e=>setNote(e.target.value)} maxLength={300} rows={3} placeholder="Ej.: Se ingresaron 20 unidades de más por error."/></Field></div>{exceedsStock&&<p className="modal-error">No puedes restar una cantidad mayor al stock disponible.</p>}<div className="modal-actions"><Btn variant="outline" disabled={saving} onClick={close}>Cancelar</Btn><Btn disabled={!hasQuantity||!note.trim()||exceedsStock||saving} onClick={async()=>{setSaving(true);try{await onSave(warehouse,quantities,note.trim());}finally{setSaving(false);}}}><Minus/> {saving?"Guardando...":"Restar stock"}</Btn></div></Modal>}
 
