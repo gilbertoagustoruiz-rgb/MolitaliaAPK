@@ -2123,10 +2123,6 @@ router.put("/app-storage/warehouses/:id/initial-stock", async (req, res): Promis
       const delta = requested[itemId] - previous[itemId];
       deltas[itemId] = delta;
       if (!delta) continue;
-      const nextCurrent = (Number(currentStock[itemId]) || 0) + delta;
-      if (nextCurrent < 0)
-        throw new Error(`La corrección de ${itemId} dejaría el stock actual en negativo. Disponible actual: ${Number(currentStock[itemId]) || 0}.`);
-      currentStock[itemId] = nextCurrent;
       changed += Math.abs(delta);
     }
     if (!changed) throw new Error("No hay cambios en el stock inicial.");
@@ -2154,9 +2150,9 @@ router.put("/app-storage/warehouses/:id/initial-stock", async (req, res): Promis
       );
     }
     const data = isRecord(found.rows[0].data)
-      ? { ...found.rows[0].data, stock: currentStock, updatedAt: now }
-      : { id: req.params.id, stock: currentStock, updatedAt: now };
-    await db.query("UPDATE warehouses SET stock=$2,data=$3,updated_at=now() WHERE id=$1", [req.params.id, currentStock, data]);
+      ? { ...found.rows[0].data, initialStock: requested, initialStockUpdatedAt: now, updatedAt: now }
+      : { id: req.params.id, initialStock: requested, initialStockUpdatedAt: now, updatedAt: now };
+    await db.query("UPDATE warehouses SET data=$2,updated_at=now() WHERE id=$1", [req.params.id, data]);
     await db.query("COMMIT");
     res.json({ stock: currentStock, initialStock: requested });
   } catch (error) {
