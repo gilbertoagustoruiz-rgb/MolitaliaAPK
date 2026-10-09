@@ -1430,6 +1430,13 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
           const quantity=Number(row.quantity)||0;
           stock[itemId]=Math.max(0,(Number(stock[itemId])||0)+quantity);
         }
+        const initialAdjustments=await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='AJUSTE_STOCK_INICIAL' AND movement_date>$2 GROUP BY item_id",[warehouseId,baseDate]);
+        for(const row of initialAdjustments.rows){
+          const itemId=String(row.item_id);
+          if(!Object.prototype.hasOwnProperty.call(stock,itemId)) continue;
+          const quantity=Number(row.quantity)||0;
+          stock[itemId]=Math.max(0,(Number(stock[itemId])||0)+quantity);
+        }
       }
       baseByWarehouse.set(warehouseId,stock);
       baseDateByWarehouse.set(warehouseId,baseDate);
@@ -2040,6 +2047,124 @@ router.put("/app-storage/warehouses/:id/import-stock", async (req, res): Promise
     await db.query("ROLLBACK").catch(()=>undefined);
     res.status(409).json({message:error instanceof Error?error.message:"No se pudo corregir el stock importado."});
   } finally { db.release(); }
+});
+
+router.get("/app-storage/warehouses/:id/initial-stock", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede consultar el stock inicial." });
+  const allowed = ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"];
+  try {
+    const found = await pool.query("SELECT id FROM warehouses WHERE id=$1 LIMIT 1", [req.params.id]);
+    if (!found.rows[0]) return void res.status(404).json({ message: "El almacén no existe." });
+    const initial = await pool.query(
+      "SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='CARGA_INICIAL' GROUP BY item_id",
+      [req.params.id],
+    );
+    const adjustments = await pool.query(
+      "SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='AJUSTE_STOCK_INICIAL' GROUP BY item_id",
+      [req.params.id],
+    );
+    const quantities: Record<string, number> = Object.fromEntries(allowed.map((itemId) => [itemId, 0]));
+    for (const row of initial.rows) {
+      const itemId = String(row.item_id);
+      if (Object.prototype.hasOwnProperty.call(quantities, itemId))
+        quantities[itemId] += Number(row.quantity) || 0;
+    }
+    for (const row of adjustments.rows) {
+      const itemId = String(row.item_id);
+      if (Object.prototype.hasOwnProperty.call(quantities, itemId))
+        quantities[itemId] += Number(row.quantity) || 0;
+    }
+    for (const itemId of allowed) quantities[itemId] = Math.max(0, Math.floor(Number(quantities[itemId]) || 0));
+    res.json({ quantities });
+  } catch (error) {
+    res.status(500).json({ message: error instanceof Error ? error.message : "No se pudo consultar el stock inicial." });
+  }
+});
+
+router.put("/app-storage/warehouses/:id/initial-stock", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede modificar el stock inicial." });
+  const quantities = isRecord(req.body?.quantities) ? req.body.quantities : {};
+  const note = String(req.body?.note || "").trim().slice(0, 300);
+  if (!note) return void res.status(400).json({ message: "Indica el motivo de la corrección del stock inicial." });
+  const allowed = ["PANETON_900G","PANETON_85G","AVENA","BATEA","MANDIL","SPAGHETTI"];
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const found = await db.query("SELECT stock,data FROM warehouses WHERE id=$1 FOR UPDATE", [req.params.id]);
+    if (!found.rows[0]) throw new Error("El almacén no existe.");
+    const currentStock = isRecord(found.rows[0].stock) ? { ...found.rows[0].stock } : {};
+    const initial = await db.query(
+      "SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='CARGA_INICIAL' GROUP BY item_id",
+      [req.params.id],
+    );
+    const adjustments = await db.query(
+      "SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='AJUSTE_STOCK_INICIAL' GROUP BY item_id",
+      [req.params.id],
+    );
+    const previous: Record<string, number> = Object.fromEntries(allowed.map((itemId) => [itemId, 0]));
+    for (const row of initial.rows) {
+      const itemId = String(row.item_id);
+      if (Object.prototype.hasOwnProperty.call(previous, itemId)) previous[itemId] += Number(row.quantity) || 0;
+    }
+    for (const row of adjustments.rows) {
+      const itemId = String(row.item_id);
+      if (Object.prototype.hasOwnProperty.call(previous, itemId)) previous[itemId] += Number(row.quantity) || 0;
+    }
+    for (const itemId of allowed) previous[itemId] = Math.max(0, Math.floor(Number(previous[itemId]) || 0));
+
+    const requested: Record<string, number> = Object.fromEntries(
+      allowed.map((itemId) => [itemId, Math.max(0, Math.floor(Number(quantities[itemId]) || 0))]),
+    );
+    const deltas: Record<string, number> = {};
+    let changed = 0;
+    for (const itemId of allowed) {
+      const delta = requested[itemId] - previous[itemId];
+      deltas[itemId] = delta;
+      if (!delta) continue;
+      const nextCurrent = (Number(currentStock[itemId]) || 0) + delta;
+      if (nextCurrent < 0)
+        throw new Error(`La corrección de ${itemId} dejaría el stock actual en negativo. Disponible actual: ${Number(currentStock[itemId]) || 0}.`);
+      currentStock[itemId] = nextCurrent;
+      changed += Math.abs(delta);
+    }
+    if (!changed) throw new Error("No hay cambios en el stock inicial.");
+
+    const now = new Date().toISOString();
+    for (const itemId of allowed) {
+      const delta = deltas[itemId];
+      if (!delta) continue;
+      const movement = {
+        id: `ALM-INI-ADJ-${randomUUID()}`,
+        warehouseId: req.params.id,
+        kind: "AJUSTE_STOCK_INICIAL",
+        itemId,
+        quantity: delta,
+        previousInitial: previous[itemId],
+        correctedInitial: requested[itemId],
+        actorId: actor.id,
+        date: now,
+        note,
+        reason: "CORRECCION_STOCK_INICIAL",
+      };
+      await db.query(
+        "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+        [movement.id, req.params.id, movement.kind, itemId, delta, actor.id, now, movement],
+      );
+    }
+    const data = isRecord(found.rows[0].data)
+      ? { ...found.rows[0].data, stock: currentStock, updatedAt: now }
+      : { id: req.params.id, stock: currentStock, updatedAt: now };
+    await db.query("UPDATE warehouses SET stock=$2,data=$3,updated_at=now() WHERE id=$1", [req.params.id, currentStock, data]);
+    await db.query("COMMIT");
+    res.json({ stock: currentStock, initialStock: requested });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo modificar el stock inicial." });
+  } finally {
+    db.release();
+  }
 });
 
 router.post("/app-storage/warehouses/:id/subtract-stock", async (req, res): Promise<void> => {
