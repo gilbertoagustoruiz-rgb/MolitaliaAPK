@@ -178,6 +178,8 @@ type Sale = {
   bonus?: string;
   redemptionCount?: number;
   redemptionItems?: Partial<RedemptionStock>;
+  /** Cantidades teóricas de la dinámica; no necesariamente fueron descontadas del Almacén. */
+  suggestedRedemptionItems?: Partial<RedemptionStock>;
   planchaAccessory?: "MANDIL" | "BATEA" | "NINGUNO";
   planchaMultiplier?: number;
   comment?: string;
@@ -10644,7 +10646,24 @@ function PromoterApp({
     bonus || requiredRedemptionEntries(requiredRedemptions).length,
   );
   const stockForCanje = warehouseRedemptionStock;
-  const missingRedemption = requiredRedemptionEntries(requiredRedemptions).find(
+  const redemptionsToConsume: Partial<RedemptionStock> =
+    mode === "PLANCHAS"
+      ? redemptionItems.reduce(
+          (result, item) => {
+            const theoretical = Math.max(
+              0,
+              Math.floor(Number(requiredRedemptions[item.id]) || 0),
+            );
+            const quantity =
+              item.id === "MANDIL" || item.id === "BATEA"
+                ? Math.min(theoretical, stockForCanje[item.id])
+                : theoretical;
+            return { ...result, [item.id]: quantity };
+          },
+          {} as RedemptionStock,
+        )
+      : requiredRedemptions;
+  const missingRedemption = requiredRedemptionEntries(redemptionsToConsume).find(
     ([itemId, quantity]) => stockForCanje[itemId] < quantity,
   );
   const exceptionNeedsComment = false;
@@ -10957,7 +10976,9 @@ function PromoterApp({
           : { [selectedProduct.brand]: unitQty },
       bonus,
       redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
-      redemptionItems: hasCanje ? requiredRedemptions : undefined,
+      redemptionItems: hasCanje ? redemptionsToConsume : undefined,
+      suggestedRedemptionItems:
+        mode === "PLANCHAS" && hasCanje ? requiredRedemptions : undefined,
       planchaAccessory:
         mode === "PLANCHAS" ? effectivePlanchaAccessory : undefined,
       planchaMultiplier:
@@ -11609,7 +11630,7 @@ function PromoterApp({
             <strong>
               {bonus || "La compra aún no activa una bonificación"}
             </strong>
-            {bonus && (
+            {bonus && mode !== "PLANCHAS" && (
               <small>
                 {requiredRedemptionEntries(requiredRedemptions)
                   .map(
@@ -11619,6 +11640,30 @@ function PromoterApp({
                   .join(" · ")}{" "}
                 · ${redemptionTotal} disponibles
               </small>
+            )}
+            {bonus && mode === "PLANCHAS" && (
+              <>
+                <small>
+                  Posibles por dinámica:{" "}
+                  {requiredRedemptionEntries(requiredRedemptions)
+                    .map(
+                      ([itemId, quantity]) =>
+                        `${quantity} ${redemptionLabel(itemId)}`,
+                    )
+                    .join(" · ")}
+                </small>
+                <small>
+                  A descontar del almacén:{" "}
+                  {requiredRedemptionEntries(redemptionsToConsume).length
+                    ? requiredRedemptionEntries(redemptionsToConsume)
+                        .map(
+                          ([itemId, quantity]) =>
+                            `${quantity} ${redemptionLabel(itemId)}`,
+                        )
+                        .join(" · ")
+                    : "0 unidades"}
+                </small>
+              </>
             )}
           </div>
         </div>
