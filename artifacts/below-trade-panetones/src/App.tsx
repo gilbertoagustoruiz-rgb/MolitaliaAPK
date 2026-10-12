@@ -10587,18 +10587,8 @@ function PromoterApp({
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
-  const mandilBaseRequirements = planchaCanjeRequirements(planchas, saleDate, "MANDIL", 1);
-  const bateaBaseRequirements = planchaCanjeRequirements(planchas, saleDate, "BATEA", 1);
-  const canCoverRequirements = (requirements: Partial<RedemptionStock>) =>
-    requiredRedemptionEntries(requirements).every(
-      ([itemId, quantity]) => warehouseRedemptionStock[itemId] >= quantity,
-    );
   const availablePlanchaAccessories = planchas >= 10
-    ? ([
-        ...(canCoverRequirements(mandilBaseRequirements) ? ["MANDIL" as const] : []),
-        ...(canCoverRequirements(bateaBaseRequirements) ? ["BATEA" as const] : []),
-        "NINGUNO" as const,
-      ])
+    ? (["MANDIL" as const, "BATEA" as const, "NINGUNO" as const])
     : (["NINGUNO" as const]);
   useEffect(() => {
     if (planchas < 10) {
