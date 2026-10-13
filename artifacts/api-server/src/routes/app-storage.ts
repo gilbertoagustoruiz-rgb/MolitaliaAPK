@@ -2256,8 +2256,8 @@ async function validateTradeSale(
   db: QueryClient,
   sale: StoredRecord,
 ) {
-  if (value(sale, "mode") !== "PLANCHAS" || numeric(sale, "planchas") <= 80)
-    throw new Error("La solicitud debe corresponder a una venta mayor a 80 planchas.");
+  if (value(sale, "mode") !== "PLANCHAS" || numeric(sale, "planchas") < 80)
+    throw new Error("La solicitud debe corresponder a una venta de 80 planchas o más.");
 
   requireFinalClientForCanje(sale);
 
