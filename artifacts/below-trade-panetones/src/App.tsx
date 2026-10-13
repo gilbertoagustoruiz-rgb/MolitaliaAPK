@@ -2286,7 +2286,7 @@ function bonusProductsFor(
     return total >= 2
       ? canjeProducts.filter((product) => product.id === "CANJE_AVENA_1")
       : [];
-  if (planchas > 80) {
+  if (planchas >= 80) {
     const fixed = canjeProducts.find(
       (product) => product.id === "CANJE_AVENA_144_SPAGHETTI_100",
     );
@@ -9617,7 +9617,7 @@ function AnalystApp({
                 })}
               </div>
             ) : (
-              <Empty title="Sin solicitudes Trade" detail="Las ventas mayores a 80 planchas aparecerán aquí antes de convertirse en ventas." />
+              <Empty title="Sin solicitudes Trade" detail="Las ventas de 80 planchas o más aparecerán aquí antes de convertirse en ventas." />
             )}
           </div>
         </section>
