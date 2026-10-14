@@ -72,6 +72,21 @@ type Market = {
   status: Status;
   warehouseId?: string;
 };
+
+function normalizeLocationValue(input?: string) {
+  return String(input || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function isPunoSouthMarket(market?: Pick<Market, "region" | "department"> | null) {
+  return (
+    normalizeLocationValue(market?.region) === "SUR" &&
+    normalizeLocationValue(market?.department) === "PUNO"
+  );
+}
 type AppUser = {
   id: string;
   dni: string;
@@ -3496,6 +3511,7 @@ function WarehouseCatalog({
   const [regularizeOpen,setRegularizeOpen]=useState(false);
   const [regularizing,setRegularizing]=useState(false);
   const [septemberRegularizing,setSeptemberRegularizing]=useState(false);
+  const [punoRegularizing,setPunoRegularizing]=useState(false);
   const [regularizeResult,setRegularizeResult]=useState("");
   const visibleWarehouses = allowedWarehouseIds?.length
     ? warehouses.filter((warehouse) => allowedWarehouseIds.includes(warehouse.id))
@@ -3667,6 +3683,22 @@ function WarehouseCatalog({
       setRegularizeResult(`ERROR: ${message}`);notify(message,true);
     }finally{setRegularizing(false);}
   };
+  const regularizePunoWithoutCanje=async()=>{
+    if(readOnly)return;
+    const confirmed=window.confirm("Se quitarán los canjes de todas las ventas de Región SUR · Departamento PUNO y se devolverá al Almacén el stock utilizado. Las ventas y productos vendidos se conservarán. ¿Continuar?");
+    if(!confirmed)return;
+    setPunoRegularizing(true);
+    try{
+      const r=await fetch("/api/app-storage/warehouses/regularize-puno-without-canje",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const text=await r.text();let p:any={};
+      try{p=text?JSON.parse(text):{};}catch{p={message:text};}
+      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Puno.`);
+      await load();
+      notify(`${p.salesRegularized||0} venta(s) de Puno quedaron sin canje. ${p.restoredItems||0} movimiento(s) de stock fueron devueltos al Almacén.`);
+    }catch(e){
+      notify(e instanceof Error?e.message:"No se pudieron regularizar las ventas de Puno.",true);
+    }finally{setPunoRegularizing(false);}
+  };
   const regularizeSeptemberClosures=async()=>{
     if(readOnly)return;
     const confirmed=window.confirm("Se regularizarán únicamente los cierres del 14 al 30 de septiembre de 2026 que tengan consumo 0. Cada cierre recibirá 1 Panetón 900 g y se descontará 1 unidad del Almacén correspondiente. ¿Continuar?");
@@ -3696,6 +3728,7 @@ function WarehouseCatalog({
           <Btn variant="outline" onClick={exportWarehouses}><Download /> Descargar</Btn>
           {!readOnly && (
             <>
+              <Btn variant="outline" disabled={punoRegularizing} onClick={()=>void regularizePunoWithoutCanje()}>{punoRegularizing?"Regularizando Puno...":"Regularizar Puno sin canjes"}</Btn>
               <Btn variant="outline" disabled={septemberRegularizing} onClick={()=>void regularizeSeptemberClosures()}>{septemberRegularizing?"Regularizando Sep...":"Regularizar cierres 14–30 Sep"}</Btn>
               <Btn variant="outline" onClick={()=>{setRegularizeResult("");setRegularizeOpen(true);}}>Regularizar consumos</Btn>
               <CsvImportButton label="Importar almacenes" onImport={importFile} testId="button-import-warehouses"/>
@@ -4616,6 +4649,7 @@ function SaleEditModal({
         originalCount,
       );
   const saleMarket = markets.find((market) => market.id === sale.marketId);
+  const punoWithoutCanje = isPunoSouthMarket(saleMarket);
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -4633,12 +4667,14 @@ function SaleEditModal({
     }),
     {} as RedemptionStock,
   );
-  const availableCanjes = bonusProductsFor(
-    sale.mode,
-    sale.units,
-    sale.planchas || 0,
-    restoredStock,
-  );
+  const availableCanjes = punoWithoutCanje
+    ? []
+    : bonusProductsFor(
+        sale.mode,
+        sale.units,
+        sale.planchas || 0,
+        restoredStock,
+      );
   const [canjeProductId, setCanjeProductId] = useState<CanjeProductId | "">(
     availableCanjes.find((product) => product.label === sale.bonus)?.id || "",
   );
@@ -4707,7 +4743,9 @@ function SaleEditModal({
     (product) => product.id === canjeProductId,
   );
   const calculatedRequirements =
-    sale.mode === "PLANCHAS"
+    punoWithoutCanje
+      ? emptyRedemptionStock()
+      : sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
         : planchaCanjeRequirements(
@@ -4723,7 +4761,9 @@ function SaleEditModal({
           )
         : emptyRedemptionStock();
   const effectiveRequirements: Partial<RedemptionStock> =
-    sale.mode === "UNIDADES" && !selectedCanje
+    punoWithoutCanje
+      ? emptyRedemptionStock()
+      : sale.mode === "UNIDADES" && !selectedCanje
       ? emptyRedemptionStock()
       : sale.mode === "PLANCHAS" && manualCanje
         ? manualCanje
@@ -4757,7 +4797,7 @@ function SaleEditModal({
     });
   };
   const exchangeEvidenceRequired = Boolean(
-    editedBonus || sale.mode === "PLANCHAS",
+    editedBonus || (sale.mode === "PLANCHAS" && !punoWithoutCanje),
   );
   const exchangeEvidenceReady =
     !exchangeEvidenceRequired || Boolean(exchange || sale.exchangePhoto);
@@ -4824,9 +4864,15 @@ function SaleEditModal({
   return (
     <Modal
       title="Editar venta"
-      detail={`${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
+      detail={punoWithoutCanje ? `${sale.id} · Región SUR · PUNO: esta venta debe permanecer sin canje.` : `${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
       close={close}
     >
+      {punoWithoutCanje && (
+        <div className="notice">
+          <strong>Región SUR · PUNO: venta sin canje</strong>
+          <p>No se pueden agregar bonificaciones a esta venta.</p>
+        </div>
+      )}
       <div className="form-grid">
         <SelectField
           label="Cliente *"
@@ -10576,13 +10622,16 @@ function PromoterApp({
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
-  const bonusProducts = bonusProductsFor(
-    mode,
-    total,
-    planchas,
-    warehouseRedemptionStock,
-    administrative ? new Date(administrative.date + "-05:00") : new Date(),
-  );
+  const punoWithoutCanje = isPunoSouthMarket(selectedMarket);
+  const bonusProducts = punoWithoutCanje
+    ? []
+    : bonusProductsFor(
+        mode,
+        total,
+        planchas,
+        warehouseRedemptionStock,
+        administrative ? new Date(administrative.date + "-05:00") : new Date(),
+      );
   const selectedBonusProduct =
     bonusProducts.find((product) => product.id === selectedBonusProductId) ||
     bonusProducts[0];
@@ -10623,21 +10672,25 @@ function PromoterApp({
     : (planchas >= 1 || miniHalfPlanchaCanje)
       ? 1
       : 0;
-  const planchaRequirements = miniHalfPlanchaCanje
-    ? ({ AVENA: 2 } as Partial<RedemptionStock>)
-    : planchaCanjeRequirements(
-        planchas,
-        saleDate,
-        effectivePlanchaAccessory,
-        planchaMultiplier,
-      );
-  const requiredRedemptions =
-    mode === "PLANCHAS"
-      ? planchaRequirements
-      : multiplyRedemptionRequirements(
-          selectedBonusProduct?.components || {},
-          canjeCount,
+  const planchaRequirements = punoWithoutCanje
+    ? ({} as Partial<RedemptionStock>)
+    : miniHalfPlanchaCanje
+      ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+      : planchaCanjeRequirements(
+          planchas,
+          saleDate,
+          effectivePlanchaAccessory,
+          planchaMultiplier,
         );
+  const requiredRedemptions =
+    punoWithoutCanje
+      ? ({} as Partial<RedemptionStock>)
+      : mode === "PLANCHAS"
+        ? planchaRequirements
+        : multiplyRedemptionRequirements(
+            selectedBonusProduct?.components || {},
+            canjeCount,
+          );
   const bonus =
     mode === "PLANCHAS" && requiredRedemptionEntries(requiredRedemptions).length
       ? canjeRequirementsLabel(requiredRedemptions)
@@ -10668,7 +10721,7 @@ function PromoterApp({
   );
   const exceptionNeedsComment = false;
   const exchangeEvidenceRequired = Boolean(
-    bonus || mode === "PLANCHAS",
+    bonus || (mode === "PLANCHAS" && !punoWithoutCanje),
   );
   const validUnitQty =
     mode === "PLANCHAS" ||
@@ -10980,9 +11033,13 @@ function PromoterApp({
       suggestedRedemptionItems:
         mode === "PLANCHAS" && hasCanje ? requiredRedemptions : undefined,
       planchaAccessory:
-        mode === "PLANCHAS" ? effectivePlanchaAccessory : undefined,
+        mode === "PLANCHAS"
+          ? punoWithoutCanje
+            ? "NINGUNO"
+            : effectivePlanchaAccessory
+          : undefined,
       planchaMultiplier:
-        mode === "PLANCHAS" ? planchaMultiplier : undefined,
+        mode === "PLANCHAS" ? (punoWithoutCanje ? 1 : planchaMultiplier) : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
@@ -11667,7 +11724,7 @@ function PromoterApp({
             )}
           </div>
         </div>
-        {bonus && mode === "PLANCHAS" && planchas >= 10 && (
+        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 10 && (
           <Field label="Dinámica de canje *">
             <select
               className="select"
@@ -11691,7 +11748,7 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {bonus && mode === "PLANCHAS" && planchas >= 80 && (
+        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && (
           <Field label="Multiplicador solicitado *">
             <select
               className="select"
@@ -11706,7 +11763,13 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {bonus && mode === "PLANCHAS" && (
+        {punoWithoutCanje && (
+          <div className="notice">
+            <strong>Región SUR · PUNO: venta sin canje</strong>
+            <p>Las ventas de este departamento no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
+          </div>
+        )}
+        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && (
           <p className="sale-form-note">
             Canje calculado automáticamente: {bonus}
             {selectedWarehouse ? ` · Almacén: ${selectedWarehouse.name}` : " · Mercado sin almacén asignado"}
