@@ -3728,9 +3728,6 @@ function WarehouseCatalog({
           <Btn variant="outline" onClick={exportWarehouses}><Download /> Descargar</Btn>
           {!readOnly && (
             <>
-              <Btn variant="outline" disabled={punoRegularizing} onClick={()=>void regularizePunoWithoutCanje()}>{punoRegularizing?"Regularizando Puno...":"Regularizar Puno sin canjes"}</Btn>
-              <Btn variant="outline" disabled={septemberRegularizing} onClick={()=>void regularizeSeptemberClosures()}>{septemberRegularizing?"Regularizando Sep...":"Regularizar cierres 14–30 Sep"}</Btn>
-              <Btn variant="outline" onClick={()=>{setRegularizeResult("");setRegularizeOpen(true);}}>Regularizar consumos</Btn>
               <CsvImportButton label="Importar almacenes" onImport={importFile} testId="button-import-warehouses"/>
               <CsvExampleButton onDownload={example} testId="button-example-warehouses"/>
               <Btn onClick={()=>setModal(true)}><Plus/> Nuevo almacén</Btn>
