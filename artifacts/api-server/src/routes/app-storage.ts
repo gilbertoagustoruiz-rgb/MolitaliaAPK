@@ -126,6 +126,23 @@ function stripCanjeFromSale(record: StoredRecord): StoredRecord {
   };
 }
 
+function enforceSaleWithoutCanje(record: StoredRecord) {
+  const clean = stripCanjeFromSale(record);
+  delete record.bonus;
+  delete record.redemptionItems;
+  delete record.suggestedRedemptionItems;
+  delete record.exchangePhoto;
+  delete record.finalClientName;
+  Object.assign(record, clean);
+}
+
+function isPunoSouthSaleRecord(record: StoredRecord) {
+  return (
+    normalizeLocationValue(record.marketRegion) === "SUR" &&
+    normalizeLocationValue(record.marketDepartment) === "PUNO"
+  );
+}
+
 function hasRedemptionConsumption(record: StoredRecord) {
   if (value(record, "bonus")) return true;
   const items = record.redemptionItems;
@@ -963,6 +980,7 @@ async function syncSnapshot(
             );
           }
           if (isNewRecord && name === "sales") {
+            if (isPunoSouthSaleRecord(record)) enforceSaleWithoutCanje(record);
             requireFinalClientForCanje(record);
           }
           if (isNewRecord && name === "sales" && hasRedemptionConsumption(record)) {
@@ -4054,6 +4072,13 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     );
     if (!customer.rows.length || !market.rows.length)
       throw new Error("Selecciona un cliente activo del mercado elegido.");
+    const marketData = isRecord(market.rows[0].data) ? market.rows[0].data : {};
+    const punoWithoutCanje = isPunoSouthMarketData(marketData);
+    if (punoWithoutCanje) {
+      input.marketRegion = value(marketData, "region");
+      input.marketDepartment = value(marketData, "department");
+      enforceSaleWithoutCanje(input);
+    }
     const date = new Date(value(input, "date"));
     const units = Number(input.units);
     const planchas = Number(input.planchas);
@@ -4130,7 +4155,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (
       (bonus && (!Number.isInteger(count) || count < 1 || count > 3)) ||
       (!bonus && count !== 0) ||
-      (mode === "UNIDADES" && count !== Math.floor(units / 2)) ||
+      (!punoWithoutCanje && mode === "UNIDADES" && count !== Math.floor(units / 2)) ||
       (count === 3 && !value(input, "comment"))
     )
       throw new Error("Número de canjes o justificación no válido.");
@@ -4157,7 +4182,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         requested.SPAGHETTI)
     )
       throw new Error("En unidades corresponde una avena cada 2 unidades.");
-    if (mode === "PLANCHAS") {
+    if (mode === "PLANCHAS" && !punoWithoutCanje) {
       const month = Number(
         new Intl.DateTimeFormat("en-US", {
           timeZone: "America/Lima",
