@@ -72,6 +72,21 @@ type Market = {
   status: Status;
   warehouseId?: string;
 };
+
+function normalizeLocationValue(input?: string) {
+  return String(input || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function isPunoSouthMarket(market?: Pick<Market, "region" | "department"> | null) {
+  return (
+    normalizeLocationValue(market?.region) === "SUR" &&
+    normalizeLocationValue(market?.department) === "PUNO"
+  );
+}
 type AppUser = {
   id: string;
   dni: string;
@@ -10576,13 +10591,16 @@ function PromoterApp({
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
-  const bonusProducts = bonusProductsFor(
-    mode,
-    total,
-    planchas,
-    warehouseRedemptionStock,
-    administrative ? new Date(administrative.date + "-05:00") : new Date(),
-  );
+  const punoWithoutCanje = isPunoSouthMarket(selectedMarket);
+  const bonusProducts = punoWithoutCanje
+    ? []
+    : bonusProductsFor(
+        mode,
+        total,
+        planchas,
+        warehouseRedemptionStock,
+        administrative ? new Date(administrative.date + "-05:00") : new Date(),
+      );
   const selectedBonusProduct =
     bonusProducts.find((product) => product.id === selectedBonusProductId) ||
     bonusProducts[0];
@@ -10623,21 +10641,25 @@ function PromoterApp({
     : (planchas >= 1 || miniHalfPlanchaCanje)
       ? 1
       : 0;
-  const planchaRequirements = miniHalfPlanchaCanje
-    ? ({ AVENA: 2 } as Partial<RedemptionStock>)
-    : planchaCanjeRequirements(
-        planchas,
-        saleDate,
-        effectivePlanchaAccessory,
-        planchaMultiplier,
-      );
-  const requiredRedemptions =
-    mode === "PLANCHAS"
-      ? planchaRequirements
-      : multiplyRedemptionRequirements(
-          selectedBonusProduct?.components || {},
-          canjeCount,
+  const planchaRequirements = punoWithoutCanje
+    ? ({} as Partial<RedemptionStock>)
+    : miniHalfPlanchaCanje
+      ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+      : planchaCanjeRequirements(
+          planchas,
+          saleDate,
+          effectivePlanchaAccessory,
+          planchaMultiplier,
         );
+  const requiredRedemptions =
+    punoWithoutCanje
+      ? ({} as Partial<RedemptionStock>)
+      : mode === "PLANCHAS"
+        ? planchaRequirements
+        : multiplyRedemptionRequirements(
+            selectedBonusProduct?.components || {},
+            canjeCount,
+          );
   const bonus =
     mode === "PLANCHAS" && requiredRedemptionEntries(requiredRedemptions).length
       ? canjeRequirementsLabel(requiredRedemptions)
@@ -10668,7 +10690,7 @@ function PromoterApp({
   );
   const exceptionNeedsComment = false;
   const exchangeEvidenceRequired = Boolean(
-    bonus || mode === "PLANCHAS",
+    bonus || (mode === "PLANCHAS" && !punoWithoutCanje),
   );
   const validUnitQty =
     mode === "PLANCHAS" ||
@@ -10980,9 +11002,13 @@ function PromoterApp({
       suggestedRedemptionItems:
         mode === "PLANCHAS" && hasCanje ? requiredRedemptions : undefined,
       planchaAccessory:
-        mode === "PLANCHAS" ? effectivePlanchaAccessory : undefined,
+        mode === "PLANCHAS"
+          ? punoWithoutCanje
+            ? "NINGUNO"
+            : effectivePlanchaAccessory
+          : undefined,
       planchaMultiplier:
-        mode === "PLANCHAS" ? planchaMultiplier : undefined,
+        mode === "PLANCHAS" ? (punoWithoutCanje ? 1 : planchaMultiplier) : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
@@ -11667,7 +11693,7 @@ function PromoterApp({
             )}
           </div>
         </div>
-        {bonus && mode === "PLANCHAS" && planchas >= 10 && (
+        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 10 && (
           <Field label="Dinámica de canje *">
             <select
               className="select"
@@ -11691,7 +11717,7 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {bonus && mode === "PLANCHAS" && planchas >= 80 && (
+        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && (
           <Field label="Multiplicador solicitado *">
             <select
               className="select"
@@ -11706,7 +11732,13 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {bonus && mode === "PLANCHAS" && (
+        {punoWithoutCanje && (
+          <div className="notice">
+            <strong>Región SUR · PUNO: venta sin canje</strong>
+            <p>Las ventas de este departamento no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
+          </div>
+        )}
+        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && (
           <p className="sale-form-note">
             Canje calculado automáticamente: {bonus}
             {selectedWarehouse ? ` · Almacén: ${selectedWarehouse.name}` : " · Mercado sin almacén asignado"}
