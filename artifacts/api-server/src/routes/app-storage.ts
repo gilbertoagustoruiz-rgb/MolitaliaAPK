@@ -4351,6 +4351,15 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       return;
     }
     const currentSale = existing.rows[0];
+    const currentMarketResult = await client.query(
+      "SELECT data FROM markets WHERE id=$1 LIMIT 1",
+      [currentSale.market_id],
+    );
+    const currentMarketData = isRecord(currentMarketResult.rows[0]?.data)
+      ? currentMarketResult.rows[0].data
+      : {};
+    const punoWithoutCanje = isPunoSouthMarketData(currentMarketData);
+    if (punoWithoutCanje) enforceSaleWithoutCanje(input);
     const saleMode = value(currentSale.data, "mode");
     const salePlanchas = Math.max(0, Math.floor(numeric(currentSale.data, "planchas")));
     const requestedAccessoryRaw = value(input, "planchaAccessory");
