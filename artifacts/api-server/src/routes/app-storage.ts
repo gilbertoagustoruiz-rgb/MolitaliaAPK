@@ -93,6 +93,39 @@ function numeric(record: StoredRecord, key: string) {
   return Number.isFinite(result) ? result : 0;
 }
 
+function normalizeLocationValue(input: unknown) {
+  return String(input ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function isPunoSouthMarketData(record: StoredRecord) {
+  return (
+    normalizeLocationValue(record.region) === "SUR" &&
+    normalizeLocationValue(record.department) === "PUNO"
+  );
+}
+
+function stripCanjeFromSale(record: StoredRecord): StoredRecord {
+  const {
+    bonus: _bonus,
+    redemptionItems: _redemptionItems,
+    suggestedRedemptionItems: _suggestedRedemptionItems,
+    exchangePhoto: _exchangePhoto,
+    finalClientName: _finalClientName,
+    ...rest
+  } = record;
+  return {
+    ...rest,
+    redemptionCount: 0,
+    planchaAccessory: value(record, "mode") === "PLANCHAS" ? "NINGUNO" : undefined,
+    planchaMultiplier: value(record, "mode") === "PLANCHAS" ? 1 : undefined,
+    punoWithoutCanje: true,
+  };
+}
+
 function hasRedemptionConsumption(record: StoredRecord) {
   if (value(record, "bonus")) return true;
   const items = record.redemptionItems;
@@ -1551,6 +1584,146 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
     req.log.error({err:error},"Unable to rebuild warehouse consumption history");
     res.status(409).json({message:error instanceof Error?error.message:"No se pudo reconstruir el stock histórico."});
   } finally { db.release(); }
+});
+
+router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar ventas de Puno." });
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    await lockInventoryLedger(db as unknown as QueryClient);
+
+    const marketsResult = await db.query("SELECT id,data FROM markets");
+    const punoMarketIds = marketsResult.rows
+      .filter((row) => isRecord(row.data) && isPunoSouthMarketData(row.data))
+      .map((row) => String(row.id));
+    if (!punoMarketIds.length) {
+      await db.query("COMMIT");
+      res.json({ salesRegularized: 0, restoredItems: 0, markets: 0 });
+      return;
+    }
+
+    const salesResult = await db.query(
+      "SELECT id,market_id,promoter_id,data FROM sales WHERE market_id = ANY($1::text[]) ORDER BY sale_date,id FOR UPDATE",
+      [punoMarketIds],
+    );
+    let salesRegularized = 0;
+    let restoredItems = 0;
+
+    for (const row of salesResult.rows) {
+      const saleId = String(row.id);
+      const saleData = isRecord(row.data) ? row.data : {};
+      const movementPrefix = `CAN-${saleId}-`;
+      const canjeMovements = await db.query(
+        "SELECT item_id,quantity FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1 FOR UPDATE",
+        [movementPrefix],
+      );
+      const hadCanje =
+        hasRedemptionConsumption(saleData) ||
+        canjeMovements.rows.some((movement) => Math.max(0, Number(movement.quantity) || 0) > 0);
+      if (!hadCanje) continue;
+
+      const restoredLinked = await restoreWarehouseStockMovements(
+        db as unknown as QueryClient,
+        `SALE:${saleId}`,
+        actor.id,
+      );
+      restoredItems += restoredLinked;
+
+      if (!restoredLinked) {
+        const alreadyLegacyRestored = await db.query(
+          "SELECT 1 FROM warehouse_movements WHERE data->>'referenceId'=$1 AND kind='PUNO_CANJE_DEVOLUCION' LIMIT 1",
+          [`PUNO-CANJE:${saleId}`],
+        );
+        if (!alreadyLegacyRestored.rows.length) {
+          const requirements: Record<string, number> = Object.fromEntries(
+            redemptionItemIds.map((itemId) => [itemId, 0]),
+          );
+          if (canjeMovements.rows.length) {
+            for (const movement of canjeMovements.rows) {
+              const itemId = String(movement.item_id || "");
+              if (!Object.prototype.hasOwnProperty.call(requirements, itemId)) continue;
+              requirements[itemId] += Math.max(0, Math.floor(Number(movement.quantity) || 0));
+            }
+          } else if (isRecord(saleData.redemptionItems)) {
+            for (const itemId of redemptionItemIds)
+              requirements[itemId] = Math.max(0, Math.floor(Number(saleData.redemptionItems[itemId]) || 0));
+          }
+
+          const entries = Object.entries(requirements).filter(([, quantity]) => quantity > 0);
+          if (entries.length) {
+            const warehouse = await warehouseForMarket(db as unknown as QueryClient, String(row.market_id));
+            const locked = await db.query("SELECT id,stock FROM warehouses WHERE id=$1 FOR UPDATE", [warehouse.id]);
+            const stock = isRecord(locked.rows[0]?.stock) ? { ...locked.rows[0].stock } : {};
+            const now = new Date().toISOString();
+            for (const [itemId, quantity] of entries) {
+              stock[itemId] = Math.max(0, Number(stock[itemId]) || 0) + quantity;
+              const movement = {
+                id: `ALM-PUNO-REST-${randomUUID()}`,
+                warehouseId: String(warehouse.id),
+                marketId: String(row.market_id),
+                kind: "PUNO_CANJE_DEVOLUCION",
+                itemId,
+                quantity,
+                actorId: actor.id,
+                referenceId: `PUNO-CANJE:${saleId}`,
+                saleId,
+                date: now,
+              };
+              await db.query(
+                "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+                [movement.id, warehouse.id, movement.kind, itemId, quantity, actor.id, now, movement],
+              );
+              restoredItems += 1;
+            }
+            await db.query(
+              "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+              [warehouse.id, stock],
+            );
+          }
+        }
+      }
+
+      await db.query(
+        "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
+        [movementPrefix],
+      );
+
+      const cleanSale = {
+        ...stripCanjeFromSale(saleData),
+        updatedAt: new Date().toISOString(),
+        punoCanjeRegularizedAt: new Date().toISOString(),
+        punoCanjeRegularizedBy: actor.id,
+      };
+      await db.query(
+        "UPDATE sales SET exchange_photo=NULL,data=$2,record_updated_at=now(),updated_at=now() WHERE id=$1",
+        [saleId, cleanSale],
+      );
+      salesRegularized += 1;
+    }
+
+    const approvals = await db.query(
+      "SELECT id,data FROM trade_approvals WHERE market_id = ANY($1::text[]) FOR UPDATE",
+      [punoMarketIds],
+    );
+    for (const approval of approvals.rows) {
+      const data = isRecord(approval.data) ? approval.data : {};
+      const sale = isRecord(data.sale) ? data.sale : null;
+      if (!sale || !hasRedemptionConsumption(sale)) continue;
+      const cleanData = { ...data, sale: stripCanjeFromSale(sale) };
+      await db.query("UPDATE trade_approvals SET data=$2,updated_at=now() WHERE id=$1", [approval.id, cleanData]);
+    }
+
+    await db.query("COMMIT");
+    res.json({ salesRegularized, restoredItems, markets: punoMarketIds.length });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to regularize Puno sales without canje");
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudieron regularizar las ventas de Puno." });
+  } finally {
+    db.release();
+  }
 });
 
 router.post("/app-storage/warehouses/regularize-september-zero-closures", async (req, res): Promise<void> => {
