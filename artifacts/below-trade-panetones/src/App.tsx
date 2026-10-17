@@ -11172,6 +11172,9 @@ function PromoterApp({
       status: "PENDIENTE",
     };
     if (requiresTradeApproval) {
+      if (!administrative) {
+        void captureTrackingPoint(user, "TRADE", selectedMarketId, clientId, id);
+      }
       try {
         if (LOCAL_WAREHOUSE_DEMO) {
           const current = readStore<TradeApproval[]>("bt-demo-trade-approvals", []);
@@ -11243,6 +11246,7 @@ function PromoterApp({
       }
       return;
     }
+    void captureTrackingPoint(user, "VENTA", selectedMarketId, clientId, id);
     const next = [sale, ...sales];
     setSales(next);
     writeStore("bt-sales", next);
@@ -11317,6 +11321,22 @@ function PromoterApp({
       date: now.toISOString(),
       status: syncStatus(),
     };
+    void captureTrackingPoint(
+      user,
+      type === "ENTRADA" ? "ENTRADA" : "SALIDA",
+      selectedMarketId,
+      markClientId,
+      id,
+    );
+    if (type === "SALIDA" && tastingUsed > 0) {
+      void captureTrackingPoint(
+        user,
+        "DEGUSTACION",
+        selectedMarketId,
+        markClientId,
+        `CLOSE-${id}`,
+      );
+    }
     const next = [item, ...attendance];
     setAttendance(next);
     writeStore("bt-attendance", next);
