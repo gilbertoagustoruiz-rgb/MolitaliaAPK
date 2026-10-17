@@ -11566,9 +11566,6 @@ function PromoterApp({
       status: "PENDIENTE",
     };
     if (requiresTradeApproval) {
-      if (!administrative) {
-        void captureTrackingPoint(user, "TRADE", selectedMarketId, clientId, id);
-      }
       try {
         if (LOCAL_WAREHOUSE_DEMO) {
           const current = readStore<TradeApproval[]>("bt-demo-trade-approvals", []);
@@ -11618,6 +11615,9 @@ function PromoterApp({
         setExchangeUrl("");
         setView("LISTA");
         notify("Solicitud enviada a Aprobaciones Trade. La venta se registrará únicamente cuando sea aprobada.");
+        if (!administrative) {
+          void captureTrackingPoint(user, "TRADE", selectedMarketId, clientId, id);
+        }
       } catch (error) {
         notify(error instanceof Error ? error.message : "No se pudo enviar la solicitud Trade.", true);
       }
@@ -13626,6 +13626,14 @@ export default function App() {
       password: user.password || catalogUser.password,
     };
   }, [user, users]);
+  useEffect(() => {
+    if (!activeUser || !isPromoterRole(activeUser.role)) return;
+    const flush = () => void sendTrackingQueue(activeUser);
+    flush();
+    window.addEventListener("online", flush);
+    return () => window.removeEventListener("online", flush);
+  }, [activeUser?.id, activeUser?.dni, activeUser?.role, activeUser?.password]);
+
   useEffect(() => {
     if (!activeUser || !isPromoterRole(activeUser.role)) return;
     const today = attendanceDay(new Date().toISOString());
