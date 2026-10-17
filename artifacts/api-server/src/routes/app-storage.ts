@@ -1166,6 +1166,86 @@ router.post("/app-storage/tracking/batch", async (req, res): Promise<void> => {
   }
 });
 
+router.post("/app-storage/tracking/diagnostics/batch", async (req, res): Promise<void> => {
+  const actor = await authorizedTrackingPromoter(req);
+  if (!actor)
+    return void res.status(403).json({
+      message: "Promotor no autorizado para enviar diagnóstico de tracking.",
+    });
+  const diagnostics = Array.isArray(req.body?.diagnostics)
+    ? req.body.diagnostics.filter(isRecord).slice(0, 500)
+    : [];
+  if (!diagnostics.length)
+    return void res.status(400).json({
+      message: "No hay diagnósticos de tracking para guardar.",
+    });
+
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    let inserted = 0;
+    for (const item of diagnostics) {
+      if (value(item, "promoterId") && value(item, "promoterId") !== actor.id)
+        continue;
+      const recordedAt = new Date(value(item, "recordedAt") || Date.now());
+      if (Number.isNaN(recordedAt.getTime())) continue;
+      const marketId = value(item, "marketId");
+      const clientId = value(item, "clientId");
+      if (marketId) {
+        const allowed = await db.query(
+          "SELECT 1 FROM assignments WHERE promoter_id=$1 AND $2=ANY(market_ids) LIMIT 1",
+          [actor.id, marketId],
+        );
+        if (!allowed.rows.length && value(actor.data, "marketId") !== marketId)
+          continue;
+      }
+      const id = value(item, "id") || `TRKERR-${randomUUID()}`;
+      const errorCode = value(item, "errorCode") || "UNKNOWN";
+      const message = value(item, "message") || "No se pudo obtener ubicación.";
+      const data = {
+        id,
+        promoterId: actor.id,
+        promoterDni: actor.dni,
+        marketId,
+        clientId,
+        eventType: value(item, "eventType") || "TRACKING",
+        errorCode,
+        message,
+        recordedAt: recordedAt.toISOString(),
+        syncedAt: new Date().toISOString(),
+      };
+      await db.query(
+        `INSERT INTO promoter_tracking_diagnostics
+          (id,promoter_id,market_id,client_id,event_type,error_code,message,recorded_at,synced_at,data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),$9)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          id,
+          actor.id,
+          marketId,
+          clientId,
+          data.eventType,
+          errorCode,
+          message,
+          recordedAt.toISOString(),
+          data,
+        ],
+      );
+      inserted += 1;
+    }
+    await db.query("COMMIT");
+    res.json({ inserted });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to save tracking diagnostics");
+    res.status(500).json({
+      message: "No se pudieron guardar los diagnósticos de tracking.",
+    });
+  } finally {
+    db.release();
+  }
+});
+
 router.get("/app-storage/tracking", async (req, res): Promise<void> => {
   const actor = await authorizedTradeActor(req);
   if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede consultar tracking." });
@@ -1201,6 +1281,51 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
          LIMIT ${values.length}`,
       values,
     );
+    const diagnosticValues: unknown[] = [];
+    const diagnosticWhere: string[] = [];
+    const addDiagnostic = (sql: string, v: unknown) => {
+      diagnosticValues.push(v);
+      diagnosticWhere.push(
+        sql.replace("?", `${diagnosticValues.length}`),
+      );
+    };
+    if (promoterId) addDiagnostic("d.promoter_id=?", promoterId);
+    if (marketId) addDiagnostic("d.market_id=?", marketId);
+    if (eventType) addDiagnostic("d.event_type=?", eventType);
+    if (from) addDiagnostic("d.recorded_at>=?", from);
+    if (to) addDiagnostic("d.recorded_at<=?", to);
+    diagnosticValues.push(limit);
+    const diagnosticResult = await pool.query(
+      `SELECT d.data,d.promoter_id,d.market_id,d.client_id,d.event_type,
+              d.error_code,d.message,d.recorded_at,d.synced_at,
+              COALESCE(u.data->>'name',u.dni,d.promoter_id) AS promoter_name,
+              COALESCE(m.name,d.market_id) AS market_name,
+              COALESCE(c.name,d.client_id) AS client_name
+         FROM promoter_tracking_diagnostics d
+         LEFT JOIN users u ON u.id=d.promoter_id
+         LEFT JOIN markets m ON m.id=d.market_id
+         LEFT JOIN clients c ON c.id=d.client_id
+         ${diagnosticWhere.length ? "WHERE " + diagnosticWhere.join(" AND ") : ""}
+         ORDER BY d.recorded_at DESC
+         LIMIT ${diagnosticValues.length}`,
+      diagnosticValues,
+    );
+
+    const diagnostics = diagnosticResult.rows.map((row) => ({
+      ...(isRecord(row.data) ? row.data : {}),
+      promoterId: row.promoter_id,
+      promoterName: row.promoter_name,
+      marketId: row.market_id,
+      marketName: row.market_name,
+      clientId: row.client_id,
+      clientName: row.client_name,
+      eventType: row.event_type,
+      errorCode: row.error_code,
+      message: row.message,
+      recordedAt: row.recorded_at,
+      syncedAt: row.synced_at,
+    }));
+
     const points = result.rows.map((row) => ({
       ...(isRecord(row.data) ? row.data : {}),
       promoterId: row.promoter_id,
@@ -1227,8 +1352,9 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
       criticalBattery: points.filter((point) => point.batteryLevel != null && Number(point.batteryLevel) <= 10).length,
       lowAccuracy: points.filter((point) => point.accuracyMeters != null && Number(point.accuracyMeters) > 100).length,
       promoters: new Set(points.map((point) => point.promoterId)).size,
+      gpsErrors: diagnostics.length,
     };
-    res.json({ points, summary });
+    res.json({ points, diagnostics, summary });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read tracking");
     res.status(500).json({ message: "No se pudo consultar el tracking." });
