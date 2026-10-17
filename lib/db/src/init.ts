@@ -137,6 +137,20 @@ export async function ensureDatabaseSchema() {
       created_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS promoter_tracking_diagnostics (
+      id text PRIMARY KEY,
+      promoter_id text NOT NULL DEFAULT '',
+      market_id text NOT NULL DEFAULT '',
+      client_id text NOT NULL DEFAULT '',
+      event_type text NOT NULL DEFAULT 'TRACKING',
+      error_code text NOT NULL DEFAULT 'UNKNOWN',
+      message text NOT NULL DEFAULT '',
+      recorded_at timestamptz NOT NULL DEFAULT now(),
+      synced_at timestamptz NOT NULL DEFAULT now(),
+      data jsonb NOT NULL DEFAULT '{}',
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS warehouses (
       id text PRIMARY KEY,
       name text NOT NULL DEFAULT '',
@@ -344,6 +358,8 @@ export async function ensureDatabaseSchema() {
     CREATE INDEX IF NOT EXISTS idx_tracking_promoter_date ON promoter_location_tracking(promoter_id,recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tracking_market_date ON promoter_location_tracking(market_id,recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tracking_event_date ON promoter_location_tracking(event_type,recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tracking_diag_promoter_date ON promoter_tracking_diagnostics(promoter_id,recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tracking_diag_event_date ON promoter_tracking_diagnostics(event_type,recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_movements_date ON inventory_movements(movement_date DESC);
     CREATE INDEX IF NOT EXISTS idx_closures_date ON session_closures(closure_date DESC);
     CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);

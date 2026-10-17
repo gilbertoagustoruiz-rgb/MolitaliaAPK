@@ -233,7 +233,28 @@ type TrackingPoint = {
   syncedAt?: string;
 };
 
+type TrackingDiagnostic = {
+  id: string;
+  promoterId: string;
+  promoterName?: string;
+  marketId?: string;
+  marketName?: string;
+  clientId?: string;
+  clientName?: string;
+  eventType: TrackingEventType;
+  errorCode:
+    | "PERMISSION_DENIED"
+    | "POSITION_UNAVAILABLE"
+    | "TIMEOUT"
+    | "GEOLOCATION_UNAVAILABLE"
+    | "UNKNOWN";
+  message: string;
+  recordedAt: string;
+  syncedAt?: string;
+};
+
 const TRACKING_QUEUE_KEY = "bt-tracking-pending";
+const TRACKING_DIAGNOSTIC_QUEUE_KEY = "bt-tracking-diagnostics-pending";
 const TRACKING_INTERVAL_MS = 60_000;
 
 function trackingQueue() {
@@ -242,6 +263,46 @@ function trackingQueue() {
 
 function saveTrackingQueue(points: TrackingPoint[]) {
   writeStore(TRACKING_QUEUE_KEY, points.slice(-2000));
+}
+
+function trackingDiagnosticQueue() {
+  return readStore<TrackingDiagnostic[]>(TRACKING_DIAGNOSTIC_QUEUE_KEY, []);
+}
+
+function saveTrackingDiagnosticQueue(items: TrackingDiagnostic[]) {
+  writeStore(TRACKING_DIAGNOSTIC_QUEUE_KEY, items.slice(-500));
+}
+
+function trackingErrorDetails(error: unknown): Pick<TrackingDiagnostic, "errorCode" | "message"> {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? Number((error as { code?: unknown }).code)
+      : 0;
+  if (code === 1)
+    return {
+      errorCode: "PERMISSION_DENIED",
+      message: "El usuario denegó el permiso de ubicación o el navegador lo bloqueó.",
+    };
+  if (code === 2)
+    return {
+      errorCode: "POSITION_UNAVAILABLE",
+      message: "El dispositivo no pudo determinar una ubicación GPS.",
+    };
+  if (code === 3)
+    return {
+      errorCode: "TIMEOUT",
+      message: "El dispositivo agotó el tiempo de espera para obtener ubicación.",
+    };
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/no disponible/i.test(message))
+    return {
+      errorCode: "GEOLOCATION_UNAVAILABLE",
+      message: "Geolocalización no disponible en este dispositivo o navegador.",
+    };
+  return {
+    errorCode: "UNKNOWN",
+    message: message || "No se pudo obtener la ubicación.",
+  };
 }
 
 async function trackingBattery() {
@@ -291,6 +352,30 @@ async function sendTrackingQueue(user: AppUser) {
   saveTrackingQueue([]);
 }
 
+async function sendTrackingDiagnosticQueue(user: AppUser) {
+  if (!navigator.onLine || !user.password) return;
+  const diagnostics = trackingDiagnosticQueue();
+  if (!diagnostics.length) return;
+  const response = await fetch("/api/app-storage/tracking/diagnostics/batch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Tracking-Dni": user.dni,
+      "X-Tracking-Key": user.password,
+    },
+    body: JSON.stringify({ diagnostics }),
+  });
+  if (!response.ok) return;
+  saveTrackingDiagnosticQueue([]);
+}
+
+async function flushTrackingQueues(user: AppUser) {
+  await Promise.all([
+    sendTrackingQueue(user),
+    sendTrackingDiagnosticQueue(user),
+  ]);
+}
+
 async function captureTrackingPoint(
   user: AppUser,
   eventType: TrackingEventType,
@@ -324,8 +409,25 @@ async function captureTrackingPoint(
     };
     saveTrackingQueue([...trackingQueue(), point]);
     await sendTrackingQueue(user);
-  } catch {
-    // El tracking nunca bloquea una venta o marcación.
+  } catch (error) {
+    // El tracking nunca bloquea una venta o marcación, pero deja trazabilidad
+    // del motivo por el que no pudo obtener ubicación.
+    const detail = trackingErrorDetails(error);
+    const diagnostic: TrackingDiagnostic = {
+      id: `TRKERR-${crypto.randomUUID()}`,
+      promoterId: user.id,
+      marketId,
+      clientId,
+      eventType,
+      errorCode: detail.errorCode,
+      message: detail.message,
+      recordedAt: new Date().toISOString(),
+    };
+    saveTrackingDiagnosticQueue([
+      ...trackingDiagnosticQueue(),
+      diagnostic,
+    ]);
+    await sendTrackingDiagnosticQueue(user);
   }
 }
 
@@ -7553,6 +7655,167 @@ function CoordinatorApp({
   );
 }
 
+function TrackingMap({
+  points,
+  connectRoute,
+}: {
+  points: TrackingPoint[];
+  connectRoute: boolean;
+}) {
+  if (!points.length) return null;
+  const width = 1000;
+  const height = 360;
+  const tileSize = 256;
+  const mercator = (point: TrackingPoint, zoom: number) => {
+    const scale = tileSize * 2 ** zoom;
+    const lat = Math.max(-85.05112878, Math.min(85.05112878, point.latitude));
+    const x = ((point.longitude + 180) / 360) * scale;
+    const sin = Math.sin((lat * Math.PI) / 180);
+    const y =
+      (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale;
+    return { x, y };
+  };
+  let zoom = 17;
+  for (; zoom > 3; zoom -= 1) {
+    const projected = points.map((point) => mercator(point, zoom));
+    const xs = projected.map((point) => point.x);
+    const ys = projected.map((point) => point.y);
+    if (
+      Math.max(...xs) - Math.min(...xs) <= width - 160 &&
+      Math.max(...ys) - Math.min(...ys) <= height - 100
+    )
+      break;
+  }
+  const projected = points.map((point) => ({
+    point,
+    ...mercator(point, zoom),
+  }));
+  const minX = Math.min(...projected.map((item) => item.x));
+  const maxX = Math.max(...projected.map((item) => item.x));
+  const minY = Math.min(...projected.map((item) => item.y));
+  const maxY = Math.max(...projected.map((item) => item.y));
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const left = centerX - width / 2;
+  const top = centerY - height / 2;
+  const startTileX = Math.floor(left / tileSize);
+  const endTileX = Math.floor((left + width) / tileSize);
+  const startTileY = Math.floor(top / tileSize);
+  const endTileY = Math.floor((top + height) / tileSize);
+  const maxTile = 2 ** zoom;
+  const tiles: Array<{ x: number; y: number; drawX: number; drawY: number }> = [];
+  for (let x = startTileX; x <= endTileX; x += 1) {
+    for (let y = startTileY; y <= endTileY; y += 1) {
+      if (y < 0 || y >= maxTile) continue;
+      const wrappedX = ((x % maxTile) + maxTile) % maxTile;
+      tiles.push({
+        x: wrappedX,
+        y,
+        drawX: x * tileSize - left,
+        drawY: y * tileSize - top,
+      });
+    }
+  }
+  const polyline = projected
+    .map((item) => `${(item.x - left).toFixed(1)},${(item.y - top).toFixed(1)}`)
+    .join(" ");
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: "100%",
+        minHeight: height,
+        height,
+        overflow: "hidden",
+        borderRadius: 14,
+        background: "#0b1320",
+      }}
+      aria-label="Mapa real de ubicaciones GPS"
+    >
+      {tiles.map((tile) => (
+        <img
+          key={`${zoom}-${tile.x}-${tile.y}-${tile.drawX}`}
+          src={`https://tile.openstreetmap.org/${zoom}/${tile.x}/${tile.y}.png`}
+          alt=""
+          width={tileSize}
+          height={tileSize}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          style={{
+            position: "absolute",
+            left: tile.drawX,
+            top: tile.drawY,
+            width: tileSize,
+            height: tileSize,
+            userSelect: "none",
+            pointerEvents: "none",
+          }}
+        />
+      ))}
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        width="100%"
+        height="100%"
+        style={{ position: "absolute", inset: 0 }}
+      >
+        {connectRoute && projected.length > 1 && (
+          <polyline
+            points={polyline}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+            opacity="0.9"
+          />
+        )}
+        {projected.map((item, index) => (
+          <g key={item.point.id}>
+            <circle
+              cx={item.x - left}
+              cy={item.y - top}
+              r={item.point.eventType === "TRACKING" ? 6 : 10}
+              fill="currentColor"
+              stroke="#ffffff"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            />
+            {connectRoute && (
+              <text
+                x={item.x - left + 10}
+                y={item.y - top - 10}
+                fontSize="14"
+                fill="#ffffff"
+                stroke="#0b1320"
+                strokeWidth="3"
+                paintOrder="stroke"
+              >
+                {index + 1}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+      <div
+        style={{
+          position: "absolute",
+          right: 8,
+          bottom: 6,
+          padding: "2px 6px",
+          borderRadius: 6,
+          background: "rgba(15,23,42,.82)",
+          fontSize: 11,
+        }}
+      >
+        © OpenStreetMap contributors
+      </div>
+    </div>
+  );
+}
+
 function TrackingModule({
   user,
   users,
@@ -7568,6 +7831,7 @@ function TrackingModule({
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const [points, setPoints] = useState<TrackingPoint[]>([]);
+  const [diagnostics, setDiagnostics] = useState<TrackingDiagnostic[]>([]);
   const [loading, setLoading] = useState(false);
   const [date, setDate] = useState(today);
   const [promoterId, setPromoterId] = useState("");
@@ -7599,6 +7863,9 @@ function TrackingModule({
       if (!response.ok)
         throw new Error(payload.message || "No se pudo cargar Tracking.");
       setPoints(Array.isArray(payload.points) ? payload.points : []);
+      setDiagnostics(
+        Array.isArray(payload.diagnostics) ? payload.diagnostics : [],
+      );
     } catch (error) {
       notify(
         error instanceof Error ? error.message : "No se pudo cargar Tracking.",
@@ -7638,24 +7905,8 @@ function TrackingModule({
             new Date(second.recordedAt).getTime(),
         )
     : [];
-  const routeSvg = (() => {
-    if (routePoints.length < 2) return "";
-    const lats = routePoints.map((point) => point.latitude);
-    const lngs = routePoints.map((point) => point.longitude);
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-    const latSpan = Math.max(0.00001, maxLat - minLat);
-    const lngSpan = Math.max(0.00001, maxLng - minLng);
-    return routePoints
-      .map((point) => {
-        const x = 6 + ((point.longitude - minLng) / lngSpan) * 88;
-        const y = 94 - ((point.latitude - minLat) / latSpan) * 88;
-        return `${x.toFixed(2)},${y.toFixed(2)}`;
-      })
-      .join(" ");
-  })();
+  const mapPoints = promoterId ? routePoints : latestByPromoter;
+  const lastDiagnostic = diagnostics[0];
 
   const exportTracking = () => {
     downloadCsv(
@@ -7741,6 +7992,10 @@ function TrackingModule({
             <small>GPS impreciso &gt; 100 m</small>
             <strong>{poorAccuracy}</strong>
           </article>
+          <article className="kpi-card">
+            <small>Intentos GPS con error</small>
+            <strong>{diagnostics.length}</strong>
+          </article>
         </div>
 
         <div className="form-grid">
@@ -7789,46 +8044,43 @@ function TrackingModule({
           />
         </div>
 
-        {promoterId && routePoints.length > 1 && (
+        {mapPoints.length > 0 && (
           <section className="dark-panel">
             <div className="panel-header">
               <div>
-                <h3>Recorrido GPS</h3>
+                <h3>{promoterId ? "Recorrido GPS en mapa" : "Última ubicación de promotores"}</h3>
                 <p>
-                  Vista proporcional del recorrido del día · {routePoints.length} puntos.
+                  {promoterId
+                    ? `Recorrido cronológico del día · ${routePoints.length} punto${routePoints.length === 1 ? "" : "s"}.`
+                    : `Mapa general · ${mapPoints.length} promotor${mapPoints.length === 1 ? "" : "es"} con ubicación.`}
                 </p>
               </div>
             </div>
-            <div style={{ minHeight: 260, padding: 16 }}>
-              <svg viewBox="0 0 100 100" width="100%" height="260" role="img" aria-label="Recorrido GPS del promotor">
-                <polyline
-                  points={routeSvg}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  vectorEffect="non-scaling-stroke"
-                />
-                {routePoints.map((point, index) => {
-                  const allLat = routePoints.map((current) => current.latitude);
-                  const allLng = routePoints.map((current) => current.longitude);
-                  const minLat = Math.min(...allLat);
-                  const maxLat = Math.max(...allLat);
-                  const minLng = Math.min(...allLng);
-                  const maxLng = Math.max(...allLng);
-                  const y = 94 - ((point.latitude - minLat) / Math.max(0.00001, maxLat - minLat)) * 88;
-                  const x = 6 + ((point.longitude - minLng) / Math.max(0.00001, maxLng - minLng)) * 88;
-                  return (
-                    <circle
-                      key={point.id}
-                      cx={x}
-                      cy={y}
-                      r={point.eventType === "TRACKING" ? 0.8 : 1.6}
-                    >
-                      <title>{`${point.eventType} · ${formatDate(point.recordedAt)}`}</title>
-                    </circle>
-                  );
-                })}
-              </svg>
+            <div style={{ padding: 16 }}>
+              <TrackingMap
+                points={mapPoints}
+                connectRoute={Boolean(promoterId)}
+              />
+            </div>
+          </section>
+        )}
+
+        {!points.length && diagnostics.length > 0 && (
+          <section className="dark-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Diagnóstico GPS</h3>
+                <p>
+                  El aplicativo sí intentó recopilar ubicación, pero el dispositivo no entregó coordenadas.
+                </p>
+              </div>
+            </div>
+            <div style={{ padding: 16 }}>
+              <strong>{lastDiagnostic?.errorCode || "GPS_ERROR"}</strong>
+              <p>{lastDiagnostic?.message || "No se pudo obtener ubicación."}</p>
+              {lastDiagnostic?.recordedAt && (
+                <small>Último intento: {formatDate(lastDiagnostic.recordedAt)}</small>
+              )}
             </div>
           </section>
         )}
@@ -13628,7 +13880,7 @@ export default function App() {
   }, [user, users]);
   useEffect(() => {
     if (!activeUser || !isPromoterRole(activeUser.role)) return;
-    const flush = () => void sendTrackingQueue(activeUser);
+    const flush = () => void flushTrackingQueues(activeUser);
     flush();
     window.addEventListener("online", flush);
     return () => window.removeEventListener("online", flush);
@@ -13636,17 +13888,10 @@ export default function App() {
 
   useEffect(() => {
     if (!activeUser || !isPromoterRole(activeUser.role)) return;
-    const today = attendanceDay(new Date().toISOString());
-    const mineToday = attendance.filter(
-      (item) =>
-        attendanceDay(item.date) === today &&
-        (String(item.promoterId) === String(activeUser.id) ||
-          String(item.promoterDni || "") === String(activeUser.dni)),
-    );
-    const entries = mineToday.filter((item) => item.type === "ENTRADA").length;
-    const exits = mineToday.filter((item) => item.type === "SALIDA").length;
-    if (entries <= exits) return;
 
+    // Tracking V2: mientras un promotor tenga sesión activa y la PWA esté
+    // visible, se intenta obtener ubicación cada 60 segundos. No depende de
+    // que exista una marcación de ENTRADA para empezar a recopilar datos.
     const send = () => {
       if (document.visibilityState !== "visible") return;
       void captureTrackingPoint(
@@ -13655,12 +13900,12 @@ export default function App() {
         promoterSession.marketId || undefined,
         promoterSession.clientId || undefined,
       );
-      void sendTrackingQueue(activeUser);
+      void flushTrackingQueues(activeUser);
     };
 
     send();
     const interval = window.setInterval(send, TRACKING_INTERVAL_MS);
-    const onOnline = () => void sendTrackingQueue(activeUser);
+    const onOnline = () => void flushTrackingQueues(activeUser);
     const onVisible = () => {
       if (document.visibilityState === "visible") send();
     };
@@ -13678,7 +13923,6 @@ export default function App() {
     activeUser?.password,
     promoterSession.marketId,
     promoterSession.clientId,
-    attendance,
   ]);
 
   const logoutImmediately = () => {
