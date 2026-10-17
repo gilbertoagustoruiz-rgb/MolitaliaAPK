@@ -13232,6 +13232,53 @@ export default function App() {
       password: user.password || catalogUser.password,
     };
   }, [user, users]);
+  useEffect(() => {
+    if (!activeUser || !isPromoterRole(activeUser.role)) return;
+    const today = attendanceDay(new Date().toISOString());
+    const mineToday = attendance.filter(
+      (item) =>
+        attendanceDay(item.date) === today &&
+        (String(item.promoterId) === String(activeUser.id) ||
+          String(item.promoterDni || "") === String(activeUser.dni)),
+    );
+    const entries = mineToday.filter((item) => item.type === "ENTRADA").length;
+    const exits = mineToday.filter((item) => item.type === "SALIDA").length;
+    if (entries <= exits) return;
+
+    const send = () => {
+      if (document.visibilityState !== "visible") return;
+      void captureTrackingPoint(
+        activeUser,
+        "TRACKING",
+        promoterSession.marketId || undefined,
+        promoterSession.clientId || undefined,
+      );
+      void sendTrackingQueue(activeUser);
+    };
+
+    send();
+    const interval = window.setInterval(send, TRACKING_INTERVAL_MS);
+    const onOnline = () => void sendTrackingQueue(activeUser);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") send();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [
+    activeUser?.id,
+    activeUser?.dni,
+    activeUser?.role,
+    activeUser?.password,
+    promoterSession.marketId,
+    promoterSession.clientId,
+    attendance,
+  ]);
+
   const logoutImmediately = () => {
     localStorage.removeItem("bt-session");
     setPromoterSession({ marketId: "", clientId: "" });
