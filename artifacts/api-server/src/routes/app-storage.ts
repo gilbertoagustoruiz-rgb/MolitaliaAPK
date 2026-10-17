@@ -1257,7 +1257,10 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
   const limit = Math.max(1, Math.min(1000, Number(req.query.limit) || 300));
   const values: unknown[] = [];
   const where: string[] = [];
-  const add = (sql: string, v: unknown) => { values.push(v); where.push(sql.replace("?", `${values.length}`)); };
+  const add = (sql: string, v: unknown) => {
+    values.push(v);
+    where.push(sql.replace("?", `${values.length}`));
+  };
   if (promoterId) add("t.promoter_id=?", promoterId);
   if (marketId) add("t.market_id=?", marketId);
   if (eventType) add("t.event_type=?", eventType);
