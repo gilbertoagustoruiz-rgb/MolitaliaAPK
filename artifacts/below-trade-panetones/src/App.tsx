@@ -11650,6 +11650,35 @@ function PromoterApp({
       (first, second) =>
         new Date(second.date).getTime() - new Date(first.date).getTime(),
     )[0];
+
+  const openAttendanceEntriesForMarket = () => {
+    const latestByClient = new Map<string, Attendance>();
+    [...todayAttendance]
+      .filter((item) => item.marketId === selectedMarketId)
+      .sort(
+        (first, second) =>
+          new Date(second.date).getTime() - new Date(first.date).getTime(),
+      )
+      .forEach((item) => {
+        const key = String(item.clientId || "").trim();
+        if (key && !latestByClient.has(key)) latestByClient.set(key, item);
+      });
+    return Array.from(latestByClient.values()).filter(
+      (item) => item.type === "ENTRADA",
+    );
+  };
+
+  const resolveOpenAttendanceForExit = () => {
+    const exact = latestAttendanceFor(markClientId);
+    if (exact?.type === "ENTRADA") return exact;
+
+    // Compatibilidad defensiva para clientes que conservaron la misma tienda
+    // visible pero cambiaron de identificador interno tras una sincronización.
+    // Solo se usa el fallback cuando existe UNA única entrada abierta en el
+    // mercado, evitando cerrar accidentalmente otra tienda.
+    const openInMarket = openAttendanceEntriesForMarket();
+    return openInMarket.length === 1 ? openInMarket[0] : undefined;
+  };
   const isRotativePromoter = user.role === "PROMOTOR ROTATIVO";
   const latestAttendanceToday = [...todayAttendance].sort(
     (first, second) =>
@@ -11954,13 +11983,19 @@ function PromoterApp({
     const now = new Date();
     const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`;
     const type = markType;
+    const matchedOpenEntry =
+      type === "SALIDA" ? resolveOpenAttendanceForExit() : undefined;
+    const attendanceClientId =
+      type === "SALIDA" && matchedOpenEntry?.clientId
+        ? matchedOpenEntry.clientId
+        : markClientId;
     const item: Attendance = {
       id,
       promoterId: user.id,
       promoterDni: user.dni,
       promoterRole: user.role,
       promoterRoleLabel: user.roleLabel || user.role,
-      clientId: markClientId,
+      clientId: attendanceClientId,
       marketId: selectedMarketId,
       type,
       photo: markPhotoUrl,
@@ -11971,7 +12006,7 @@ function PromoterApp({
       user,
       type === "ENTRADA" ? "ENTRADA" : "SALIDA",
       selectedMarketId,
-      markClientId,
+      attendanceClientId,
       id,
     );
     if (type === "SALIDA" && tastingUsed > 0) {
@@ -11979,7 +12014,7 @@ function PromoterApp({
         user,
         "DEGUSTACION",
         selectedMarketId,
-        markClientId,
+        attendanceClientId,
         `CLOSE-${id}`,
       );
     }
@@ -12041,7 +12076,7 @@ function PromoterApp({
         promoterRole: user.role,
         promoterRoleLabel: user.roleLabel || user.role,
         marketId: selectedMarketId,
-        clientId: markClientId,
+        clientId: attendanceClientId,
         tastingUsed,
         tasting900g,
         tasting85g,
@@ -12134,7 +12169,9 @@ function PromoterApp({
             (first, second) =>
               new Date(second.date).getTime() - new Date(first.date).getTime(),
           )[0]
-      : latestAttendanceFor(markClientId);
+      : markType === "SALIDA"
+        ? resolveOpenAttendanceForExit()
+        : latestAttendanceFor(markClientId);
     if (attendanceLimitReached(markType)) {
       notify(
         `Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === "ENTRADA" ? "entradas" : "salidas"} por hoy.`,
