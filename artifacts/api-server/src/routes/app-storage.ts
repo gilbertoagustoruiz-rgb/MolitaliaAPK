@@ -1067,6 +1067,188 @@ async function authorizedWarehouseActor(req: Request) {
   return authorizedTradeActor(req);
 }
 
+async function authorizedTrackingPromoter(req: Request) {
+  const dni = req.get("x-tracking-dni") || "";
+  const key = req.get("x-tracking-key") || "";
+  if (!dni || !key) return null;
+  const result = await pool.query(
+    "SELECT id,dni,role,status,data,password_hash FROM users WHERE dni=$1 LIMIT 1",
+    [dni],
+  );
+  const row = result.rows[0];
+  const data = isRecord(row?.data) ? row.data : {};
+  const role = String(row?.role || value(data, "role") || "");
+  if (
+    !row ||
+    row.status !== "ACTIVO" ||
+    !["PROMOTOR", "PROMOTOR ROTATIVO", "PROMOTOR PERMANENTE"].includes(role) ||
+    !row.password_hash ||
+    !(await verifyPassword(key, row.password_hash))
+  ) return null;
+  return { id: String(row.id), dni: String(row.dni), role, data };
+}
+
+
+router.post("/app-storage/tracking/batch", async (req, res): Promise<void> => {
+  const actor = await authorizedTrackingPromoter(req);
+  if (!actor) return void res.status(403).json({ message: "Promotor no autorizado para enviar tracking." });
+  const points = Array.isArray(req.body?.points) ? req.body.points.filter(isRecord).slice(0, 500) : [];
+  if (!points.length) return void res.status(400).json({ message: "No hay puntos de tracking para guardar." });
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    let inserted = 0;
+    for (const point of points) {
+      if (value(point, "promoterId") && value(point, "promoterId") !== actor.id) continue;
+      const latitude = Number(point.latitude);
+      const longitude = Number(point.longitude);
+      const accuracy = Number(point.accuracyMeters);
+      const recordedAt = new Date(value(point, "recordedAt") || Date.now());
+      if (
+        !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+        !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+        Number.isNaN(recordedAt.getTime())
+      ) continue;
+      const marketId = value(point, "marketId");
+      const clientId = value(point, "clientId");
+      if (marketId) {
+        const allowed = await db.query(
+          "SELECT 1 FROM assignments WHERE promoter_id=$1 AND $2=ANY(market_ids) LIMIT 1",
+          [actor.id, marketId],
+        );
+        if (!allowed.rows.length && value(actor.data, "marketId") !== marketId) continue;
+      }
+      const batteryLevelRaw = point.batteryLevel;
+      const batteryLevel = batteryLevelRaw === null || batteryLevelRaw === undefined
+        ? null
+        : Math.max(0, Math.min(100, Number(batteryLevelRaw)));
+      const batteryCharging = typeof point.batteryCharging === "boolean" ? point.batteryCharging : null;
+      const id = value(point, "id") || `TRK-${randomUUID()}`;
+      const data = {
+        id,
+        promoterId: actor.id,
+        promoterDni: actor.dni,
+        marketId,
+        clientId,
+        eventType: value(point, "eventType") || "TRACKING",
+        referenceId: value(point, "referenceId") || undefined,
+        latitude,
+        longitude,
+        accuracyMeters: Number.isFinite(accuracy) ? Math.max(0, accuracy) : undefined,
+        batteryLevel: Number.isFinite(Number(batteryLevel)) ? batteryLevel : undefined,
+        batteryCharging,
+        online: point.online !== false,
+        source: value(point, "source") || "BROWSER_GEOLOCATION",
+        recordedAt: recordedAt.toISOString(),
+        syncedAt: new Date().toISOString(),
+      };
+      await db.query(
+        `INSERT INTO promoter_location_tracking
+          (id,promoter_id,market_id,client_id,event_type,reference_id,latitude,longitude,accuracy_meters,battery_level,battery_charging,online,source,recorded_at,synced_at,data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),$15)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          id, actor.id, marketId, clientId, data.eventType, data.referenceId || null,
+          latitude, longitude, data.accuracyMeters ?? null, data.batteryLevel ?? null,
+          batteryCharging, data.online, data.source, recordedAt.toISOString(), data,
+        ],
+      );
+      inserted += 1;
+    }
+    await db.query("COMMIT");
+    res.json({ inserted });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    req.log.error({ err: error }, "Unable to save tracking points");
+    res.status(500).json({ message: "No se pudieron guardar los puntos de tracking." });
+  } finally {
+    db.release();
+  }
+});
+
+router.get("/app-storage/tracking", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede consultar tracking." });
+  const promoterId = String(req.query.promoterId || "").trim();
+  const marketId = String(req.query.marketId || "").trim();
+  const eventType = String(req.query.eventType || "").trim();
+  const from = String(req.query.from || "").trim();
+  const to = String(req.query.to || "").trim();
+  const limit = Math.max(1, Math.min(1000, Number(req.query.limit) || 300));
+  const values: unknown[] = [];
+  const where: string[] = [];
+  const add = (sql: string, v: unknown) => { values.push(v); where.push(sql.replace("?", `${values.length}`)); };
+  if (promoterId) add("t.promoter_id=?", promoterId);
+  if (marketId) add("t.market_id=?", marketId);
+  if (eventType) add("t.event_type=?", eventType);
+  if (from) add("t.recorded_at>=?", from);
+  if (to) add("t.recorded_at<=?", to);
+  values.push(limit);
+  try {
+    const result = await pool.query(
+      `SELECT t.data,t.promoter_id,t.market_id,t.client_id,t.event_type,t.reference_id,
+              t.latitude,t.longitude,t.accuracy_meters,t.battery_level,t.battery_charging,
+              t.online,t.source,t.recorded_at,t.synced_at,
+              COALESCE(u.data->>'name',u.dni,t.promoter_id) AS promoter_name,
+              COALESCE(m.name,t.market_id) AS market_name,
+              COALESCE(c.name,t.client_id) AS client_name
+         FROM promoter_location_tracking t
+         LEFT JOIN users u ON u.id=t.promoter_id
+         LEFT JOIN markets m ON m.id=t.market_id
+         LEFT JOIN clients c ON c.id=t.client_id
+         ${where.length ? "WHERE " + where.join(" AND ") : ""}
+         ORDER BY t.recorded_at DESC
+         LIMIT ${values.length}`,
+      values,
+    );
+    const points = result.rows.map((row) => ({
+      ...(isRecord(row.data) ? row.data : {}),
+      promoterId: row.promoter_id,
+      promoterName: row.promoter_name,
+      marketId: row.market_id,
+      marketName: row.market_name,
+      clientId: row.client_id,
+      clientName: row.client_name,
+      eventType: row.event_type,
+      referenceId: row.reference_id,
+      latitude: Number(row.latitude),
+      longitude: Number(row.longitude),
+      accuracyMeters: row.accuracy_meters == null ? null : Number(row.accuracy_meters),
+      batteryLevel: row.battery_level == null ? null : Number(row.battery_level),
+      batteryCharging: row.battery_charging,
+      online: row.online,
+      source: row.source,
+      recordedAt: row.recorded_at,
+      syncedAt: row.synced_at,
+    }));
+    const summary = {
+      total: points.length,
+      lowBattery: points.filter((point) => point.batteryLevel != null && Number(point.batteryLevel) <= 20).length,
+      criticalBattery: points.filter((point) => point.batteryLevel != null && Number(point.batteryLevel) <= 10).length,
+      lowAccuracy: points.filter((point) => point.accuracyMeters != null && Number(point.accuracyMeters) > 100).length,
+      promoters: new Set(points.map((point) => point.promoterId)).size,
+    };
+    res.json({ points, summary });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to read tracking");
+    res.status(500).json({ message: "No se pudo consultar el tracking." });
+  }
+});
+
+router.delete("/app-storage/tracking/retention", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede aplicar retención." });
+  const days = Math.max(30, Math.min(365, Number(req.query.days) || 90));
+  try {
+    const result = await pool.query(
+      "DELETE FROM promoter_location_tracking WHERE recorded_at < now() - ($1::text || ' days')::interval RETURNING id",
+      [String(days)],
+    );
+    res.json({ deleted: result.rows.length, retentionDays: days });
+  } catch (error) {
+    res.status(500).json({ message: "No se pudo aplicar la retención de tracking." });
+  }
+});
 
 const warehouseTransferItemIds = [
   "PANETON_900G",
