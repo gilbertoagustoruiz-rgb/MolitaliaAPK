@@ -182,6 +182,27 @@ export const promoterLocationTrackingTable = pgTable(
   ],
 );
 
+export const promoterTrackingDiagnosticsTable = pgTable(
+  "promoter_tracking_diagnostics",
+  {
+    id: text("id").primaryKey(),
+    promoterId: text("promoter_id").notNull().default(""),
+    marketId: text("market_id").notNull().default(""),
+    clientId: text("client_id").notNull().default(""),
+    eventType: text("event_type").notNull().default("TRACKING"),
+    errorCode: text("error_code").notNull().default("UNKNOWN"),
+    message: text("message").notNull().default(""),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_tracking_diag_promoter_date").on(table.promoterId, table.recordedAt),
+    index("idx_tracking_diag_event_date").on(table.eventType, table.recordedAt),
+  ],
+);
+
 export const warehousesTable = pgTable(
   "warehouses",
   {
