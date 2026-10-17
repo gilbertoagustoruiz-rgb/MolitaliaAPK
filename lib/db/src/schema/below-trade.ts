@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -151,6 +152,34 @@ export const attendanceTable = pgTable(
     ...timestamps,
   },
   (table) => [index("idx_attendance_date").on(table.eventDate)],
+);
+
+export const promoterLocationTrackingTable = pgTable(
+  "promoter_location_tracking",
+  {
+    id: text("id").primaryKey(),
+    promoterId: text("promoter_id").notNull().default(""),
+    marketId: text("market_id").notNull().default(""),
+    clientId: text("client_id").notNull().default(""),
+    eventType: text("event_type").notNull().default("TRACKING"),
+    referenceId: text("reference_id"),
+    latitude: numeric("latitude", { precision: 10, scale: 7 }).notNull(),
+    longitude: numeric("longitude", { precision: 10, scale: 7 }).notNull(),
+    accuracyMeters: numeric("accuracy_meters", { precision: 10, scale: 2 }),
+    batteryLevel: numeric("battery_level", { precision: 5, scale: 2 }),
+    batteryCharging: boolean("battery_charging"),
+    online: boolean("online").notNull().default(true),
+    source: text("source").notNull().default("BROWSER_GEOLOCATION"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_tracking_promoter_date").on(table.promoterId, table.recordedAt),
+    index("idx_tracking_market_date").on(table.marketId, table.recordedAt),
+    index("idx_tracking_event_date").on(table.eventType, table.recordedAt),
+  ],
 );
 
 export const warehousesTable = pgTable(
