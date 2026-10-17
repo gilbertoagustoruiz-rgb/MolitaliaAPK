@@ -9552,7 +9552,12 @@ function AnalystApp({
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
-    ...(["ADMIN", "ANALISTA"].includes(user.role) ? [["aprobaciones-trade", "Aprobaciones Trade"]] : []),
+    ...(["ADMIN", "ANALISTA"].includes(user.role)
+      ? [
+          ["aprobaciones-trade", "Aprobaciones Trade"],
+          ["tracking", "Tracking"],
+        ]
+      : []),
     ["marcaciones", "Marcaciones"],
   ];
   return (
@@ -10120,6 +10125,15 @@ function AnalystApp({
           assignments={assignments}
           setAssignments={setAssignments}
           setUsers={setUsers}
+          notify={notify}
+        />
+      )}
+      {tab === "tracking" && (
+        <TrackingModule
+          user={user}
+          users={users}
+          markets={markets}
+          clients={clients}
           notify={notify}
         />
       )}
