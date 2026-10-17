@@ -1088,53 +1088,6 @@ async function authorizedTrackingPromoter(req: Request) {
   return { id: String(row.id), dni: String(row.dni), role, data };
 }
 
-async function ensureTrackingRuntimeTables() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS promoter_location_tracking (
-      id text PRIMARY KEY,
-      promoter_id text NOT NULL DEFAULT '',
-      market_id text NOT NULL DEFAULT '',
-      client_id text NOT NULL DEFAULT '',
-      event_type text NOT NULL DEFAULT 'TRACKING',
-      reference_id text,
-      latitude numeric(10,7) NOT NULL,
-      longitude numeric(10,7) NOT NULL,
-      accuracy_meters numeric(10,2),
-      battery_level numeric(5,2),
-      battery_charging boolean,
-      online boolean NOT NULL DEFAULT true,
-      source text NOT NULL DEFAULT 'BROWSER_GEOLOCATION',
-      recorded_at timestamptz NOT NULL DEFAULT now(),
-      synced_at timestamptz NOT NULL DEFAULT now(),
-      data jsonb NOT NULL DEFAULT '{}',
-      created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS promoter_tracking_diagnostics (
-      id text PRIMARY KEY,
-      promoter_id text NOT NULL DEFAULT '',
-      market_id text NOT NULL DEFAULT '',
-      client_id text NOT NULL DEFAULT '',
-      event_type text NOT NULL DEFAULT 'TRACKING',
-      error_code text NOT NULL DEFAULT 'UNKNOWN',
-      message text NOT NULL DEFAULT '',
-      recorded_at timestamptz NOT NULL DEFAULT now(),
-      synced_at timestamptz NOT NULL DEFAULT now(),
-      data jsonb NOT NULL DEFAULT '{}',
-      created_at timestamptz NOT NULL DEFAULT now()
-    );
-    CREATE INDEX IF NOT EXISTS idx_tracking_promoter_date
-      ON promoter_location_tracking(promoter_id,recorded_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_tracking_market_date
-      ON promoter_location_tracking(market_id,recorded_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_tracking_event_date
-      ON promoter_location_tracking(event_type,recorded_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_tracking_diag_promoter_date
-      ON promoter_tracking_diagnostics(promoter_id,recorded_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_tracking_diag_event_date
-      ON promoter_tracking_diagnostics(event_type,recorded_at DESC);
-  `);
-}
-
 
 router.post("/app-storage/tracking/batch", async (req, res): Promise<void> => {
   const actor = await authorizedTrackingPromoter(req);
@@ -1143,7 +1096,6 @@ router.post("/app-storage/tracking/batch", async (req, res): Promise<void> => {
   if (!points.length) return void res.status(400).json({ message: "No hay puntos de tracking para guardar." });
   const db = await pool.connect();
   try {
-    await ensureTrackingRuntimeTables();
     await db.query("BEGIN");
     let inserted = 0;
     for (const point of points) {
@@ -1230,7 +1182,6 @@ router.post("/app-storage/tracking/diagnostics/batch", async (req, res): Promise
 
   const db = await pool.connect();
   try {
-    await ensureTrackingRuntimeTables();
     await db.query("BEGIN");
     let inserted = 0;
     for (const item of diagnostics) {
@@ -1297,35 +1248,27 @@ router.post("/app-storage/tracking/diagnostics/batch", async (req, res): Promise
 
 router.get("/app-storage/tracking", async (req, res): Promise<void> => {
   const actor = await authorizedTradeActor(req);
-  if (!actor)
-    return void res.status(403).json({
-      message: "Solo Admin o Analista puede consultar tracking.",
-    });
-
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede consultar tracking." });
   const promoterId = String(req.query.promoterId || "").trim();
   const marketId = String(req.query.marketId || "").trim();
   const eventType = String(req.query.eventType || "").trim();
   const from = String(req.query.from || "").trim();
   const to = String(req.query.to || "").trim();
   const limit = Math.max(1, Math.min(1000, Number(req.query.limit) || 300));
-
+  const values: unknown[] = [];
+  const where: string[] = [];
+  const add = (sql: string, v: unknown) => {
+    values.push(v);
+    where.push(sql.replace("?", `${values.length}`));
+  };
+  if (promoterId) add("t.promoter_id=?", promoterId);
+  if (marketId) add("t.market_id=?", marketId);
+  if (eventType) add("t.event_type=?", eventType);
+  if (from) add("t.recorded_at>=?", from);
+  if (to) add("t.recorded_at<=?", to);
+  values.push(limit);
   try {
-    await ensureTrackingRuntimeTables();
-
-    const values: unknown[] = [];
-    const where: string[] = [];
-    const add = (column: string, v: unknown) => {
-      values.push(v);
-      where.push(`${column}=$${values.length}`);
-    };
-    if (promoterId) add("t.promoter_id", promoterId);
-    if (marketId) add("t.market_id", marketId);
-    if (eventType) add("t.event_type", eventType);
-    if (from) add("t.recorded_at", new Date(from).toISOString());
-    if (to) add("t.recorded_at", new Date(to).toISOString());
-    values.push(limit);
-
-    const pointResult = await pool.query(
+    const result = await pool.query(
       `SELECT t.data,t.promoter_id,t.market_id,t.client_id,t.event_type,t.reference_id,
               t.latitude,t.longitude,t.accuracy_meters,t.battery_level,t.battery_charging,
               t.online,t.source,t.recorded_at,t.synced_at,
@@ -1338,11 +1281,55 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
          LEFT JOIN clients c ON c.id=t.client_id
          ${where.length ? "WHERE " + where.join(" AND ") : ""}
          ORDER BY t.recorded_at DESC
-         LIMIT $${values.length}`,
+         LIMIT ${values.length}`,
       values,
     );
+    const diagnosticValues: unknown[] = [];
+    const diagnosticWhere: string[] = [];
+    const addDiagnostic = (sql: string, v: unknown) => {
+      diagnosticValues.push(v);
+      diagnosticWhere.push(
+        sql.replace("?", `${diagnosticValues.length}`),
+      );
+    };
+    if (promoterId) addDiagnostic("d.promoter_id=?", promoterId);
+    if (marketId) addDiagnostic("d.market_id=?", marketId);
+    if (eventType) addDiagnostic("d.event_type=?", eventType);
+    if (from) addDiagnostic("d.recorded_at>=?", from);
+    if (to) addDiagnostic("d.recorded_at<=?", to);
+    diagnosticValues.push(limit);
+    const diagnosticResult = await pool.query(
+      `SELECT d.data,d.promoter_id,d.market_id,d.client_id,d.event_type,
+              d.error_code,d.message,d.recorded_at,d.synced_at,
+              COALESCE(u.data->>'name',u.dni,d.promoter_id) AS promoter_name,
+              COALESCE(m.name,d.market_id) AS market_name,
+              COALESCE(c.name,d.client_id) AS client_name
+         FROM promoter_tracking_diagnostics d
+         LEFT JOIN users u ON u.id=d.promoter_id
+         LEFT JOIN markets m ON m.id=d.market_id
+         LEFT JOIN clients c ON c.id=d.client_id
+         ${diagnosticWhere.length ? "WHERE " + diagnosticWhere.join(" AND ") : ""}
+         ORDER BY d.recorded_at DESC
+         LIMIT ${diagnosticValues.length}`,
+      diagnosticValues,
+    );
 
-    const points = pointResult.rows.map((row) => ({
+    const diagnostics = diagnosticResult.rows.map((row) => ({
+      ...(isRecord(row.data) ? row.data : {}),
+      promoterId: row.promoter_id,
+      promoterName: row.promoter_name,
+      marketId: row.market_id,
+      marketName: row.market_name,
+      clientId: row.client_id,
+      clientName: row.client_name,
+      eventType: row.event_type,
+      errorCode: row.error_code,
+      message: row.message,
+      recordedAt: row.recorded_at,
+      syncedAt: row.synced_at,
+    }));
+
+    const points = result.rows.map((row) => ({
       ...(isRecord(row.data) ? row.data : {}),
       promoterId: row.promoter_id,
       promoterName: row.promoter_name,
@@ -1354,96 +1341,26 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
       referenceId: row.reference_id,
       latitude: Number(row.latitude),
       longitude: Number(row.longitude),
-      accuracyMeters:
-        row.accuracy_meters == null ? null : Number(row.accuracy_meters),
-      batteryLevel:
-        row.battery_level == null ? null : Number(row.battery_level),
+      accuracyMeters: row.accuracy_meters == null ? null : Number(row.accuracy_meters),
+      batteryLevel: row.battery_level == null ? null : Number(row.battery_level),
       batteryCharging: row.battery_charging,
       online: row.online,
       source: row.source,
       recordedAt: row.recorded_at,
       syncedAt: row.synced_at,
     }));
-
-    let diagnostics: StoredRecord[] = [];
-    try {
-      const diagnosticValues: unknown[] = [];
-      const diagnosticWhere: string[] = [];
-      const addDiagnostic = (column: string, v: unknown) => {
-        diagnosticValues.push(v);
-        diagnosticWhere.push(
-          `${column}=$${diagnosticValues.length}`,
-        );
-      };
-      if (promoterId) addDiagnostic("d.promoter_id", promoterId);
-      if (marketId) addDiagnostic("d.market_id", marketId);
-      if (eventType) addDiagnostic("d.event_type", eventType);
-      if (from) addDiagnostic("d.recorded_at", new Date(from).toISOString());
-      if (to) addDiagnostic("d.recorded_at", new Date(to).toISOString());
-      diagnosticValues.push(limit);
-
-      const diagnosticResult = await pool.query(
-        `SELECT d.data,d.promoter_id,d.market_id,d.client_id,d.event_type,
-                d.error_code,d.message,d.recorded_at,d.synced_at,
-                COALESCE(u.data->>'name',u.dni,d.promoter_id) AS promoter_name,
-                COALESCE(m.name,d.market_id) AS market_name,
-                COALESCE(c.name,d.client_id) AS client_name
-           FROM promoter_tracking_diagnostics d
-           LEFT JOIN users u ON u.id=d.promoter_id
-           LEFT JOIN markets m ON m.id=d.market_id
-           LEFT JOIN clients c ON c.id=d.client_id
-           ${diagnosticWhere.length ? "WHERE " + diagnosticWhere.join(" AND ") : ""}
-           ORDER BY d.recorded_at DESC
-           LIMIT $${diagnosticValues.length}`,
-        diagnosticValues,
-      );
-      diagnostics = diagnosticResult.rows.map((row) => ({
-        ...(isRecord(row.data) ? row.data : {}),
-        promoterId: row.promoter_id,
-        promoterName: row.promoter_name,
-        marketId: row.market_id,
-        marketName: row.market_name,
-        clientId: row.client_id,
-        clientName: row.client_name,
-        eventType: row.event_type,
-        errorCode: row.error_code,
-        message: row.message,
-        recordedAt: row.recorded_at,
-        syncedAt: row.synced_at,
-      }));
-    } catch (diagnosticError) {
-      req.log.warn(
-        { err: diagnosticError },
-        "Tracking diagnostics unavailable; returning GPS points only",
-      );
-      diagnostics = [];
-    }
-
     const summary = {
       total: points.length,
-      lowBattery: points.filter(
-        (point) =>
-          point.batteryLevel != null && Number(point.batteryLevel) <= 20,
-      ).length,
-      criticalBattery: points.filter(
-        (point) =>
-          point.batteryLevel != null && Number(point.batteryLevel) <= 10,
-      ).length,
-      lowAccuracy: points.filter(
-        (point) =>
-          point.accuracyMeters != null && Number(point.accuracyMeters) > 100,
-      ).length,
+      lowBattery: points.filter((point) => point.batteryLevel != null && Number(point.batteryLevel) <= 20).length,
+      criticalBattery: points.filter((point) => point.batteryLevel != null && Number(point.batteryLevel) <= 10).length,
+      lowAccuracy: points.filter((point) => point.accuracyMeters != null && Number(point.accuracyMeters) > 100).length,
       promoters: new Set(points.map((point) => point.promoterId)).size,
       gpsErrors: diagnostics.length,
     };
-
     res.json({ points, diagnostics, summary });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read tracking");
-    res.status(500).json({
-      message: "No se pudo consultar el tracking.",
-      code: "TRACKING_QUERY_FAILED",
-    });
+    res.status(500).json({ message: "No se pudo consultar el tracking." });
   }
 });
 
