@@ -412,11 +412,11 @@ async function createAutomaticClosuresForDay(day: string) {
     }
     const openPromoters = await client.query(
       `SELECT latest.*,users.data AS user_data FROM (
-         SELECT DISTINCT ON (promoter_id,client_id)
+         SELECT DISTINCT ON (promoter_id,market_id)
            id,promoter_id,market_id,client_id,event_type
          FROM attendance
          WHERE event_date >= $1::timestamptz AND event_date <= $2::timestamptz
-         ORDER BY promoter_id,client_id,event_date DESC,created_at DESC
+         ORDER BY promoter_id,market_id,event_date DESC,created_at DESC
        ) latest
        JOIN users ON users.id=latest.promoter_id
        WHERE latest.event_type='ENTRADA'`,

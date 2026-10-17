@@ -11651,34 +11651,26 @@ function PromoterApp({
         new Date(second.date).getTime() - new Date(first.date).getTime(),
     )[0];
 
-  const openAttendanceEntriesForMarket = () => {
-    const latestByClient = new Map<string, Attendance>();
+  const latestAttendanceForMarket = (marketId: string) =>
     [...todayAttendance]
-      .filter((item) => item.marketId === selectedMarketId)
+      .filter((item) => item.marketId === marketId)
       .sort(
         (first, second) =>
           new Date(second.date).getTime() - new Date(first.date).getTime(),
-      )
-      .forEach((item) => {
-        const key = String(item.clientId || "").trim();
-        if (key && !latestByClient.has(key)) latestByClient.set(key, item);
-      });
-    return Array.from(latestByClient.values()).filter(
-      (item) => item.type === "ENTRADA",
-    );
-  };
+      )[0];
 
-  const resolveOpenAttendanceForExit = () => {
-    const exact = latestAttendanceFor(markClientId);
-    if (exact?.type === "ENTRADA") return exact;
+  const activeMarketEntry = latestAttendanceForMarket(selectedMarketId);
+  const hasActiveMarketSession = Boolean(
+    selectedMarketId && activeMarketEntry?.type === "ENTRADA",
+  );
 
-    // Compatibilidad defensiva para clientes que conservaron la misma tienda
-    // visible pero cambiaron de identificador interno tras una sincronización.
-    // Solo se usa el fallback cuando existe UNA única entrada abierta en el
-    // mercado, evitando cerrar accidentalmente otra tienda.
-    const openInMarket = openAttendanceEntriesForMarket();
-    return openInMarket.length === 1 ? openInMarket[0] : undefined;
-  };
+  useEffect(() => {
+    if (!selectedMarketId) {
+      setMarkType("ENTRADA");
+      return;
+    }
+    setMarkType(hasActiveMarketSession ? "SALIDA" : "ENTRADA");
+  }, [selectedMarketId, hasActiveMarketSession]);
   const isRotativePromoter = user.role === "PROMOTOR ROTATIVO";
   const latestAttendanceToday = [...todayAttendance].sort(
     (first, second) =>
@@ -11983,12 +11975,7 @@ function PromoterApp({
     const now = new Date();
     const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`;
     const type = markType;
-    const matchedOpenEntry =
-      type === "SALIDA" ? resolveOpenAttendanceForExit() : undefined;
-    const attendanceClientId =
-      type === "SALIDA" && matchedOpenEntry?.clientId
-        ? matchedOpenEntry.clientId
-        : markClientId;
+    const attendanceClientId = markClientId;
     const item: Attendance = {
       id,
       promoterId: user.id,
@@ -12162,16 +12149,7 @@ function PromoterApp({
       );
       return;
     }
-    const latest = isRotativePromoter
-      ? [...todayAttendance]
-          .filter((item) => item.marketId === selectedMarketId)
-          .sort(
-            (first, second) =>
-              new Date(second.date).getTime() - new Date(first.date).getTime(),
-          )[0]
-      : markType === "SALIDA"
-        ? resolveOpenAttendanceForExit()
-        : latestAttendanceFor(markClientId);
+    const latest = latestAttendanceForMarket(selectedMarketId);
     if (attendanceLimitReached(markType)) {
       notify(
         `Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === "ENTRADA" ? "entradas" : "salidas"} por hoy.`,
@@ -12181,18 +12159,14 @@ function PromoterApp({
     }
     if (markType === "SALIDA" && (!latest || latest.type !== "ENTRADA")) {
       notify(
-        isRotativePromoter
-          ? "Primero debes registrar una entrada activa para finalizar tu jornada."
-          : "Primero debes registrar la entrada en esta tienda",
+        "Primero debes registrar una entrada activa en este mercado.",
         true,
       );
       return;
     }
     if (markType === "ENTRADA" && latest?.type === "ENTRADA") {
       notify(
-        isRotativePromoter
-          ? "Ya tienes una entrada activa. Puedes registrar ventas en tus clientes asignados o marcar tu salida."
-          : "Ya tienes una entrada abierta en esta tienda",
+        "Ya tienes una entrada activa en este mercado. Marca Salida para cerrar la jornada.",
         true,
       );
       return;
@@ -13061,16 +13035,21 @@ function PromoterApp({
                   onChange={(value) =>
                     setMarkType(value as "ENTRADA" | "SALIDA")
                   }
-                  items={[
-                    {
-                      value: "ENTRADA",
-                      label: `Entrada (${todayAttendanceCount("ENTRADA")}/${MAX_DAILY_ATTENDANCE_BY_TYPE})`,
-                    },
-                    {
-                      value: "SALIDA",
-                      label: `Salida (${todayAttendanceCount("SALIDA")}/${MAX_DAILY_ATTENDANCE_BY_TYPE})`,
-                    },
-                  ]}
+                  items={
+                    hasActiveMarketSession
+                      ? [
+                          {
+                            value: "SALIDA",
+                            label: `Salida (${todayAttendanceCount("SALIDA")}/${MAX_DAILY_ATTENDANCE_BY_TYPE})`,
+                          },
+                        ]
+                      : [
+                          {
+                            value: "ENTRADA",
+                            label: `Entrada (${todayAttendanceCount("ENTRADA")}/${MAX_DAILY_ATTENDANCE_BY_TYPE})`,
+                          },
+                        ]
+                  }
                 />
                 <div
                   className={`attendance-gate ${attendanceLimitReached(markType) ? "blocked" : "ready"}`}
@@ -13079,7 +13058,9 @@ function PromoterApp({
                   <span>
                     {attendanceLimitReached(markType)
                       ? `Ya registraste el máximo de ${MAX_DAILY_ATTENDANCE_BY_TYPE} ${markType === "ENTRADA" ? "entradas" : "salidas"} por hoy.`
-                      : `Hoy llevas ${todayAttendanceCount("ENTRADA")} entrada(s) y ${todayAttendanceCount("SALIDA")} salida(s).`}
+                      : hasActiveMarketSession
+                        ? "Tienes una Entrada activa en este mercado. Puedes marcar la Salida en cualquiera de sus tiendas."
+                        : "No tienes una sesión abierta en este mercado. Registra una Entrada para iniciar la jornada."}
                   </span>
                 </div>
                 <PhotoField
