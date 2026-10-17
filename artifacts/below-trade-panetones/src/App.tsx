@@ -7553,6 +7553,386 @@ function CoordinatorApp({
   );
 }
 
+function TrackingModule({
+  user,
+  users,
+  markets,
+  clients,
+  notify,
+}: {
+  user: AppUser;
+  users: AppUser[];
+  markets: Market[];
+  clients: Client[];
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [points, setPoints] = useState<TrackingPoint[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [date, setDate] = useState(today);
+  const [promoterId, setPromoterId] = useState("");
+  const [marketId, setMarketId] = useState("");
+  const [eventType, setEventType] = useState("");
+  const promoterOptions = users.filter(
+    (current) => isPromoterRole(current.role) && current.status === "ACTIVO",
+  );
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "1000" });
+      if (promoterId) params.set("promoterId", promoterId);
+      if (marketId) params.set("marketId", marketId);
+      if (eventType) params.set("eventType", eventType);
+      if (date) {
+        params.set("from", `${date}T00:00:00-05:00`);
+        params.set("to", `${date}T23:59:59-05:00`);
+      }
+      const response = await fetch(`/api/app-storage/tracking?${params.toString()}`, {
+        headers: {
+          "X-Admin-Dni": user.dni,
+          "X-Admin-Key": sessionAdminKey(user),
+        },
+        cache: "no-store",
+      });
+      const payload = await response.json();
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo cargar Tracking.");
+      setPoints(Array.isArray(payload.points) ? payload.points : []);
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo cargar Tracking.",
+        true,
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    const interval = window.setInterval(() => void load(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [date, promoterId, marketId, eventType]);
+
+  const lowBattery = points.filter(
+    (point) => point.batteryLevel != null && Number(point.batteryLevel) <= 20,
+  ).length;
+  const poorAccuracy = points.filter(
+    (point) => point.accuracyMeters != null && Number(point.accuracyMeters) > 100,
+  ).length;
+  const activePromoters = new Set(points.map((point) => point.promoterId)).size;
+  const latestByPromoter = Array.from(
+    points.reduce((map, point) => {
+      if (!map.has(point.promoterId)) map.set(point.promoterId, point);
+      return map;
+    }, new Map<string, TrackingPoint>()),
+  ).map(([, point]) => point);
+
+  const routePoints = promoterId
+    ? [...points]
+        .filter((point) => point.promoterId === promoterId)
+        .sort(
+          (first, second) =>
+            new Date(first.recordedAt).getTime() -
+            new Date(second.recordedAt).getTime(),
+        )
+    : [];
+  const routeSvg = (() => {
+    if (routePoints.length < 2) return "";
+    const lats = routePoints.map((point) => point.latitude);
+    const lngs = routePoints.map((point) => point.longitude);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const latSpan = Math.max(0.00001, maxLat - minLat);
+    const lngSpan = Math.max(0.00001, maxLng - minLng);
+    return routePoints
+      .map((point) => {
+        const x = 6 + ((point.longitude - minLng) / lngSpan) * 88;
+        const y = 94 - ((point.latitude - minLat) / latSpan) * 88;
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      })
+      .join(" ");
+  })();
+
+  const exportTracking = () => {
+    downloadCsv(
+      `tracking-${date || "todos"}.csv`,
+      [
+        "Fecha y hora",
+        "Promotor",
+        "Mercado",
+        "Cliente",
+        "Evento",
+        "Referencia",
+        "Latitud",
+        "Longitud",
+        "Precisión m",
+        "Batería %",
+        "Cargando",
+        "Online",
+      ],
+      points.map((point) => [
+        point.recordedAt,
+        point.promoterName ||
+          users.find((current) => current.id === point.promoterId)?.name ||
+          point.promoterId,
+        point.marketName ||
+          markets.find((market) => market.id === point.marketId)?.name ||
+          point.marketId ||
+          "",
+        point.clientName ||
+          clients.find((client) => client.id === point.clientId)?.name ||
+          point.clientId ||
+          "",
+        point.eventType,
+        point.referenceId || "",
+        point.latitude,
+        point.longitude,
+        point.accuracyMeters ?? "",
+        point.batteryLevel ?? "",
+        point.batteryCharging == null
+          ? "NO DISPONIBLE"
+          : point.batteryCharging
+            ? "SÍ"
+            : "NO",
+        point.online ? "SÍ" : "NO",
+      ]),
+    );
+    notify("Tracking descargado");
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <h2>Tracking</h2>
+          <p>
+            Ubicación enviada por promotores durante jornada activa. La PWA
+            captura aproximadamente cada 60 segundos mientras está visible.
+          </p>
+        </div>
+        <div className="panel-actions">
+          <Btn variant="outline" onClick={exportTracking} disabled={!points.length}>
+            <Download /> Descargar
+          </Btn>
+          <Btn variant="outline" onClick={() => void load()} disabled={loading}>
+            <RefreshCw className={loading ? "spin" : ""} /> Actualizar
+          </Btn>
+        </div>
+      </div>
+      <div className="panel-body">
+        <div className="kpi-grid">
+          <article className="kpi-card">
+            <small>Puntos recibidos</small>
+            <strong>{points.length}</strong>
+          </article>
+          <article className="kpi-card">
+            <small>Promotores con ubicación</small>
+            <strong>{activePromoters}</strong>
+          </article>
+          <article className="kpi-card">
+            <small>Batería baja ≤ 20%</small>
+            <strong>{lowBattery}</strong>
+          </article>
+          <article className="kpi-card">
+            <small>GPS impreciso &gt; 100 m</small>
+            <strong>{poorAccuracy}</strong>
+          </article>
+        </div>
+
+        <div className="form-grid">
+          <Field label="Fecha">
+            <Input type="date" value={date} onChange={setDate} />
+          </Field>
+          <SelectField
+            label="Promotor"
+            value={promoterId}
+            onChange={setPromoterId}
+            placeholder="Todos"
+            items={[
+              { value: "", label: "Todos" },
+              ...promoterOptions.map((promoter) => ({
+                value: promoter.id,
+                label: promoter.name,
+              })),
+            ]}
+          />
+          <SelectField
+            label="Mercado"
+            value={marketId}
+            onChange={setMarketId}
+            placeholder="Todos"
+            items={[
+              { value: "", label: "Todos" },
+              ...markets.map((market) => ({
+                value: market.id,
+                label: market.name,
+              })),
+            ]}
+          />
+          <SelectField
+            label="Evento"
+            value={eventType}
+            onChange={setEventType}
+            items={[
+              { value: "", label: "Todos" },
+              { value: "TRACKING", label: "Tracking automático" },
+              { value: "ENTRADA", label: "Entrada" },
+              { value: "VENTA", label: "Venta" },
+              { value: "TRADE", label: "Solicitud Trade" },
+              { value: "DEGUSTACION", label: "Degustación" },
+              { value: "SALIDA", label: "Salida" },
+            ]}
+          />
+        </div>
+
+        {promoterId && routePoints.length > 1 && (
+          <section className="dark-panel">
+            <div className="panel-header">
+              <div>
+                <h3>Recorrido GPS</h3>
+                <p>
+                  Vista proporcional del recorrido del día · {routePoints.length} puntos.
+                </p>
+              </div>
+            </div>
+            <div style={{ minHeight: 260, padding: 16 }}>
+              <svg viewBox="0 0 100 100" width="100%" height="260" role="img" aria-label="Recorrido GPS del promotor">
+                <polyline
+                  points={routeSvg}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  vectorEffect="non-scaling-stroke"
+                />
+                {routePoints.map((point, index) => {
+                  const allLat = routePoints.map((current) => current.latitude);
+                  const allLng = routePoints.map((current) => current.longitude);
+                  const minLat = Math.min(...allLat);
+                  const maxLat = Math.max(...allLat);
+                  const minLng = Math.min(...allLng);
+                  const maxLng = Math.max(...allLng);
+                  const y = 94 - ((point.latitude - minLat) / Math.max(0.00001, maxLat - minLat)) * 88;
+                  const x = 6 + ((point.longitude - minLng) / Math.max(0.00001, maxLng - minLng)) * 88;
+                  return (
+                    <circle
+                      key={point.id}
+                      cx={x}
+                      cy={y}
+                      r={point.eventType === "TRACKING" ? 0.8 : 1.6}
+                    >
+                      <title>{`${point.eventType} · ${formatDate(point.recordedAt)}`}</title>
+                    </circle>
+                  );
+                })}
+              </svg>
+            </div>
+          </section>
+        )}
+
+        <div className="module-table-wrap">
+          <div className="module-table">
+            <div className="module-table-row module-table-header cols-7">
+              <span>Fecha / hora</span>
+              <span>Promotor</span>
+              <span>Mercado / cliente</span>
+              <span>Evento</span>
+              <span>GPS</span>
+              <span>Batería</span>
+              <span>Estado</span>
+            </div>
+            {points.map((point) => {
+              const battery =
+                point.batteryLevel == null
+                  ? "No disponible"
+                  : `${Math.round(Number(point.batteryLevel))}%`;
+              const batteryState =
+                point.batteryLevel != null && Number(point.batteryLevel) <= 10
+                  ? "Crítica"
+                  : point.batteryLevel != null && Number(point.batteryLevel) <= 20
+                    ? "Baja"
+                    : "Normal";
+              return (
+                <article className="module-table-row cols-7" key={point.id}>
+                  <span>
+                    <strong>{formatDate(point.recordedAt)}</strong>
+                    <small>{point.referenceId || "Captura periódica"}</small>
+                  </span>
+                  <span>
+                    <strong>{point.promoterName || point.promoterId}</strong>
+                    <small>{point.promoterId}</small>
+                  </span>
+                  <span>
+                    <strong>{point.marketName || point.marketId || "Sin mercado"}</strong>
+                    <small>{point.clientName || point.clientId || "Sin cliente"}</small>
+                  </span>
+                  <span>
+                    <strong>{point.eventType}</strong>
+                    <small>{point.online ? "Online" : "Capturado offline"}</small>
+                  </span>
+                  <span>
+                    <strong>
+                      {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}
+                    </strong>
+                    <small>
+                      Precisión:{" "}
+                      {point.accuracyMeters == null
+                        ? "N/D"
+                        : `${Math.round(Number(point.accuracyMeters))} m`}
+                    </small>
+                  </span>
+                  <span>
+                    <strong>{battery}</strong>
+                    <small>
+                      {point.batteryCharging == null
+                        ? "Estado no disponible"
+                        : point.batteryCharging
+                          ? "Cargando"
+                          : "No cargando"}{" "}
+                      · {batteryState}
+                    </small>
+                  </span>
+                  <span>
+                    <StatusPill
+                      status={
+                        point.accuracyMeters != null &&
+                        Number(point.accuracyMeters) > 100
+                          ? "INACTIVO"
+                          : "ACTIVO"
+                      }
+                    />
+                  </span>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
+        {!points.length && !loading && (
+          <Empty
+            title="Sin puntos de tracking"
+            detail="No hay ubicaciones para los filtros seleccionados."
+          />
+        )}
+
+        {latestByPromoter.length > 0 && (
+          <div className="notice">
+            <strong>Estado del tracking</strong>
+            <p>
+              Batería y ubicación dependen de los permisos/capacidades del navegador.
+              Si la PWA queda suspendida o el teléfono se bloquea, el navegador puede
+              detener las capturas hasta volver a estar activo.
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function AnalystApp({
   user,
   productPrices,
