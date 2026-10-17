@@ -1259,7 +1259,7 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
   const where: string[] = [];
   const add = (sql: string, v: unknown) => {
     values.push(v);
-    where.push(sql.replace("?", `${values.length}`));
+    where.push(sql.replace("?", `$${values.length}`));
   };
   if (promoterId) add("t.promoter_id=?", promoterId);
   if (marketId) add("t.market_id=?", marketId);
@@ -1281,7 +1281,7 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
          LEFT JOIN clients c ON c.id=t.client_id
          ${where.length ? "WHERE " + where.join(" AND ") : ""}
          ORDER BY t.recorded_at DESC
-         LIMIT ${values.length}`,
+         LIMIT $${values.length}`,
       values,
     );
     const diagnosticValues: unknown[] = [];
@@ -1289,7 +1289,7 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
     const addDiagnostic = (sql: string, v: unknown) => {
       diagnosticValues.push(v);
       diagnosticWhere.push(
-        sql.replace("?", `${diagnosticValues.length}`),
+        sql.replace("?", `$${diagnosticValues.length}`),
       );
     };
     if (promoterId) addDiagnostic("d.promoter_id=?", promoterId);
@@ -1310,7 +1310,7 @@ router.get("/app-storage/tracking", async (req, res): Promise<void> => {
          LEFT JOIN clients c ON c.id=d.client_id
          ${diagnosticWhere.length ? "WHERE " + diagnosticWhere.join(" AND ") : ""}
          ORDER BY d.recorded_at DESC
-         LIMIT ${diagnosticValues.length}`,
+         LIMIT $${diagnosticValues.length}`,
       diagnosticValues,
     );
 
