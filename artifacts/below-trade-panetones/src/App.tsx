@@ -204,6 +204,131 @@ type Sale = {
   updatedAt?: string;
   status: SyncStatus;
 };
+type TrackingEventType =
+  | "TRACKING"
+  | "ENTRADA"
+  | "VENTA"
+  | "SALIDA"
+  | "TRADE"
+  | "DEGUSTACION";
+
+type TrackingPoint = {
+  id: string;
+  promoterId: string;
+  promoterName?: string;
+  marketId?: string;
+  marketName?: string;
+  clientId?: string;
+  clientName?: string;
+  eventType: TrackingEventType;
+  referenceId?: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters?: number | null;
+  batteryLevel?: number | null;
+  batteryCharging?: boolean | null;
+  online: boolean;
+  source: "BROWSER_GEOLOCATION";
+  recordedAt: string;
+  syncedAt?: string;
+};
+
+const TRACKING_QUEUE_KEY = "bt-tracking-pending";
+const TRACKING_INTERVAL_MS = 60_000;
+
+function trackingQueue() {
+  return readStore<TrackingPoint[]>(TRACKING_QUEUE_KEY, []);
+}
+
+function saveTrackingQueue(points: TrackingPoint[]) {
+  writeStore(TRACKING_QUEUE_KEY, points.slice(-2000));
+}
+
+async function trackingBattery() {
+  try {
+    const nav = navigator as Navigator & {
+      getBattery?: () => Promise<{ level: number; charging: boolean }>;
+    };
+    if (!nav.getBattery) return { level: null, charging: null };
+    const battery = await nav.getBattery();
+    return {
+      level: Math.max(0, Math.min(100, Math.round(battery.level * 100))),
+      charging: Boolean(battery.charging),
+    };
+  } catch {
+    return { level: null, charging: null };
+  }
+}
+
+function currentPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocalización no disponible"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12_000,
+      maximumAge: 45_000,
+    });
+  });
+}
+
+async function sendTrackingQueue(user: AppUser) {
+  if (!navigator.onLine || !user.password) return;
+  const points = trackingQueue();
+  if (!points.length) return;
+  const response = await fetch("/api/app-storage/tracking/batch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Tracking-Dni": user.dni,
+      "X-Tracking-Key": user.password,
+    },
+    body: JSON.stringify({ points }),
+  });
+  if (!response.ok) return;
+  saveTrackingQueue([]);
+}
+
+async function captureTrackingPoint(
+  user: AppUser,
+  eventType: TrackingEventType,
+  marketId?: string,
+  clientId?: string,
+  referenceId?: string,
+) {
+  if (!isPromoterRole(user.role)) return;
+  try {
+    const [position, battery] = await Promise.all([
+      currentPosition(),
+      trackingBattery(),
+    ]);
+    const point: TrackingPoint = {
+      id: `TRK-${crypto.randomUUID()}`,
+      promoterId: user.id,
+      marketId,
+      clientId,
+      eventType,
+      referenceId,
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracyMeters: Number.isFinite(position.coords.accuracy)
+        ? position.coords.accuracy
+        : null,
+      batteryLevel: battery.level,
+      batteryCharging: battery.charging,
+      online: navigator.onLine,
+      source: "BROWSER_GEOLOCATION",
+      recordedAt: new Date().toISOString(),
+    };
+    saveTrackingQueue([...trackingQueue(), point]);
+    await sendTrackingQueue(user);
+  } catch {
+    // El tracking nunca bloquea una venta o marcación.
+  }
+}
+
 const UNIT_SALE_PRODUCTS = [
   { sku: "COSTA-800", label: "PANETON COSTA 800 GR", brand: "COSTA", weightKg: 0.8 },
   { sku: "COSTA-BOLSA-800", label: "PANETON COSTA BOLSA 800 GR", brand: "COSTA", weightKg: 0.8 },
