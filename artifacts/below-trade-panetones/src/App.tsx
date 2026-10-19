@@ -7724,33 +7724,21 @@ function TrackingMap({
   connectRoute: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<any>(null);
+  const mapboxRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
+  const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState("");
   const mapboxToken = String(import.meta.env.VITE_MAPBOX_TOKEN || "").trim();
 
   useEffect(() => {
-    if (!containerRef.current || !points.length || !mapboxToken) return;
+    if (!containerRef.current || !mapboxToken || mapRef.current) return;
     let cancelled = false;
-    let map: any = null;
-    const markers: any[] = [];
-
-    const validPoints = points.filter(
-      (point) =>
-        Number.isFinite(Number(point.latitude)) &&
-        Number.isFinite(Number(point.longitude)) &&
-        Number(point.latitude) >= -90 &&
-        Number(point.latitude) <= 90 &&
-        Number(point.longitude) >= -180 &&
-        Number(point.longitude) <= 180,
-    );
-    if (!validPoints.length) {
-      setMapError("No hay coordenadas GPS válidas para mostrar.");
-      return;
-    }
 
     setMapError("");
     void loadMapboxGl()
       .then((mapboxgl) => {
-        if (cancelled || !containerRef.current) return;
+        if (cancelled || !containerRef.current || mapRef.current) return;
         if (!mapboxgl?.supported?.()) {
           setMapError(
             "Este navegador no tiene soporte WebGL suficiente para mostrar Mapbox.",
@@ -7758,107 +7746,32 @@ function TrackingMap({
           return;
         }
 
-        const first = validPoints[0];
-        map = new mapboxgl.Map({
+        mapboxRef.current = mapboxgl;
+        const firstValidPoint = points.find(
+          (point) =>
+            Number.isFinite(Number(point.latitude)) &&
+            Number.isFinite(Number(point.longitude)) &&
+            Number(point.latitude) >= -90 &&
+            Number(point.latitude) <= 90 &&
+            Number(point.longitude) >= -180 &&
+            Number(point.longitude) <= 180,
+        );
+
+        const map = new mapboxgl.Map({
           accessToken: mapboxToken,
           container: containerRef.current,
           style: "mapbox://styles/mapbox/dark-v11",
-          center: [Number(first.longitude), Number(first.latitude)],
-          zoom: 15,
+          center: firstValidPoint
+            ? [Number(firstValidPoint.longitude), Number(firstValidPoint.latitude)]
+            : [-77.0428, -12.0464],
+          zoom: firstValidPoint ? 15 : 11,
           attributionControl: true,
         });
         map.addControl(new mapboxgl.NavigationControl(), "top-right");
-
-        const bounds = new mapboxgl.LngLatBounds();
-        validPoints.forEach((point, index) => {
-          const lng = Number(point.longitude);
-          const lat = Number(point.latitude);
-          bounds.extend([lng, lat]);
-
-          const element = document.createElement("button");
-          element.type = "button";
-          element.title = `${point.eventType} · ${formatDate(point.recordedAt)}`;
-          element.style.width = point.eventType === "TRACKING" ? "14px" : "20px";
-          element.style.height = point.eventType === "TRACKING" ? "14px" : "20px";
-          element.style.borderRadius = "999px";
-          element.style.border = "2px solid #ffffff";
-          element.style.background = trackingMarkerColor(point.eventType);
-          element.style.boxShadow = "0 2px 8px rgba(0,0,0,.45)";
-          element.style.cursor = "pointer";
-          element.style.padding = "0";
-
-          const popup = new mapboxgl.Popup({ offset: 18 }).setHTML(
-            [
-              `<strong>${point.eventType}</strong>`,
-              `<div>${formatDate(point.recordedAt)}</div>`,
-              point.promoterName ? `<div>Promotor: ${point.promoterName}</div>` : "",
-              point.marketName ? `<div>Mercado: ${point.marketName}</div>` : "",
-              point.clientName ? `<div>Cliente: ${point.clientName}</div>` : "",
-              point.accuracyMeters != null
-                ? `<div>Precisión: ${Math.round(Number(point.accuracyMeters))} m</div>`
-                : "",
-              point.batteryLevel != null
-                ? `<div>Batería: ${Math.round(Number(point.batteryLevel))}%</div>`
-                : "",
-              connectRoute ? `<div>Punto: ${index + 1}/${validPoints.length}</div>` : "",
-            ]
-              .filter(Boolean)
-              .join(""),
-          );
-
-          const marker = new mapboxgl.Marker({ element })
-            .setLngLat([lng, lat])
-            .setPopup(popup)
-            .addTo(map);
-          markers.push(marker);
-        });
-
         map.on("load", () => {
-          if (
-            cancelled ||
-            !map ||
-            !connectRoute ||
-            validPoints.length < 2
-          )
-            return;
-
-          map.addSource("tracking-route", {
-            type: "geojson",
-            data: {
-              type: "Feature",
-              properties: {},
-              geometry: {
-                type: "LineString",
-                coordinates: validPoints.map((point) => [
-                  Number(point.longitude),
-                  Number(point.latitude),
-                ]),
-              },
-            },
-          });
-          map.addLayer({
-            id: "tracking-route-line",
-            type: "line",
-            source: "tracking-route",
-            layout: {
-              "line-join": "round",
-              "line-cap": "round",
-            },
-            paint: {
-              "line-color": "#f97316",
-              "line-width": 4,
-              "line-opacity": 0.9,
-            },
-          });
+          if (!cancelled) setMapReady(true);
         });
-
-        if (validPoints.length > 1) {
-          map.fitBounds(bounds, {
-            padding: 70,
-            maxZoom: 17,
-            duration: 0,
-          });
-        }
+        mapRef.current = map;
       })
       .catch((error) => {
         if (!cancelled)
@@ -7871,10 +7784,148 @@ function TrackingMap({
 
     return () => {
       cancelled = true;
-      markers.forEach((marker) => marker.remove());
-      map?.remove();
+      setMapReady(false);
+      markersRef.current.forEach((marker) => marker.remove());
+      markersRef.current = [];
+      mapRef.current?.remove();
+      mapRef.current = null;
+      mapboxRef.current = null;
     };
-  }, [points, connectRoute, mapboxToken]);
+  }, [mapboxToken]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const mapboxgl = mapboxRef.current;
+    if (!map || !mapboxgl || !mapReady) return;
+
+    const validPoints = points.filter(
+      (point) =>
+        Number.isFinite(Number(point.latitude)) &&
+        Number.isFinite(Number(point.longitude)) &&
+        Number(point.latitude) >= -90 &&
+        Number(point.latitude) <= 90 &&
+        Number(point.longitude) >= -180 &&
+        Number(point.longitude) <= 180,
+    );
+
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = [];
+
+    if (!validPoints.length) {
+      setMapError("No hay coordenadas GPS válidas para mostrar.");
+      if (map.getLayer("tracking-route-line"))
+        map.removeLayer("tracking-route-line");
+      if (map.getSource("tracking-route"))
+        map.removeSource("tracking-route");
+      return;
+    }
+
+    setMapError("");
+    const bounds = new mapboxgl.LngLatBounds();
+
+    validPoints.forEach((point, index) => {
+      const lng = Number(point.longitude);
+      const lat = Number(point.latitude);
+      bounds.extend([lng, lat]);
+
+      const element = document.createElement("button");
+      element.type = "button";
+      element.title = `${point.eventType} · ${formatDate(point.recordedAt)}`;
+      element.style.width = point.eventType === "TRACKING" ? "14px" : "20px";
+      element.style.height = point.eventType === "TRACKING" ? "14px" : "20px";
+      element.style.borderRadius = "999px";
+      element.style.border = "2px solid #ffffff";
+      element.style.background = trackingMarkerColor(point.eventType);
+      element.style.boxShadow = "0 2px 8px rgba(0,0,0,.45)";
+      element.style.cursor = "pointer";
+      element.style.padding = "0";
+
+      const popup = new mapboxgl.Popup({ offset: 18 }).setHTML(
+        [
+          `<strong>${point.eventType}</strong>`,
+          `<div>${formatDate(point.recordedAt)}</div>`,
+          point.promoterName ? `<div>Promotor: ${point.promoterName}</div>` : "",
+          point.marketName ? `<div>Mercado: ${point.marketName}</div>` : "",
+          point.clientName ? `<div>Cliente: ${point.clientName}</div>` : "",
+          point.accuracyMeters != null
+            ? `<div>Precisión: ${Math.round(Number(point.accuracyMeters))} m</div>`
+            : "",
+          point.batteryLevel != null
+            ? `<div>Batería: ${Math.round(Number(point.batteryLevel))}%</div>`
+            : "",
+          connectRoute ? `<div>Punto: ${index + 1}/${validPoints.length}</div>` : "",
+        ]
+          .filter(Boolean)
+          .join(""),
+      );
+
+      const marker = new mapboxgl.Marker({ element })
+        .setLngLat([lng, lat])
+        .setPopup(popup)
+        .addTo(map);
+      markersRef.current.push(marker);
+    });
+
+    const routeData = {
+      type: "Feature",
+      properties: {},
+      geometry: {
+        type: "LineString",
+        coordinates: validPoints.map((point) => [
+          Number(point.longitude),
+          Number(point.latitude),
+        ]),
+      },
+    };
+
+    if (connectRoute && validPoints.length > 1) {
+      const source = map.getSource("tracking-route");
+      if (source) {
+        source.setData(routeData);
+      } else {
+        map.addSource("tracking-route", {
+          type: "geojson",
+          data: routeData,
+        });
+        map.addLayer({
+          id: "tracking-route-line",
+          type: "line",
+          source: "tracking-route",
+          layout: {
+            "line-join": "round",
+            "line-cap": "round",
+          },
+          paint: {
+            "line-color": "#f97316",
+            "line-width": 4,
+            "line-opacity": 0.9,
+          },
+        });
+      }
+    } else {
+      if (map.getLayer("tracking-route-line"))
+        map.removeLayer("tracking-route-line");
+      if (map.getSource("tracking-route"))
+        map.removeSource("tracking-route");
+    }
+
+    if (validPoints.length > 1) {
+      map.fitBounds(bounds, {
+        padding: 70,
+        maxZoom: 17,
+        duration: 0,
+      });
+    } else {
+      map.easeTo({
+        center: [
+          Number(validPoints[0].longitude),
+          Number(validPoints[0].latitude),
+        ],
+        zoom: Math.max(map.getZoom(), 15),
+        duration: 0,
+      });
+    }
+  }, [points, connectRoute, mapReady]);
 
   if (!points.length) return null;
 
