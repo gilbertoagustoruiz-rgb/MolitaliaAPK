@@ -7655,6 +7655,67 @@ function CoordinatorApp({
   );
 }
 
+const MAPBOX_GL_VERSION = "3.33.0";
+let mapboxLoader: Promise<any> | null = null;
+
+function loadMapboxGl() {
+  if (mapboxLoader) return mapboxLoader;
+  mapboxLoader = new Promise((resolve, reject) => {
+    const existing = (window as any).mapboxgl;
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    if (!document.querySelector('link[data-mapbox-gl="true"]')) {
+      const css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = `https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_GL_VERSION}/mapbox-gl.css`;
+      css.dataset.mapboxGl = "true";
+      document.head.appendChild(css);
+    }
+
+    const currentScript = document.querySelector<HTMLScriptElement>(
+      'script[data-mapbox-gl="true"]',
+    );
+    if (currentScript) {
+      currentScript.addEventListener("load", () =>
+        resolve((window as any).mapboxgl),
+      );
+      currentScript.addEventListener("error", () =>
+        reject(new Error("No se pudo cargar Mapbox GL JS.")),
+      );
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = `https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_GL_VERSION}/mapbox-gl.js`;
+    script.async = true;
+    script.dataset.mapboxGl = "true";
+    script.onload = () => resolve((window as any).mapboxgl);
+    script.onerror = () => reject(new Error("No se pudo cargar Mapbox GL JS."));
+    document.head.appendChild(script);
+  });
+  return mapboxLoader;
+}
+
+function trackingMarkerColor(eventType: TrackingEventType) {
+  switch (eventType) {
+    case "ENTRADA":
+      return "#22c55e";
+    case "SALIDA":
+      return "#ef4444";
+    case "VENTA":
+      return "#f97316";
+    case "TRADE":
+      return "#a855f7";
+    case "DEGUSTACION":
+      return "#eab308";
+    default:
+      return "#38bdf8";
+  }
+}
+
 function TrackingMap({
   points,
   connectRoute,
@@ -7662,155 +7723,258 @@ function TrackingMap({
   points: TrackingPoint[];
   connectRoute: boolean;
 }) {
-  if (!points.length) return null;
-  const width = 1000;
-  const height = 360;
-  const tileSize = 256;
-  const mercator = (point: TrackingPoint, zoom: number) => {
-    const scale = tileSize * 2 ** zoom;
-    const lat = Math.max(-85.05112878, Math.min(85.05112878, point.latitude));
-    const x = ((point.longitude + 180) / 360) * scale;
-    const sin = Math.sin((lat * Math.PI) / 180);
-    const y =
-      (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale;
-    return { x, y };
-  };
-  let zoom = 17;
-  for (; zoom > 3; zoom -= 1) {
-    const projected = points.map((point) => mercator(point, zoom));
-    const xs = projected.map((point) => point.x);
-    const ys = projected.map((point) => point.y);
-    if (
-      Math.max(...xs) - Math.min(...xs) <= width - 160 &&
-      Math.max(...ys) - Math.min(...ys) <= height - 100
-    )
-      break;
-  }
-  const projected = points.map((point) => ({
-    point,
-    ...mercator(point, zoom),
-  }));
-  const minX = Math.min(...projected.map((item) => item.x));
-  const maxX = Math.max(...projected.map((item) => item.x));
-  const minY = Math.min(...projected.map((item) => item.y));
-  const maxY = Math.max(...projected.map((item) => item.y));
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-  const left = centerX - width / 2;
-  const top = centerY - height / 2;
-  const startTileX = Math.floor(left / tileSize);
-  const endTileX = Math.floor((left + width) / tileSize);
-  const startTileY = Math.floor(top / tileSize);
-  const endTileY = Math.floor((top + height) / tileSize);
-  const maxTile = 2 ** zoom;
-  const tiles: Array<{ x: number; y: number; drawX: number; drawY: number }> = [];
-  for (let x = startTileX; x <= endTileX; x += 1) {
-    for (let y = startTileY; y <= endTileY; y += 1) {
-      if (y < 0 || y >= maxTile) continue;
-      const wrappedX = ((x % maxTile) + maxTile) % maxTile;
-      tiles.push({
-        x: wrappedX,
-        y,
-        drawX: x * tileSize - left,
-        drawY: y * tileSize - top,
-      });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [mapError, setMapError] = useState("");
+  const mapboxToken = String(import.meta.env.VITE_MAPBOX_TOKEN || "").trim();
+
+  useEffect(() => {
+    if (!containerRef.current || !points.length || !mapboxToken) return;
+    let cancelled = false;
+    let map: any = null;
+    const markers: any[] = [];
+
+    const validPoints = points.filter(
+      (point) =>
+        Number.isFinite(Number(point.latitude)) &&
+        Number.isFinite(Number(point.longitude)) &&
+        Number(point.latitude) >= -90 &&
+        Number(point.latitude) <= 90 &&
+        Number(point.longitude) >= -180 &&
+        Number(point.longitude) <= 180,
+    );
+    if (!validPoints.length) {
+      setMapError("No hay coordenadas GPS válidas para mostrar.");
+      return;
     }
+
+    setMapError("");
+    void loadMapboxGl()
+      .then((mapboxgl) => {
+        if (cancelled || !containerRef.current) return;
+        if (!mapboxgl?.supported?.()) {
+          setMapError(
+            "Este navegador no tiene soporte WebGL suficiente para mostrar Mapbox.",
+          );
+          return;
+        }
+
+        const first = validPoints[0];
+        map = new mapboxgl.Map({
+          accessToken: mapboxToken,
+          container: containerRef.current,
+          style: "mapbox://styles/mapbox/dark-v11",
+          center: [Number(first.longitude), Number(first.latitude)],
+          zoom: 15,
+          attributionControl: true,
+        });
+        map.addControl(new mapboxgl.NavigationControl(), "top-right");
+
+        const bounds = new mapboxgl.LngLatBounds();
+        validPoints.forEach((point, index) => {
+          const lng = Number(point.longitude);
+          const lat = Number(point.latitude);
+          bounds.extend([lng, lat]);
+
+          const element = document.createElement("button");
+          element.type = "button";
+          element.title = `${point.eventType} · ${formatDate(point.recordedAt)}`;
+          element.style.width = point.eventType === "TRACKING" ? "14px" : "20px";
+          element.style.height = point.eventType === "TRACKING" ? "14px" : "20px";
+          element.style.borderRadius = "999px";
+          element.style.border = "2px solid #ffffff";
+          element.style.background = trackingMarkerColor(point.eventType);
+          element.style.boxShadow = "0 2px 8px rgba(0,0,0,.45)";
+          element.style.cursor = "pointer";
+          element.style.padding = "0";
+
+          const popup = new mapboxgl.Popup({ offset: 18 }).setHTML(
+            [
+              `<strong>${point.eventType}</strong>`,
+              `<div>${formatDate(point.recordedAt)}</div>`,
+              point.promoterName ? `<div>Promotor: ${point.promoterName}</div>` : "",
+              point.marketName ? `<div>Mercado: ${point.marketName}</div>` : "",
+              point.clientName ? `<div>Cliente: ${point.clientName}</div>` : "",
+              point.accuracyMeters != null
+                ? `<div>Precisión: ${Math.round(Number(point.accuracyMeters))} m</div>`
+                : "",
+              point.batteryLevel != null
+                ? `<div>Batería: ${Math.round(Number(point.batteryLevel))}%</div>`
+                : "",
+              connectRoute ? `<div>Punto: ${index + 1}/${validPoints.length}</div>` : "",
+            ]
+              .filter(Boolean)
+              .join(""),
+          );
+
+          const marker = new mapboxgl.Marker({ element })
+            .setLngLat([lng, lat])
+            .setPopup(popup)
+            .addTo(map);
+          markers.push(marker);
+        });
+
+        map.on("load", () => {
+          if (
+            cancelled ||
+            !map ||
+            !connectRoute ||
+            validPoints.length < 2
+          )
+            return;
+
+          map.addSource("tracking-route", {
+            type: "geojson",
+            data: {
+              type: "Feature",
+              properties: {},
+              geometry: {
+                type: "LineString",
+                coordinates: validPoints.map((point) => [
+                  Number(point.longitude),
+                  Number(point.latitude),
+                ]),
+              },
+            },
+          });
+          map.addLayer({
+            id: "tracking-route-line",
+            type: "line",
+            source: "tracking-route",
+            layout: {
+              "line-join": "round",
+              "line-cap": "round",
+            },
+            paint: {
+              "line-color": "#f97316",
+              "line-width": 4,
+              "line-opacity": 0.9,
+            },
+          });
+        });
+
+        if (validPoints.length > 1) {
+          map.fitBounds(bounds, {
+            padding: 70,
+            maxZoom: 17,
+            duration: 0,
+          });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled)
+          setMapError(
+            error instanceof Error
+              ? error.message
+              : "No se pudo inicializar Mapbox.",
+          );
+      });
+
+    return () => {
+      cancelled = true;
+      markers.forEach((marker) => marker.remove());
+      map?.remove();
+    };
+  }, [points, connectRoute, mapboxToken]);
+
+  if (!points.length) return null;
+
+  if (!mapboxToken) {
+    return (
+      <div
+        style={{
+          minHeight: 300,
+          display: "grid",
+          placeItems: "center",
+          padding: 24,
+          borderRadius: 14,
+          background: "#0b1320",
+          textAlign: "center",
+        }}
+      >
+        <div>
+          <MapPin size={34} />
+          <h4>Mapbox pendiente de configuración</h4>
+          <p style={{ maxWidth: 520 }}>
+            Agrega la variable pública <strong>VITE_MAPBOX_TOKEN</strong> en
+            DigitalOcean y vuelve a desplegar para habilitar el mapa.
+          </p>
+        </div>
+      </div>
+    );
   }
-  const polyline = projected
-    .map((item) => `${(item.x - left).toFixed(1)},${(item.y - top).toFixed(1)}`)
-    .join(" ");
 
   return (
     <div
       style={{
         position: "relative",
         width: "100%",
-        minHeight: height,
-        height,
+        minHeight: 420,
+        height: 420,
         overflow: "hidden",
         borderRadius: 14,
         background: "#0b1320",
       }}
-      aria-label="Mapa real de ubicaciones GPS"
+      aria-label="Mapa Mapbox de ubicaciones GPS"
     >
-      {tiles.map((tile) => (
-        <img
-          key={`${zoom}-${tile.x}-${tile.y}-${tile.drawX}`}
-          src={`https://tile.openstreetmap.org/${zoom}/${tile.x}/${tile.y}.png`}
-          alt=""
-          width={tileSize}
-          height={tileSize}
-          loading="lazy"
-          referrerPolicy="no-referrer"
+      <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+      {mapError && (
+        <div
           style={{
             position: "absolute",
-            left: tile.drawX,
-            top: tile.drawY,
-            width: tileSize,
-            height: tileSize,
-            userSelect: "none",
-            pointerEvents: "none",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            padding: 24,
+            background: "rgba(11,19,32,.94)",
+            zIndex: 3,
+            textAlign: "center",
           }}
-        />
-      ))}
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        preserveAspectRatio="none"
-        width="100%"
-        height="100%"
-        style={{ position: "absolute", inset: 0 }}
-      >
-        {connectRoute && projected.length > 1 && (
-          <polyline
-            points={polyline}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            vectorEffect="non-scaling-stroke"
-            opacity="0.9"
-          />
-        )}
-        {projected.map((item, index) => (
-          <g key={item.point.id}>
-            <circle
-              cx={item.x - left}
-              cy={item.y - top}
-              r={item.point.eventType === "TRACKING" ? 6 : 10}
-              fill="currentColor"
-              stroke="#ffffff"
-              strokeWidth="2"
-              vectorEffect="non-scaling-stroke"
-            />
-            {connectRoute && (
-              <text
-                x={item.x - left + 10}
-                y={item.y - top - 10}
-                fontSize="14"
-                fill="#ffffff"
-                stroke="#0b1320"
-                strokeWidth="3"
-                paintOrder="stroke"
-              >
-                {index + 1}
-              </text>
-            )}
-          </g>
-        ))}
-      </svg>
+        >
+          <div>
+            <AlertTriangle size={32} />
+            <h4>No se pudo mostrar el mapa</h4>
+            <p>{mapError}</p>
+          </div>
+        </div>
+      )}
       <div
         style={{
           position: "absolute",
-          right: 8,
-          bottom: 6,
-          padding: "2px 6px",
-          borderRadius: 6,
-          background: "rgba(15,23,42,.82)",
+          left: 12,
+          bottom: 12,
+          zIndex: 2,
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 8,
+          padding: "8px 10px",
+          borderRadius: 10,
+          background: "rgba(15,23,42,.88)",
           fontSize: 11,
         }}
       >
-        © OpenStreetMap contributors
+        {[
+          ["ENTRADA", "#22c55e"],
+          ["TRACKING", "#38bdf8"],
+          ["VENTA", "#f97316"],
+          ["TRADE", "#a855f7"],
+          ["DEGUSTACIÓN", "#eab308"],
+          ["SALIDA", "#ef4444"],
+        ].map(([label, color]) => (
+          <span
+            key={label}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+          >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: color,
+              }}
+            />
+            {label}
+          </span>
+        ))}
       </div>
     </div>
   );
