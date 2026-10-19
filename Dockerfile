@@ -1,5 +1,7 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
+ARG VITE_MAPBOX_TOKEN
+ENV VITE_MAPBOX_TOKEN=${VITE_MAPBOX_TOKEN}
 RUN corepack enable
 COPY . .
 RUN pnpm install --frozen-lockfile
