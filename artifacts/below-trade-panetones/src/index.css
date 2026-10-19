@@ -504,8 +504,8 @@ select:focus-visible,
   border-color: #38506d;
 }
 .workspace {
-  width: min(1600px, calc(100% - 40px));
-  margin: 0 auto;
+  width: min(1600px, calc(100% - 300px));
+  margin: 0 20px 0 260px;
   padding: 38px 0 70px;
 }
 .page-head {
@@ -554,24 +554,34 @@ select:focus-visible,
   font-size: 11px;
 }
 .tabs {
+  position: fixed;
+  left: 20px;
+  top: 92px;
+  z-index: 20;
   display: flex;
+  flex-direction: column;
   gap: 4px;
-  padding: 5px;
-  margin-bottom: 26px;
-  width: max-content;
-  max-width: 100%;
-  overflow: auto;
+  width: 220px;
+  max-height: calc(100vh - 112px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  margin: 0;
   border: 1px solid hsl(var(--line));
   border-radius: 13px;
-  background: hsla(var(--surface) / 0.72);
+  background: hsla(var(--surface) / 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 36px hsla(218 45% 10% / 0.12);
 }
 .tab {
+  width: 100%;
   border: 0;
   border-radius: 9px;
   background: transparent;
-  padding: 10px 13px;
+  padding: 11px 13px;
   color: hsl(var(--muted));
   font-weight: 700;
+  text-align: left;
   white-space: nowrap;
 }
 .tab.active {
@@ -4180,13 +4190,29 @@ select:focus-visible,
     grid-column: 1/-1;
     width: 100%;
   }
+  .workspace {
+    width: calc(100% - 24px);
+    margin: 0 auto;
+    padding: 28px 0 50px;
+  }
   .tabs {
+    position: static;
+    flex-direction: row;
     width: 100%;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 5px;
+    margin-bottom: 22px;
+    backdrop-filter: none;
+    box-shadow: none;
   }
   .tab {
-    flex: 1;
-    padding: 9px 7px;
+    flex: 0 0 auto;
+    width: auto;
+    padding: 9px 10px;
     font-size: 11px;
+    text-align: center;
   }
   .promoter-layout {
     display: block;
