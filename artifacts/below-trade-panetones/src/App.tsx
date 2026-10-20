@@ -81,6 +81,18 @@ function normalizeLocationValue(input?: string) {
     .toUpperCase();
 }
 
+function peruDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Lima",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+
 function isPunoSouthMarket(market?: Pick<Market, "region" | "department"> | null) {
   return (
     normalizeLocationValue(market?.region) === "SUR" &&
@@ -5429,7 +5441,7 @@ function AdminCanjesModule({
   });
   const exportCanjes = () => {
     downloadCsv(
-      `canjes-${new Date().toISOString().slice(0, 10)}.csv`,
+      `canjes-${peruDateKey()}.csv`,
       ["Fecha", "Origen", "Mercado", "Producto", "Cantidad", "Responsable"],
       canjes.map((canje) => [
         formatDate(canje.date),
@@ -7256,7 +7268,7 @@ function CoordinatorApp({
 
   const exportMarkets = () => {
     downloadCsv(
-      `mercados-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      `mercados-coordinador-${peruDateKey()}.csv`,
       ["Código", "Mercado", "Región", "Departamento", "Provincia", "Distrito", "Almacén"],
       allowedMarkets.map((market) => [
         market.id,
@@ -7272,7 +7284,7 @@ function CoordinatorApp({
   };
   const exportClients = () => {
     downloadCsv(
-      `clientes-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      `clientes-coordinador-${peruDateKey()}.csv`,
       ["Código", "Cliente", "Categoría", "Mercado", "Estado"],
       allowedClients.map((client) => [
         client.code,
@@ -7286,7 +7298,7 @@ function CoordinatorApp({
   };
   const exportSales = () => {
     downloadCsv(
-      `ventas-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      `ventas-coordinador-${peruDateKey()}.csv`,
       [
         "Código",
         "Fecha",
@@ -7329,7 +7341,7 @@ function CoordinatorApp({
   };
   const exportCanjes = () => {
     downloadCsv(
-      `canjes-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      `canjes-coordinador-${peruDateKey()}.csv`,
       ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Canje", "Cantidad", "Foto"],
       allowedCanjes.map((sale) => [
         sale.id,
@@ -7346,7 +7358,7 @@ function CoordinatorApp({
   };
   const exportDegustacion = () => {
     downloadCsv(
-      `degustacion-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      `degustacion-coordinador-${peruDateKey()}.csv`,
       ["Código", "Fecha", "Promotor", "Mercado", "Producto", "Cantidad", "Contactos"],
       allowedDegustaciones.map((movement) => {
         const productId = movement.degustacionProductId || "PANETON_900G";
@@ -7367,7 +7379,7 @@ function CoordinatorApp({
   };
   const exportAssignments = () => {
     downloadCsv(
-      `asignaciones-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      `asignaciones-coordinador-${peruDateKey()}.csv`,
       ["Promotor", "DNI", "Rol", "Mercados", "Clientes"],
       allowedAssignments.map((item) => {
         const promoter = users.find((current) =>
@@ -7386,7 +7398,7 @@ function CoordinatorApp({
   };
   const exportAttendance = () => {
     downloadCsv(
-      `marcaciones-coordinador-${new Date().toISOString().slice(0, 10)}.csv`,
+      `marcaciones-coordinador-${peruDateKey()}.csv`,
       ["Código", "Fecha", "Promotor", "DNI", "Tipo", "Mercado", "Cliente", "Estado", "Foto"],
       allowedAttendance.map((item) => {
         const promoter = userMap[item.promoterId];
@@ -8044,7 +8056,7 @@ function TrackingModule({
   clients: Client[];
   notify: (message: string, error?: boolean) => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = peruDateKey();
   const [points, setPoints] = useState<TrackingPoint[]>([]);
   const [diagnostics, setDiagnostics] = useState<TrackingDiagnostic[]>([]);
   const [loading, setLoading] = useState(false);
