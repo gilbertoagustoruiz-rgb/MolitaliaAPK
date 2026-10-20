@@ -267,7 +267,7 @@ type TrackingDiagnostic = {
 
 const TRACKING_QUEUE_KEY = "bt-tracking-pending";
 const TRACKING_DIAGNOSTIC_QUEUE_KEY = "bt-tracking-diagnostics-pending";
-const TRACKING_INTERVAL_MS = 200_000;
+const TRACKING_INTERVAL_MS = 740_000;
 
 function trackingQueue() {
   return readStore<TrackingPoint[]>(TRACKING_QUEUE_KEY, []);
@@ -8189,7 +8189,7 @@ function TrackingModule({
           <h2>Tracking</h2>
           <p>
             Ubicación enviada por promotores durante jornada activa. La PWA
-            captura aproximadamente cada 200 segundos mientras está visible.
+            captura aproximadamente cada 740 segundos mientras está visible.
           </p>
         </div>
         <div className="panel-actions">
@@ -14135,7 +14135,7 @@ export default function App() {
     if (!activeUser || !isPromoterRole(activeUser.role)) return;
 
     // Tracking V2: mientras un promotor tenga sesión activa y la PWA esté
-    // visible, se intenta obtener ubicación cada 200 segundos. No depende de
+    // visible, se intenta obtener ubicación cada 740 segundos. No depende de
     // que exista una marcación de ENTRADA para empezar a recopilar datos.
     const send = () => {
       if (document.visibilityState !== "visible") return;
