@@ -131,6 +131,10 @@ function stripCanjeFromSale(record: StoredRecord): StoredRecord {
     suggestedRedemptionItems: _suggestedRedemptionItems,
     exchangePhoto: _exchangePhoto,
     finalClientName: _finalClientName,
+    redemptionRuleId: _redemptionRuleId,
+    redemptionRuleCode: _redemptionRuleCode,
+    redemptionRuleName: _redemptionRuleName,
+    redemptionRuleSnapshot: _redemptionRuleSnapshot,
     ...rest
   } = record;
   return {
@@ -149,6 +153,10 @@ function enforceSaleWithoutCanje(record: StoredRecord) {
   delete record.suggestedRedemptionItems;
   delete record.exchangePhoto;
   delete record.finalClientName;
+  delete record.redemptionRuleId;
+  delete record.redemptionRuleCode;
+  delete record.redemptionRuleName;
+  delete record.redemptionRuleSnapshot;
   Object.assign(record, clean);
 }
 
@@ -623,10 +631,11 @@ async function upsertRecord(
     );
   } else if (name === "sales") {
     await client.query(
-      `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,data,record_updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,redemption_rule_id,data,record_updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (id) DO UPDATE SET receipt_photo=EXCLUDED.receipt_photo,exchange_photo=EXCLUDED.exchange_photo,
-       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       redemption_rule_id=EXCLUDED.redemption_rule_id,status=EXCLUDED.status,data=EXCLUDED.data,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
        WHERE sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at`,
       [
         key,
@@ -641,6 +650,7 @@ async function upsertRecord(
         "SINCRONIZADA",
         value(source, "receiptPhoto") || null,
         value(source, "exchangePhoto") || null,
+        value(source, "redemptionRuleId") || null,
         normalized,
         updated,
       ],
@@ -997,6 +1007,23 @@ async function syncSnapshot(
           }
           if (isNewRecord && name === "sales") {
             if (isPunoSouthSaleRecord(record)) enforceSaleWithoutCanje(record);
+            const validatedRule = await validateSubmittedRedemptionRule(
+              client as unknown as QueryClient,
+              record,
+              dateValue(record),
+            );
+            if (validatedRule) {
+              record.redemptionRuleId = validatedRule.id;
+              record.redemptionRuleCode = validatedRule.code;
+              record.redemptionRuleName = validatedRule.name;
+              record.redemptionRuleSnapshot = {
+                code: validatedRule.code,
+                name: validatedRule.name,
+                items: validatedRule.items,
+                accessory: validatedRule.accessory,
+                appliedFactor: validatedRule.appliedFactor,
+              };
+            }
             requireFinalClientForCanje(record);
           }
           if (isNewRecord && name === "sales" && hasRedemptionConsumption(record)) {
@@ -1077,6 +1104,121 @@ async function authorizedTradeActor(req: Request) {
     !(await verifyPassword(key, actor.password_hash))
   ) return null;
   return { id: String(actor.id), role: actorRole, data: actorData };
+}
+
+async function validateSubmittedRedemptionRule(
+  client: QueryClient,
+  sale: StoredRecord,
+  saleDate: Date,
+) {
+  const ruleId = value(sale, "redemptionRuleId");
+  if (!ruleId) return null;
+  const result = await client.query(
+    `SELECT id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,
+            min_exclusive,repeatable,step_quantity,eligible_skus,accessory,
+            items,valid_from,valid_to,priority,status
+     FROM redemption_rules
+     WHERE id=$1 AND status='ACTIVO'
+     LIMIT 1`,
+    [ruleId],
+  );
+  const rule = result.rows[0];
+  if (!rule) throw new Error("La Escala de Canje seleccionada ya no está activa.");
+
+  if (String(rule.sale_mode) !== value(sale, "mode"))
+    throw new Error("La Escala de Canje no corresponde al tipo de venta.");
+
+  const validFrom = rule.valid_from ? new Date(String(rule.valid_from)) : null;
+  const validTo = rule.valid_to ? new Date(String(rule.valid_to)) : null;
+  if (validFrom && saleDate < validFrom)
+    throw new Error("La Escala de Canje aún no está vigente para esta fecha.");
+  if (validTo && saleDate > validTo)
+    throw new Error("La Escala de Canje ya no está vigente para esta fecha.");
+
+  const accessory =
+    value(sale, "mode") === "PLANCHAS"
+      ? value(sale, "planchaAccessory") || "NINGUNO"
+      : "NINGUNO";
+  if (String(rule.accessory || "NINGUNO") !== accessory)
+    throw new Error("La Escala de Canje no corresponde al accesorio seleccionado.");
+
+  const quantity =
+    String(rule.quantity_basis) === "UNITS"
+      ? numeric(sale, "units")
+      : numeric(sale, "planchas");
+  const minQuantity = Number(rule.min_quantity || 0);
+  const maxQuantity =
+    rule.max_quantity === null || rule.max_quantity === undefined
+      ? null
+      : Number(rule.max_quantity);
+  if (Boolean(rule.min_exclusive) ? quantity <= minQuantity : quantity < minQuantity)
+    throw new Error("La compra no alcanza la cantidad mínima de esta escala.");
+  if (maxQuantity !== null && quantity > maxQuantity)
+    throw new Error("La compra supera la cantidad máxima de esta escala.");
+
+  const saleSkus = saleItemDrafts(sale).map((item) => item.sku);
+  const eligibleSkus = Array.isArray(rule.eligible_skus)
+    ? rule.eligible_skus.map((sku: unknown) => String(sku))
+    : [];
+  if (
+    eligibleSkus.length &&
+    (saleSkus.length === 0 || saleSkus.some((sku) => !eligibleSkus.includes(sku)))
+  )
+    throw new Error("Uno o más productos no pertenecen a la Escala de Canje seleccionada.");
+
+  let factor = 1;
+  if (Boolean(rule.repeatable)) {
+    const step = Math.max(
+      0,
+      Number(rule.step_quantity || 0) || Number(rule.min_quantity || 0),
+    );
+    if (step <= 0) throw new Error("La escala repetible no tiene un paso válido.");
+    factor = Math.max(1, Math.floor(quantity / step));
+  }
+  if (value(sale, "mode") === "PLANCHAS" && numeric(sale, "planchas") > 80) {
+    factor *= Math.max(1, Math.min(4, Math.floor(numeric(sale, "planchaMultiplier") || 1)));
+  }
+
+  const ruleItems = isRecord(rule.items) ? rule.items : {};
+  const requestedItems = isRecord(sale.redemptionItems) ? sale.redemptionItems : {};
+  for (const itemId of redemptionItemIds) {
+    const expected =
+      Math.max(0, Math.floor(Number(ruleItems[itemId]) || 0)) * factor;
+    const requested = Math.max(
+      0,
+      Math.floor(Number(requestedItems[itemId]) || 0),
+    );
+    const optionalAccessory = itemId === "MANDIL" || itemId === "BATEA";
+    const validQuantity = optionalAccessory
+      ? requested >= 0 && requested <= expected
+      : requested === expected;
+    if (!validQuantity)
+      throw new Error(
+        optionalAccessory
+          ? `El canje no coincide con ${String(rule.name || rule.code)}: ${itemId} no puede superar ${expected}.`
+          : `El canje no coincide con ${String(rule.name || rule.code)}: ${itemId} debe ser ${expected}.`,
+      );
+  }
+
+  const expectedHasCanje = redemptionItemIds.some(
+    (itemId) => Math.max(0, Number(ruleItems[itemId]) || 0) * factor > 0,
+  );
+  if (expectedHasCanje !== Boolean(value(sale, "bonus")))
+    throw new Error("La venta no conserva la bonificación definida por la escala.");
+
+  return {
+    id: String(rule.id),
+    code: String(rule.code),
+    name: String(rule.name),
+    items: Object.fromEntries(
+      redemptionItemIds.map((itemId) => [
+        itemId,
+        Math.max(0, Math.floor(Number(ruleItems[itemId]) || 0)) * factor,
+      ]),
+    ),
+    accessory: String(rule.accessory || "NINGUNO"),
+    appliedFactor: factor,
+  };
 }
 
 async function authorizedWarehouseActor(req: Request) {
@@ -2402,6 +2544,199 @@ router.delete("/app-storage/transfers/:id", async (req, res): Promise<void> => {
     });
   } finally {
     db.release();
+  }
+});
+
+function normalizeRedemptionRuleRow(row: Record<string, unknown>) {
+  const data = isRecord(row.data) ? row.data : {};
+  return {
+    ...data,
+    id: String(row.id || ""),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    saleMode: String(row.sale_mode || "PLANCHAS"),
+    quantityBasis: String(row.quantity_basis || "PLANCHAS"),
+    minQuantity: Number(row.min_quantity || 0),
+    maxQuantity:
+      row.max_quantity === null || row.max_quantity === undefined
+        ? null
+        : Number(row.max_quantity),
+    minExclusive: Boolean(row.min_exclusive),
+    repeatable: Boolean(row.repeatable),
+    stepQuantity:
+      row.step_quantity === null || row.step_quantity === undefined
+        ? null
+        : Number(row.step_quantity),
+    eligibleSkus: Array.isArray(row.eligible_skus) ? row.eligible_skus : [],
+    accessory: String(row.accessory || "NINGUNO"),
+    items: isRecord(row.items) ? row.items : {},
+    validFrom: row.valid_from ? new Date(String(row.valid_from)).toISOString() : null,
+    validTo: row.valid_to ? new Date(String(row.valid_to)).toISOString() : null,
+    priority: Number(row.priority || 100),
+    status: String(row.status || "ACTIVO"),
+    updatedAt: row.updated_at ? new Date(String(row.updated_at)).toISOString() : undefined,
+  };
+}
+
+router.get("/app-storage/redemption-rules", async (_req, res): Promise<void> => {
+  try {
+    const result = await pool.query(
+      `SELECT id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,
+              min_exclusive,repeatable,step_quantity,eligible_skus,accessory,
+              items,valid_from,valid_to,priority,status,data,updated_at
+       FROM redemption_rules
+       ORDER BY priority,code`,
+    );
+    res.json({ rules: result.rows.map(normalizeRedemptionRuleRow) });
+  } catch (error) {
+    console.error("Unable to read redemption rules", error);
+    res.status(500).json({ message: "No se pudieron leer las Escalas de Canje." });
+  }
+});
+
+router.post("/app-storage/redemption-rules", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor)
+    return void res.status(403).json({
+      message: "Solo Admin o Analista puede administrar Escalas de Canje.",
+    });
+  const input = isRecord(req.body?.rule) ? req.body.rule : {};
+  const id = value(input, "id") || `RR-${randomUUID()}`;
+  const code = value(input, "code").toUpperCase().replace(/\s+/g, "_");
+  const name = value(input, "name");
+  const saleMode = value(input, "saleMode") === "UNIDADES" ? "UNIDADES" : "PLANCHAS";
+  const quantityBasis = value(input, "quantityBasis") === "UNITS" ? "UNITS" : "PLANCHAS";
+  const minQuantity = Math.max(0, Number(input.minQuantity) || 0);
+  const maxRaw = input.maxQuantity;
+  const maxQuantity =
+    maxRaw === null || maxRaw === undefined || String(maxRaw).trim() === ""
+      ? null
+      : Math.max(0, Number(maxRaw) || 0);
+  const accessory = ["NINGUNO", "MANDIL", "BATEA"].includes(value(input, "accessory"))
+    ? value(input, "accessory")
+    : "NINGUNO";
+  const itemsSource = isRecord(input.items) ? input.items : {};
+  const items = Object.fromEntries(
+    redemptionItemIds.map((itemId) => [
+      itemId,
+      Math.max(0, Math.floor(Number(itemsSource[itemId]) || 0)),
+    ]),
+  );
+  if (!code || !name || minQuantity <= 0)
+    return void res.status(400).json({
+      message: "Completa código, nombre y cantidad mínima de la escala.",
+    });
+  if (maxQuantity !== null && maxQuantity < minQuantity)
+    return void res.status(400).json({
+      message: "La cantidad máxima no puede ser menor que la mínima.",
+    });
+  if (!Object.values(items).some((quantity) => quantity > 0))
+    return void res.status(400).json({
+      message: "La escala debe bonificar al menos un producto.",
+    });
+  const eligibleSkus = Array.isArray(input.eligibleSkus)
+    ? input.eligibleSkus
+        .map((sku: unknown) => String(sku || "").trim())
+        .filter(Boolean)
+    : [];
+  const validFrom = value(input, "validFrom") ? new Date(value(input, "validFrom")) : null;
+  const validTo = value(input, "validTo") ? new Date(value(input, "validTo")) : null;
+  if (validFrom && Number.isNaN(validFrom.getTime()))
+    return void res.status(400).json({ message: "Vigencia desde no válida." });
+  if (validTo && Number.isNaN(validTo.getTime()))
+    return void res.status(400).json({ message: "Vigencia hasta no válida." });
+  if (validFrom && validTo && validTo < validFrom)
+    return void res.status(400).json({ message: "La vigencia final no puede ser anterior a la inicial." });
+
+  const rule = {
+    ...input,
+    id,
+    code,
+    name,
+    saleMode,
+    quantityBasis,
+    minQuantity,
+    maxQuantity,
+    minExclusive: Boolean(input.minExclusive),
+    repeatable: Boolean(input.repeatable),
+    stepQuantity:
+      input.stepQuantity === null || input.stepQuantity === undefined || String(input.stepQuantity).trim() === ""
+        ? null
+        : Math.max(0, Number(input.stepQuantity) || 0),
+    eligibleSkus,
+    accessory,
+    items,
+    validFrom: validFrom?.toISOString() || null,
+    validTo: validTo?.toISOString() || null,
+    priority: Math.max(0, Math.floor(Number(input.priority) || 100)),
+    status: value(input, "status") === "INACTIVO" ? "INACTIVO" : "ACTIVO",
+    updatedAt: new Date().toISOString(),
+    updatedBy: actor.id,
+  };
+  try {
+    const result = await pool.query(
+      `INSERT INTO redemption_rules
+        (id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+         repeatable,step_quantity,eligible_skus,accessory,items,valid_from,valid_to,
+         priority,status,data,updated_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now())
+       ON CONFLICT(id) DO UPDATE SET
+         code=EXCLUDED.code,name=EXCLUDED.name,sale_mode=EXCLUDED.sale_mode,
+         quantity_basis=EXCLUDED.quantity_basis,min_quantity=EXCLUDED.min_quantity,
+         max_quantity=EXCLUDED.max_quantity,min_exclusive=EXCLUDED.min_exclusive,
+         repeatable=EXCLUDED.repeatable,step_quantity=EXCLUDED.step_quantity,
+         eligible_skus=EXCLUDED.eligible_skus,accessory=EXCLUDED.accessory,
+         items=EXCLUDED.items,valid_from=EXCLUDED.valid_from,valid_to=EXCLUDED.valid_to,
+         priority=EXCLUDED.priority,status=EXCLUDED.status,data=EXCLUDED.data,updated_at=now()
+       RETURNING id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,
+                 min_exclusive,repeatable,step_quantity,eligible_skus,accessory,
+                 items,valid_from,valid_to,priority,status,data,updated_at`,
+      [
+        id,code,name,saleMode,quantityBasis,minQuantity,maxQuantity,
+        rule.minExclusive,rule.repeatable,rule.stepQuantity,eligibleSkus,accessory,
+        items,rule.validFrom,rule.validTo,rule.priority,rule.status,rule,
+      ],
+    );
+    res.json({ rule: normalizeRedemptionRuleRow(result.rows[0]) });
+  } catch (error) {
+    res.status(409).json({
+      message:
+        error instanceof Error && /unique/i.test(error.message)
+          ? "Ya existe una escala con ese código."
+          : error instanceof Error
+            ? error.message
+            : "No se pudo guardar la Escala de Canje.",
+    });
+  }
+});
+
+router.delete("/app-storage/redemption-rules/:id", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor)
+    return void res.status(403).json({
+      message: "Solo Admin o Analista puede administrar Escalas de Canje.",
+    });
+  const id = String(req.params.id || "").trim();
+  if (!id) return void res.status(400).json({ message: "Escala no válida." });
+  try {
+    const used = await pool.query(
+      "SELECT 1 FROM sales WHERE data->>'redemptionRuleId'=$1 LIMIT 1",
+      [id],
+    );
+    if (used.rows.length) {
+      await pool.query(
+        "UPDATE redemption_rules SET status='INACTIVO',updated_at=now() WHERE id=$1",
+        [id],
+      );
+      res.json({ id, status: "INACTIVO", preservedHistory: true });
+      return;
+    }
+    await pool.query("DELETE FROM redemption_rules WHERE id=$1", [id]);
+    res.json({ id, deleted: true });
+  } catch (error) {
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo eliminar la escala.",
+    });
   }
 });
 
@@ -4321,17 +4656,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     res.status(400).json({ message: "Venta no válida." });
     return;
   }
-  try {
-    requireFinalClientForCanje(input);
-  } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Nombre Cliente Final es obligatorio cuando existe canje.",
-    });
-    return;
-  }
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
@@ -4405,6 +4729,8 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       input.marketRegion = value(marketData, "region");
       input.marketDepartment = value(marketData, "department");
       enforceSaleWithoutCanje(input);
+    } else {
+      requireFinalClientForCanje(input);
     }
     const date = new Date(value(input, "date"));
     const units = Number(input.units);
@@ -4462,7 +4788,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       !validMiniFullPlancha &&
       (!Number.isInteger(planchas) ||
         planchas < 1 ||
-        planchas > 80 ||
         units !== planchas * 6)
     )
       throw new Error(
@@ -4501,7 +4826,27 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       (bonus && !Object.values(requested).some((n) => n > 0))
     )
       throw new Error("Los componentes del canje no son válidos.");
+    const validatedRule = punoWithoutCanje
+      ? null
+      : await validateSubmittedRedemptionRule(
+          db as unknown as QueryClient,
+          input,
+          date,
+        );
+    if (validatedRule) {
+      input.redemptionRuleId = validatedRule.id;
+      input.redemptionRuleCode = validatedRule.code;
+      input.redemptionRuleName = validatedRule.name;
+      input.redemptionRuleSnapshot = {
+        code: validatedRule.code,
+        name: validatedRule.name,
+        items: validatedRule.items,
+        accessory: validatedRule.accessory,
+        appliedFactor: validatedRule.appliedFactor,
+      };
+    }
     if (
+      !validatedRule &&
       mode === "UNIDADES" &&
       (requested.AVENA !== count ||
         requested.BATEA ||
@@ -4509,7 +4854,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         requested.SPAGHETTI)
     )
       throw new Error("En unidades corresponde una avena cada 2 unidades.");
-    if (mode === "PLANCHAS" && !punoWithoutCanje) {
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje) {
       const month = Number(
         new Intl.DateTimeFormat("en-US", {
           timeZone: "America/Lima",
@@ -4815,6 +5160,34 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
             : isRecord(currentSale.data.redemptionItems)
               ? currentSale.data.redemptionItems
               : undefined,
+      redemptionRuleId:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "redemptionRuleId") || undefined
+            : value(currentSale.data, "redemptionRuleId") || undefined,
+      redemptionRuleCode:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "redemptionRuleCode") || undefined
+            : value(currentSale.data, "redemptionRuleCode") || undefined,
+      redemptionRuleName:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "redemptionRuleName") || undefined
+            : value(currentSale.data, "redemptionRuleName") || undefined,
+      redemptionRuleSnapshot:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? isRecord(input.redemptionRuleSnapshot)
+              ? input.redemptionRuleSnapshot
+              : undefined
+            : isRecord(currentSale.data.redemptionRuleSnapshot)
+              ? currentSale.data.redemptionRuleSnapshot
+              : undefined,
       planchaAccessory:
         saleMode === "PLANCHAS"
           ? punoWithoutCanje
@@ -4845,7 +5218,9 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     };
     await client.query(
       `UPDATE sales
-       SET client_id=$2,amount_soles=$3,sale_date=$4,status='SINCRONIZADA',receipt_photo=$5,exchange_photo=$6,data=$7,record_updated_at=$8,updated_at=now()
+       SET client_id=$2,amount_soles=$3,sale_date=$4,status='SINCRONIZADA',
+           receipt_photo=$5,exchange_photo=$6,redemption_rule_id=$7,
+           data=$8,record_updated_at=$9,updated_at=now()
        WHERE id=$1`,
       [
         id,
@@ -4854,6 +5229,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         saleDate,
         sale.receiptPhoto || null,
         sale.exchangePhoto || null,
+        sale.redemptionRuleId || null,
         sale,
         updatedAt,
       ],

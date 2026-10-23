@@ -104,11 +104,41 @@ export const salesTable = pgTable(
     status: text("status").notNull().default("SINCRONIZADA"),
     receiptPhoto: text("receipt_photo"),
     exchangePhoto: text("exchange_photo"),
+    redemptionRuleId: text("redemption_rule_id"),
     data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
     recordUpdatedAt,
     ...timestamps,
   },
   (table) => [index("idx_sales_date").on(table.saleDate)],
+);
+
+export const redemptionRulesTable = pgTable(
+  "redemption_rules",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    saleMode: text("sale_mode").notNull(),
+    quantityBasis: text("quantity_basis").notNull().default("PLANCHAS"),
+    minQuantity: numeric("min_quantity").notNull().default("0"),
+    maxQuantity: numeric("max_quantity"),
+    minExclusive: boolean("min_exclusive").notNull().default(false),
+    repeatable: boolean("repeatable").notNull().default(false),
+    stepQuantity: numeric("step_quantity"),
+    eligibleSkus: text("eligible_skus").array().notNull().default([]),
+    accessory: text("accessory").notNull().default("NINGUNO"),
+    items: jsonb("items").$type<Record<string, number>>().notNull().default({}),
+    validFrom: timestamp("valid_from", { withTimezone: true }),
+    validTo: timestamp("valid_to", { withTimezone: true }),
+    priority: integer("priority").notNull().default(100),
+    status: text("status").notNull().default("ACTIVO"),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("redemption_rules_code_unique").on(table.code),
+    index("idx_redemption_rules_active").on(table.status, table.priority),
+  ],
 );
 
 export const tradeApprovalsTable = pgTable(

@@ -205,6 +205,16 @@ type Sale = {
   bonus?: string;
   redemptionCount?: number;
   redemptionItems?: Partial<RedemptionStock>;
+  redemptionRuleId?: string;
+  redemptionRuleCode?: string;
+  redemptionRuleName?: string;
+  redemptionRuleSnapshot?: {
+    code: string;
+    name: string;
+    items: Partial<RedemptionStock>;
+    accessory?: "MANDIL" | "BATEA" | "NINGUNO";
+    appliedFactor?: number;
+  };
   /** Solo se envía desde edición Admin/Analista; el backend no lo persiste. */
   canjeEdited?: boolean;
   /** Cantidades teóricas de la dinámica; no necesariamente fueron descontadas del Almacén. */
@@ -218,6 +228,26 @@ type Sale = {
   updatedAt?: string;
   status: SyncStatus;
 };
+type RedemptionRule = {
+  id: string;
+  code: string;
+  name: string;
+  saleMode: "UNIDADES" | "PLANCHAS";
+  quantityBasis: "UNITS" | "PLANCHAS";
+  minQuantity: number;
+  maxQuantity: number | null;
+  minExclusive?: boolean;
+  repeatable?: boolean;
+  stepQuantity?: number | null;
+  eligibleSkus: string[];
+  accessory: "MANDIL" | "BATEA" | "NINGUNO";
+  items: Partial<RedemptionStock>;
+  validFrom?: string | null;
+  validTo?: string | null;
+  priority: number;
+  status: Status;
+};
+
 type TrackingEventType =
   | "TRACKING"
   | "ENTRADA"
@@ -2488,6 +2518,92 @@ function saleRedemptionRequirements(sale: Sale) {
     Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)),
   );
 }
+function redemptionRuleFactor(rule: RedemptionRule, quantity: number) {
+  if (!rule.repeatable) return 1;
+  const step = Math.max(0, Number(rule.stepQuantity) || Number(rule.minQuantity) || 0);
+  return step > 0 ? Math.max(1, Math.floor(quantity / step)) : 1;
+}
+function redemptionRuleMatches(
+  rule: RedemptionRule,
+  input: {
+    mode: "UNIDADES" | "PLANCHAS";
+    units: number;
+    planchas: number;
+    skus: string[];
+    accessory: "MANDIL" | "BATEA" | "NINGUNO";
+    date: Date;
+  },
+) {
+  if (rule.status !== "ACTIVO" || rule.saleMode !== input.mode) return false;
+  const time = input.date.getTime();
+  if (rule.validFrom && time < new Date(rule.validFrom).getTime()) return false;
+  if (rule.validTo && time > new Date(rule.validTo).getTime()) return false;
+  if (rule.accessory !== input.accessory) return false;
+  if (
+    rule.eligibleSkus.length &&
+    input.skus.some((sku) => !rule.eligibleSkus.includes(sku))
+  )
+    return false;
+  const quantity = rule.quantityBasis === "UNITS" ? input.units : input.planchas;
+  if (rule.minExclusive ? quantity <= rule.minQuantity : quantity < rule.minQuantity)
+    return false;
+  if (rule.maxQuantity != null && quantity > rule.maxQuantity) return false;
+  if (rule.repeatable) {
+    const step = Math.max(0, Number(rule.stepQuantity) || Number(rule.minQuantity) || 0);
+    if (step <= 0 || quantity < step) return false;
+  }
+  return true;
+}
+function resolveRedemptionRule(
+  rules: RedemptionRule[],
+  input: {
+    mode: "UNIDADES" | "PLANCHAS";
+    units: number;
+    planchas: number;
+    skus: string[];
+    accessory: "MANDIL" | "BATEA" | "NINGUNO";
+    date: Date;
+    multiplier?: number;
+  },
+) {
+  const rule = [...rules]
+    .filter((candidate) => redemptionRuleMatches(candidate, input))
+    .sort((a, b) => a.priority - b.priority || a.code.localeCompare(b.code))[0];
+  if (!rule) return null;
+  const repeatFactor = redemptionRuleFactor(
+    rule,
+    rule.quantityBasis === "UNITS" ? input.units : input.planchas,
+  );
+  const tradeFactor =
+    input.mode === "PLANCHAS" && input.planchas > 80
+      ? Math.max(1, Math.min(4, Number(input.multiplier) || 1))
+      : 1;
+  const appliedFactor = repeatFactor * tradeFactor;
+  const items = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]:
+        Math.max(0, Math.floor(Number(rule.items[item.id]) || 0)) * appliedFactor,
+    }),
+    {} as Partial<RedemptionStock>,
+  );
+  return { rule, items, appliedFactor };
+}
+function inferRedemptionRuleForSale(sale: Sale, rules: RedemptionRule[]) {
+  if (sale.redemptionRuleId)
+    return rules.find((rule) => rule.id === sale.redemptionRuleId) || null;
+  const requirements = saleRedemptionRequirements(sale);
+  return (
+    rules.find((rule) =>
+      redemptionItems.every(
+        (item) =>
+          Math.max(0, Number(requirements[item.id]) || 0) ===
+          Math.max(0, Number(rule.items[item.id]) || 0),
+      ),
+    ) || null
+  );
+}
+
 function planchaCanjeRequirements(
   planchas: number,
   date: Date,
@@ -5086,6 +5202,12 @@ function SaleEditModal({
         {
           ...sale,
           canjeEdited,
+          redemptionRuleId: canjeEdited ? undefined : sale.redemptionRuleId,
+          redemptionRuleCode: canjeEdited ? undefined : sale.redemptionRuleCode,
+          redemptionRuleName: canjeEdited ? undefined : sale.redemptionRuleName,
+          redemptionRuleSnapshot: canjeEdited
+            ? undefined
+            : sale.redemptionRuleSnapshot,
           clientId,
           finalClientName: editedBonus
             ? finalClientName.trim()
@@ -5446,6 +5568,424 @@ function TableSearch({
   );
 }
 
+function RedemptionRulesModule({
+  user,
+  productPrices,
+  notify,
+}: {
+  user: AppUser;
+  productPrices: ProductPrice[];
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const emptyRule = (): RedemptionRule => ({
+    id: "",
+    code: "",
+    name: "",
+    saleMode: "PLANCHAS",
+    quantityBasis: "PLANCHAS",
+    minQuantity: 1,
+    maxQuantity: 1,
+    minExclusive: false,
+    repeatable: false,
+    stepQuantity: null,
+    eligibleSkus: [],
+    accessory: "NINGUNO",
+    items: {},
+    validFrom: null,
+    validTo: null,
+    priority: 100,
+    status: "ACTIVO",
+  });
+  const [rules, setRules] = useState<RedemptionRule[]>([]);
+  const [editing, setEditing] = useState<RedemptionRule | null>(null);
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const authHeaders = {
+    "Content-Type": "application/json",
+    "x-admin-dni": user.dni,
+    "x-admin-key": user.password || "",
+  };
+
+  const load = async () => {
+    try {
+      const response = await fetch("/api/app-storage/redemption-rules");
+      const payload = await response.json();
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudieron cargar las Escalas de Canje.");
+      setRules(Array.isArray(payload.rules) ? payload.rules : []);
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudieron cargar las Escalas de Canje.",
+        true,
+      );
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const save = async () => {
+    if (!editing) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/app-storage/redemption-rules", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ rule: editing }),
+      });
+      const payload = await response.json();
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo guardar la escala.");
+      await load();
+      setEditing(null);
+      notify("Escala de Canje guardada.");
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo guardar la escala.",
+        true,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (rule: RedemptionRule) => {
+    if (!window.confirm(`¿Eliminar o desactivar ${rule.name}?`)) return;
+    try {
+      const response = await fetch(
+        `/api/app-storage/redemption-rules/${encodeURIComponent(rule.id)}`,
+        { method: "DELETE", headers: authHeaders },
+      );
+      const payload = await response.json();
+      if (!response.ok)
+        throw new Error(payload.message || "No se pudo eliminar la escala.");
+      await load();
+      notify(
+        payload.preservedHistory
+          ? "La escala ya fue usada y quedó INACTIVA para conservar el historial."
+          : "Escala eliminada.",
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : "No se pudo eliminar la escala.",
+        true,
+      );
+    }
+  };
+
+  const visible = rules.filter((rule) =>
+    matchesTableSearch(search, [
+      rule.code,
+      rule.name,
+      rule.saleMode,
+      rule.quantityBasis,
+      rule.accessory,
+      rule.status,
+      rule.eligibleSkus.join(" "),
+      canjeRequirementsLabel(rule.items),
+    ]),
+  );
+
+  const rangeLabel = (rule: RedemptionRule) => {
+    const unit = rule.quantityBasis === "UNITS" ? "und" : "planchas";
+    if (rule.repeatable)
+      return `Cada ${rule.stepQuantity || rule.minQuantity} ${unit}`;
+    if (rule.maxQuantity == null)
+      return `${rule.minExclusive ? ">" : "≥"} ${rule.minQuantity} ${unit}`;
+    if (rule.minQuantity === rule.maxQuantity)
+      return `${rule.minQuantity} ${unit}`;
+    return `${rule.minQuantity}–${rule.maxQuantity} ${unit}`;
+  };
+
+  return (
+    <section className="admin-module">
+      <div className="admin-intro">
+        <div>
+          <span className="eyebrow">CATÁLOGO MAESTRO</span>
+          <h2>Tabla Canjes</h2>
+          <p>
+            Define las escalas comerciales que utiliza el formulario de ventas.
+            Las ventas guardan una copia de la escala aplicada para conservar el historial.
+          </p>
+        </div>
+        <div className="page-actions">
+          <Btn onClick={() => setEditing(emptyRule())}>
+            <Plus /> Nueva escala
+          </Btn>
+        </div>
+      </div>
+      <section className="panel">
+        <div className="panel-body sales-panel-body">
+          <TableSearch
+            value={search}
+            onChange={setSearch}
+            fields="Código, escala, modalidad, rango, producto elegible, bonificación, accesorio y estado."
+            count={visible.length}
+            total={rules.length}
+          />
+          {visible.length ? (
+            <div className="module-table-wrap">
+              <div className="module-table">
+                <div className="module-table-row module-table-header cols-7">
+                  <span>Código</span>
+                  <span>Escala</span>
+                  <span>Compra</span>
+                  <span>Productos</span>
+                  <span>Bonifica</span>
+                  <span>Estado</span>
+                  <span>Acciones</span>
+                </div>
+                {visible.map((rule) => (
+                  <article className="module-table-row cols-7" key={rule.id}>
+                    <span>
+                      <strong>{rule.code}</strong>
+                      <small>{rule.saleMode}</small>
+                    </span>
+                    <span>
+                      <strong>{rule.name}</strong>
+                      <small>{rule.accessory === "NINGUNO" ? "Sin accesorio" : rule.accessory}</small>
+                    </span>
+                    <span>
+                      <strong>{rangeLabel(rule)}</strong>
+                      <small>{rule.minExclusive ? "Límite inferior exclusivo" : "Límite incluido"}</small>
+                    </span>
+                    <span>
+                      <strong>
+                        {rule.eligibleSkus.length
+                          ? `${rule.eligibleSkus.length} SKU(s)`
+                          : "Todos los SKU"}
+                      </strong>
+                      <small>
+                        {rule.eligibleSkus.length
+                          ? rule.eligibleSkus.join(", ")
+                          : "Sin restricción"}
+                      </small>
+                    </span>
+                    <span>
+                      <strong>{canjeRequirementsLabel(rule.items)}</strong>
+                      <small>{rule.repeatable ? "Regla repetible" : "Aplicación única"}</small>
+                    </span>
+                    <span><StatusPill status={rule.status} /></span>
+                    <span className="module-table-actions">
+                      <Btn variant="outline" onClick={() => setEditing({ ...rule, eligibleSkus: [...rule.eligibleSkus], items: { ...rule.items } })}>
+                        <Pencil /> Editar
+                      </Btn>
+                      <Btn variant="danger" onClick={() => void remove(rule)}>
+                        <Trash2 /> Eliminar
+                      </Btn>
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <Empty title="No hay escalas" detail="Crea la primera Escala de Canje." />
+          )}
+        </div>
+      </section>
+
+      {editing && (
+        <Modal
+          title={editing.id ? "Editar Escala de Canje" : "Nueva Escala de Canje"}
+          detail="Esta configuración será usada automáticamente por las ventas nuevas."
+          close={() => setEditing(null)}
+        >
+          <div className="form-grid">
+            <Field label="Código *">
+              <Input
+                value={editing.code}
+                onChange={(value) => setEditing({ ...editing, code: value.toUpperCase().replace(/\s+/g, "_") })}
+                placeholder="ESCALA_7"
+              />
+            </Field>
+            <Field label="Nombre *">
+              <Input
+                value={editing.name}
+                onChange={(value) => setEditing({ ...editing, name: value })}
+                placeholder="Escala 7"
+              />
+            </Field>
+            <SelectField
+              label="Tipo de venta *"
+              value={editing.saleMode}
+              onChange={(value) => setEditing({ ...editing, saleMode: value as RedemptionRule["saleMode"] })}
+              items={[
+                { value: "UNIDADES", label: "Unidades" },
+                { value: "PLANCHAS", label: "Planchas" },
+              ]}
+            />
+            <SelectField
+              label="Medir por *"
+              value={editing.quantityBasis}
+              onChange={(value) => setEditing({ ...editing, quantityBasis: value as RedemptionRule["quantityBasis"] })}
+              items={[
+                { value: "UNITS", label: "Unidades" },
+                { value: "PLANCHAS", label: "Planchas" },
+              ]}
+            />
+            <Field label="Cantidad mínima *">
+              <Input
+                type="number"
+                min={0}
+                step={editing.quantityBasis === "PLANCHAS" ? 0.5 : 1}
+                value={editing.minQuantity}
+                onChange={(value) => setEditing({ ...editing, minQuantity: Number(value) || 0 })}
+              />
+            </Field>
+            <Field label="Cantidad máxima">
+              <Input
+                type="number"
+                min={0}
+                step={editing.quantityBasis === "PLANCHAS" ? 0.5 : 1}
+                value={editing.maxQuantity ?? ""}
+                onChange={(value) =>
+                  setEditing({
+                    ...editing,
+                    maxQuantity: value === "" ? null : Number(value),
+                  })
+                }
+                placeholder="Vacío = sin máximo"
+              />
+            </Field>
+            <SelectField
+              label="Accesorio"
+              value={editing.accessory}
+              onChange={(value) => setEditing({ ...editing, accessory: value as RedemptionRule["accessory"] })}
+              items={[
+                { value: "NINGUNO", label: "Sin Mandil / Batea" },
+                { value: "MANDIL", label: "Con Mandil" },
+                { value: "BATEA", label: "Con Batea" },
+              ]}
+            />
+            <SelectField
+              label="Estado"
+              value={editing.status}
+              onChange={(value) => setEditing({ ...editing, status: value as Status })}
+              items={[
+                { value: "ACTIVO", label: "Activo" },
+                { value: "INACTIVO", label: "Inactivo" },
+              ]}
+            />
+            <Field label="Prioridad">
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                value={editing.priority}
+                onChange={(value) => setEditing({ ...editing, priority: Math.max(0, Number(value) || 0) })}
+              />
+            </Field>
+            <Field label="Vigencia desde">
+              <Input
+                type="date"
+                value={editing.validFrom ? editing.validFrom.slice(0, 10) : ""}
+                onChange={(value) => setEditing({ ...editing, validFrom: value || null })}
+              />
+            </Field>
+            <Field label="Vigencia hasta">
+              <Input
+                type="date"
+                value={editing.validTo ? editing.validTo.slice(0, 10) : ""}
+                onChange={(value) => setEditing({ ...editing, validTo: value || null })}
+              />
+            </Field>
+            <Field label="Regla repetible">
+              <select
+                className="select"
+                value={editing.repeatable ? "SI" : "NO"}
+                onChange={(event) => setEditing({ ...editing, repeatable: event.target.value === "SI" })}
+              >
+                <option value="NO">No</option>
+                <option value="SI">Sí</option>
+              </select>
+            </Field>
+            {editing.repeatable && (
+              <Field label="Cada cuántas unidades/planchas">
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={editing.stepQuantity ?? ""}
+                  onChange={(value) => setEditing({ ...editing, stepQuantity: value === "" ? null : Number(value) })}
+                />
+              </Field>
+            )}
+            <Field label="Mínimo exclusivo">
+              <select
+                className="select"
+                value={editing.minExclusive ? "SI" : "NO"}
+                onChange={(event) => setEditing({ ...editing, minExclusive: event.target.value === "SI" })}
+              >
+                <option value="NO">Incluye el mínimo (≥)</option>
+                <option value="SI">Mayor que el mínimo (&gt;)</option>
+              </select>
+            </Field>
+          </div>
+
+          <Field label="Productos / SKU elegibles">
+            <div className="check-list" style={{ maxHeight: 220, overflow: "auto" }}>
+              {productPrices
+                .filter((product) => product.status !== "INACTIVO")
+                .map((product) => {
+                  const checked = editing.eligibleSkus.includes(product.sku);
+                  return (
+                    <label className="check" key={product.sku}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) =>
+                          setEditing({
+                            ...editing,
+                            eligibleSkus: event.target.checked
+                              ? [...editing.eligibleSkus, product.sku]
+                              : editing.eligibleSkus.filter((sku) => sku !== product.sku),
+                          })
+                        }
+                      />
+                      <span>{product.product} · {product.sku}</span>
+                    </label>
+                  );
+                })}
+            </div>
+            <small>Sin selección = aplica a todos los productos compatibles con el tipo de venta.</small>
+          </Field>
+
+          <div className="form-grid">
+            {redemptionItems.map((item) => (
+              <Field key={item.id} label={item.label + " bonifica"}>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={Math.max(0, Number(editing.items[item.id]) || 0)}
+                  onChange={(value) =>
+                    setEditing({
+                      ...editing,
+                      items: {
+                        ...editing.items,
+                        [item.id]: Math.max(0, Math.floor(Number(value) || 0)),
+                      },
+                    })
+                  }
+                />
+              </Field>
+            ))}
+          </div>
+
+          <div className="modal-actions">
+            <Btn variant="outline" onClick={() => setEditing(null)}>Cancelar</Btn>
+            <Btn disabled={saving} onClick={() => void save()}>
+              {saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}
+              {saving ? "Guardando..." : "Guardar escala"}
+            </Btn>
+          </div>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
 function AdminCanjesModule({
   onEdit,
   canjes,
@@ -5466,6 +6006,26 @@ function AdminCanjesModule({
   notify: (message: string, error?: boolean) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [redemptionRules, setRedemptionRules] = useState<RedemptionRule[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/app-storage/redemption-rules")
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || "No se pudieron cargar las escalas.");
+        if (!cancelled) setRedemptionRules(Array.isArray(payload.rules) ? payload.rules : []);
+      })
+      .catch(() => {
+        if (!cancelled) setRedemptionRules([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const scaleForCanje = (canje: AdminCanje) => {
+    if (!canje.sale) return null;
+    return inferRedemptionRuleForSale(canje.sale, redemptionRules);
+  };
   const visibleCanjes = canjes.filter((canje) => {
     const promoter = canje.promoterId
       ? users.find((current) => current.id === canje.promoterId)
@@ -5483,6 +6043,9 @@ function AdminCanjesModule({
       promoter?.dni,
       canje.actorName,
       marketMap[canje.marketId]?.name || "Mercado no identificado",
+      canje.sale?.redemptionRuleName ||
+        canje.sale?.redemptionRuleCode ||
+        scaleForCanje(canje)?.name,
       canjeProductLabel(
         canje.canjeProductId,
         canje.canjeProductLabel ||
@@ -5495,11 +6058,15 @@ function AdminCanjesModule({
   const exportCanjes = () => {
     downloadCsv(
       `canjes-${peruDateKey()}.csv`,
-      ["Fecha", "Origen", "Mercado", "Producto", "Cantidad", "Responsable"],
+      ["Fecha", "Origen", "Mercado", "Escala", "Producto", "Cantidad", "Responsable"],
       canjes.map((canje) => [
         formatDate(canje.date),
         canje.source === "sale" ? "Venta" : "Movimiento",
         marketMap[canje.marketId]?.name || "Mercado",
+        canje.sale?.redemptionRuleName ||
+          canje.sale?.redemptionRuleCode ||
+          scaleForCanje(canje)?.name ||
+          "Histórico / sin clasificar",
         canjeProductLabel(
           canje.canjeProductId,
           canje.canjeProductLabel ||
@@ -5550,8 +6117,9 @@ function AdminCanjesModule({
           {visibleCanjes.length ? (
             <div className="module-table-wrap">
               <div className="module-table">
-                <div className="module-table-row module-table-header cols-6">
+                <div className="module-table-row module-table-header cols-8">
                   <span>Código</span>
+                  <span>Escala</span>
                   <span>Producto</span>
                   <span>Responsable</span>
                   <span>Origen</span>
@@ -5565,12 +6133,25 @@ function AdminCanjesModule({
                     : undefined;
                   return (
                     <article
-                      className="module-table-row cols-7"
+                      className="module-table-row cols-8"
                       key={`${canje.source}-${canje.canjeId}`}
                     >
                       <span>
                         <b className="module-table-id">{canje.canjeId}</b>
                         <small>{canje.status}</small>
+                      </span>
+                      <span>
+                        <strong>
+                          {canje.sale?.redemptionRuleName ||
+                            canje.sale?.redemptionRuleCode ||
+                            scaleForCanje(canje)?.name ||
+                            "Histórico"}
+                        </strong>
+                        <small>
+                          {canje.sale?.redemptionRuleCode ||
+                            scaleForCanje(canje)?.code ||
+                            "Sin ID de escala"}
+                        </small>
                       </span>
                       <span>
                         <strong>
@@ -7313,6 +7894,9 @@ function CoordinatorApp({
     ["almacen", "Almacén"],
     ["clientes", "Clientes"],
     ["canjes", "Canjes"],
+    ...(["ADMIN", "ANALISTA"].includes(user.role)
+      ? [["tabla-canjes", "Tabla Canjes"]]
+      : []),
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
@@ -7395,13 +7979,14 @@ function CoordinatorApp({
   const exportCanjes = () => {
     downloadCsv(
       `canjes-coordinador-${peruDateKey()}.csv`,
-      ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Canje", "Cantidad", "Foto"],
+      ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Escala", "Canje", "Cantidad", "Foto"],
       allowedCanjes.map((sale) => [
         sale.id,
         formatDate(sale.date),
         userMap[sale.promoterId]?.name || "No identificado",
         marketMap[sale.marketId]?.name || "",
         clientMap[sale.clientId]?.name || "",
+        sale.redemptionRuleName || sale.redemptionRuleCode || "Histórico",
         sale.bonus || "",
         sale.redemptionCount || 1,
         photoExportLink(sale.exchangePhoto),
@@ -8707,6 +9292,8 @@ function AnalystApp({
         "Unidades totales",
         "Peso (kg)",
         "Ingreso total (S/)",
+        "Escala de canje",
+        "Código escala",
         "Bonificación",
         "Número de canjes",
         "Comentario",
@@ -8755,6 +9342,8 @@ function AnalystApp({
           sale.units,
           (sale.weightKg ?? 0).toFixed(3),
           (sale.amountSoles ?? 0).toFixed(2),
+          sale.redemptionRuleName || "",
+          sale.redemptionRuleCode || "",
           sale.bonus || "Sin canje",
           sale.redemptionCount ?? (sale.bonus ? 1 : 0),
           sale.comment || "",
@@ -10599,6 +11188,13 @@ function AnalystApp({
           </div>
         </section>
       )}
+      {tab === "tabla-canjes" && (
+        <RedemptionRulesModule
+          user={user}
+          productPrices={productPrices}
+          notify={notify}
+        />
+      )}
       {tab === "canjes" && (
         <AdminCanjesModule
           onEdit={(record) => {
@@ -10693,7 +11289,12 @@ function AnalystApp({
                       <div className="record-main">
                         <strong>{promoter?.name || "Promotor"} · {sale.planchas || 0} planchas</strong>
                         <small>{client?.name || approval.clientId} · {marketMap[approval.marketId]?.name || approval.marketId}</small>
-                        <em>{formatSoles(sale.amountSoles)} · {formatDate(approval.requestedAt)} · {sale.bonus || "Sin canje"}</em>
+                        <em>
+                          {formatSoles(sale.amountSoles)} · {formatDate(approval.requestedAt)} ·{" "}
+                          {sale.redemptionRuleName
+                            ? `${sale.redemptionRuleName} · ${sale.bonus || "Sin canje"}`
+                            : sale.bonus || "Sin canje"}
+                        </em>
                         <div className="record-photos">
                           <PhotoThumbnail label="Boleta" src={sale.receiptPhoto} />
                           {sale.exchangePhoto && <PhotoThumbnail label="Cliente/Canje" src={sale.exchangePhoto} />}
@@ -11401,6 +12002,28 @@ function PromoterApp({
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/app-storage/redemption-rules")
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok)
+          throw new Error(payload.message || "No se pudieron cargar las Escalas de Canje.");
+        if (!cancelled) {
+          setRedemptionRules(Array.isArray(payload.rules) ? payload.rules : []);
+          setRedemptionRulesLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRedemptionRules([]);
+          setRedemptionRulesLoaded(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const promoterAssignment = assignments.find((assignment) =>
     assignmentMatchesUser(assignment, user),
   );
@@ -11448,6 +12071,8 @@ function PromoterApp({
   const [planchaAccessory, setPlanchaAccessory] = useState<"MANDIL" | "BATEA" | "NINGUNO">("NINGUNO");
   const [planchaMultiplier, setPlanchaMultiplier] = useState(1);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [redemptionRules, setRedemptionRules] = useState<RedemptionRule[]>([]);
+  const [redemptionRulesLoaded, setRedemptionRulesLoaded] = useState(false);
   const [comment, setComment] = useState("");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
@@ -11673,18 +12298,6 @@ function PromoterApp({
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
   const punoWithoutCanje = isPunoSouthMarket(selectedMarket);
-  const bonusProducts = punoWithoutCanje
-    ? []
-    : bonusProductsFor(
-        mode,
-        total,
-        planchas,
-        warehouseRedemptionStock,
-        administrative ? new Date(administrative.date + "-05:00") : new Date(),
-      );
-  const selectedBonusProduct =
-    bonusProducts.find((product) => product.id === selectedBonusProductId) ||
-    bonusProducts[0];
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
@@ -11715,34 +12328,73 @@ function PromoterApp({
   useEffect(() => {
     if (planchas < 80 && planchaMultiplier !== 1) setPlanchaMultiplier(1);
   }, [planchas, planchaMultiplier]);
+
+  const masterRuleMatch =
+    !punoWithoutCanje && redemptionRulesLoaded
+      ? resolveRedemptionRule(redemptionRules, {
+          mode,
+          units: total,
+          planchas,
+          skus:
+            mode === "UNIDADES"
+              ? [selectedProduct?.sku].filter(
+                  (value): value is string => Boolean(value),
+                )
+              : normalizedPlanchaLines.map((line) => line.sku),
+          accessory:
+            mode === "PLANCHAS" ? effectivePlanchaAccessory : "NINGUNO",
+          date: saleDate,
+          multiplier: planchaMultiplier,
+        })
+      : null;
+
+  const bonusProducts =
+    punoWithoutCanje || redemptionRulesLoaded
+      ? []
+      : bonusProductsFor(
+          mode,
+          total,
+          planchas,
+          warehouseRedemptionStock,
+          saleDate,
+        );
+  const selectedBonusProduct =
+    bonusProducts.find((product) => product.id === selectedBonusProductId) ||
+    bonusProducts[0];
   const automaticUnitCanjeCount =
     mode === "UNIDADES" ? Math.floor(unitQty / 2) : 0;
-  const canjeCount = mode === "UNIDADES"
-    ? (selectedBonusProduct ? automaticUnitCanjeCount : 0)
-    : (planchas >= 1 || miniHalfPlanchaCanje)
-      ? 1
-      : 0;
-  const planchaRequirements = punoWithoutCanje
-    ? ({} as Partial<RedemptionStock>)
-    : miniHalfPlanchaCanje
-      ? ({ AVENA: 2 } as Partial<RedemptionStock>)
-      : planchaCanjeRequirements(
-          planchas,
-          saleDate,
-          effectivePlanchaAccessory,
-          planchaMultiplier,
-        );
+  const canjeCount = masterRuleMatch
+    ? mode === "UNIDADES"
+      ? masterRuleMatch.appliedFactor
+      : 1
+    : mode === "UNIDADES"
+      ? (selectedBonusProduct ? automaticUnitCanjeCount : 0)
+      : (planchas >= 1 || miniHalfPlanchaCanje)
+        ? 1
+        : 0;
+  const legacyPlanchaRequirements = miniHalfPlanchaCanje
+    ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+    : planchaCanjeRequirements(
+        planchas,
+        saleDate,
+        effectivePlanchaAccessory,
+        planchaMultiplier,
+      );
   const requiredRedemptions =
     punoWithoutCanje
       ? ({} as Partial<RedemptionStock>)
-      : mode === "PLANCHAS"
-        ? planchaRequirements
-        : multiplyRedemptionRequirements(
-            selectedBonusProduct?.components || {},
-            canjeCount,
-          );
+      : masterRuleMatch
+        ? masterRuleMatch.items
+        : redemptionRulesLoaded
+          ? ({} as Partial<RedemptionStock>)
+          : mode === "PLANCHAS"
+            ? legacyPlanchaRequirements
+            : multiplyRedemptionRequirements(
+                selectedBonusProduct?.components || {},
+                canjeCount,
+              );
   const bonus =
-    mode === "PLANCHAS" && requiredRedemptionEntries(requiredRedemptions).length
+    requiredRedemptionEntries(requiredRedemptions).length
       ? canjeRequirementsLabel(requiredRedemptions)
       : selectedBonusProduct?.label;
   const hasCanje = Boolean(
@@ -12101,6 +12753,18 @@ function PromoterApp({
         mode === "PLANCHAS"
           ? Object.fromEntries(normalizedPlanchaLines.map((line) => [line.product.label, line.units]))
           : { [selectedProduct.brand]: unitQty },
+      redemptionRuleId: masterRuleMatch?.rule.id,
+      redemptionRuleCode: masterRuleMatch?.rule.code,
+      redemptionRuleName: masterRuleMatch?.rule.name,
+      redemptionRuleSnapshot: masterRuleMatch
+        ? {
+            code: masterRuleMatch.rule.code,
+            name: masterRuleMatch.rule.name,
+            items: masterRuleMatch.items,
+            accessory: masterRuleMatch.rule.accessory,
+            appliedFactor: masterRuleMatch.appliedFactor,
+          }
+        : undefined,
       bonus,
       redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
       redemptionItems: hasCanje ? redemptionsToConsume : undefined,
@@ -12798,6 +13462,11 @@ function PromoterApp({
                   )
                   .join(" · ")}{" "}
                 · ${redemptionTotal} disponibles
+              </small>
+            )}
+            {masterRuleMatch && (
+              <small>
+                Escala aplicada: {masterRuleMatch.rule.name} ({masterRuleMatch.rule.code})
               </small>
             )}
             {bonus && mode === "PLANCHAS" && (
