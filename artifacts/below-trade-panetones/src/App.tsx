@@ -7979,13 +7979,14 @@ function CoordinatorApp({
   const exportCanjes = () => {
     downloadCsv(
       `canjes-coordinador-${peruDateKey()}.csv`,
-      ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Canje", "Cantidad", "Foto"],
+      ["Venta", "Fecha", "Promotor", "Mercado", "Cliente", "Escala", "Canje", "Cantidad", "Foto"],
       allowedCanjes.map((sale) => [
         sale.id,
         formatDate(sale.date),
         userMap[sale.promoterId]?.name || "No identificado",
         marketMap[sale.marketId]?.name || "",
         clientMap[sale.clientId]?.name || "",
+        sale.redemptionRuleName || sale.redemptionRuleCode || "Histórico",
         sale.bonus || "",
         sale.redemptionCount || 1,
         photoExportLink(sale.exchangePhoto),
@@ -9291,6 +9292,8 @@ function AnalystApp({
         "Unidades totales",
         "Peso (kg)",
         "Ingreso total (S/)",
+        "Escala de canje",
+        "Código escala",
         "Bonificación",
         "Número de canjes",
         "Comentario",
@@ -9339,6 +9342,8 @@ function AnalystApp({
           sale.units,
           (sale.weightKg ?? 0).toFixed(3),
           (sale.amountSoles ?? 0).toFixed(2),
+          sale.redemptionRuleName || "",
+          sale.redemptionRuleCode || "",
           sale.bonus || "Sin canje",
           sale.redemptionCount ?? (sale.bonus ? 1 : 0),
           sale.comment || "",
@@ -11284,7 +11289,12 @@ function AnalystApp({
                       <div className="record-main">
                         <strong>{promoter?.name || "Promotor"} · {sale.planchas || 0} planchas</strong>
                         <small>{client?.name || approval.clientId} · {marketMap[approval.marketId]?.name || approval.marketId}</small>
-                        <em>{formatSoles(sale.amountSoles)} · {formatDate(approval.requestedAt)} · {sale.bonus || "Sin canje"}</em>
+                        <em>
+                          {formatSoles(sale.amountSoles)} · {formatDate(approval.requestedAt)} ·{" "}
+                          {sale.redemptionRuleName
+                            ? `${sale.redemptionRuleName} · ${sale.bonus || "Sin canje"}`
+                            : sale.bonus || "Sin canje"}
+                        </em>
                         <div className="record-photos">
                           <PhotoThumbnail label="Boleta" src={sale.receiptPhoto} />
                           {sale.exchangePhoto && <PhotoThumbnail label="Cliente/Canje" src={sale.exchangePhoto} />}
