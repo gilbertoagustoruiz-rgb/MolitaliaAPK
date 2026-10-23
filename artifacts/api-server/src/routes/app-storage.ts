@@ -2635,7 +2635,9 @@ router.post("/app-storage/redemption-rules", async (req, res): Promise<void> => 
       message: "La escala debe bonificar al menos un producto.",
     });
   const eligibleSkus = Array.isArray(input.eligibleSkus)
-    ? input.eligibleSkus.map((sku) => String(sku || "").trim()).filter(Boolean)
+    ? input.eligibleSkus
+        .map((sku: unknown) => String(sku || "").trim())
+        .filter(Boolean)
     : [];
   const validFrom = value(input, "validFrom") ? new Date(value(input, "validFrom")) : null;
   const validTo = value(input, "validTo") ? new Date(value(input, "validTo")) : null;
