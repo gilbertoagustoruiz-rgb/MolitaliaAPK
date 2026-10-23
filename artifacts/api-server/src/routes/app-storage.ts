@@ -631,10 +631,11 @@ async function upsertRecord(
     );
   } else if (name === "sales") {
     await client.query(
-      `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,data,record_updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+      `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,redemption_rule_id,data,record_updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (id) DO UPDATE SET receipt_photo=EXCLUDED.receipt_photo,exchange_photo=EXCLUDED.exchange_photo,
-       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       redemption_rule_id=EXCLUDED.redemption_rule_id,status=EXCLUDED.status,data=EXCLUDED.data,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
        WHERE sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at`,
       [
         key,
@@ -649,6 +650,7 @@ async function upsertRecord(
         "SINCRONIZADA",
         value(source, "receiptPhoto") || null,
         value(source, "exchangePhoto") || null,
+        value(source, "redemptionRuleId") || null,
         normalized,
         updated,
       ],
@@ -5214,7 +5216,9 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     };
     await client.query(
       `UPDATE sales
-       SET client_id=$2,amount_soles=$3,sale_date=$4,status='SINCRONIZADA',receipt_photo=$5,exchange_photo=$6,data=$7,record_updated_at=$8,updated_at=now()
+       SET client_id=$2,amount_soles=$3,sale_date=$4,status='SINCRONIZADA',
+           receipt_photo=$5,exchange_photo=$6,redemption_rule_id=$7,
+           data=$8,record_updated_at=$9,updated_at=now()
        WHERE id=$1`,
       [
         id,
@@ -5223,6 +5227,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         saleDate,
         sale.receiptPhoto || null,
         sale.exchangePhoto || null,
+        sale.redemptionRuleId || null,
         sale,
         updatedAt,
       ],
