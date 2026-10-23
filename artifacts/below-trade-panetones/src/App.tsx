@@ -205,6 +205,8 @@ type Sale = {
   bonus?: string;
   redemptionCount?: number;
   redemptionItems?: Partial<RedemptionStock>;
+  /** Solo se envía desde edición Admin/Analista; el backend no lo persiste. */
+  canjeEdited?: boolean;
   /** Cantidades teóricas de la dinámica; no necesariamente fueron descontadas del Almacén. */
   suggestedRedemptionItems?: Partial<RedemptionStock>;
   planchaAccessory?: "MANDIL" | "BATEA" | "NINGUNO";
@@ -4971,6 +4973,7 @@ function SaleEditModal({
     Math.max(1, Math.min(4, Number(sale.planchaMultiplier) || inferredMultiplier)),
   );
   const [manualCanje, setManualCanje] = useState<RedemptionStock | null>(null);
+  const [canjeEdited, setCanjeEdited] = useState(false);
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -5035,7 +5038,7 @@ function SaleEditModal({
   );
   const missingStock =
     punoWithoutCanje ||
-    !canjeQuantitiesChanged ||
+    !canjeEdited ||
     (sale.mode === "UNIDADES" && !selectedCanje)
       ? undefined
       : requiredRedemptionEntries(effectiveRequirements).find(
@@ -5043,6 +5046,7 @@ function SaleEditModal({
         );
   const updateManualCanje = (itemId: RedemptionItemId, rawValue: string) => {
     const quantity = Math.max(0, Math.floor(Number(rawValue) || 0));
+    setCanjeEdited(true);
     setManualCanje((current) => {
       const base = current
         ? { ...current }
@@ -5081,6 +5085,7 @@ function SaleEditModal({
       const saved = await onSave(
         {
           ...sale,
+          canjeEdited,
           clientId,
           finalClientName: editedBonus
             ? finalClientName.trim()
@@ -5190,7 +5195,10 @@ function SaleEditModal({
           <SelectField
             label="Canje"
             value={canjeProductId}
-            onChange={(value) => setCanjeProductId(value as CanjeProductId | "")}
+            onChange={(value) => {
+              setCanjeProductId(value as CanjeProductId | "");
+              setCanjeEdited(true);
+            }}
             items={[
               { value: "", label: "Sin canje" },
               ...availableCanjes.map((product) => ({
@@ -5209,6 +5217,7 @@ function SaleEditModal({
                   setPlanchaAccessory(
                     value as "MANDIL" | "BATEA" | "NINGUNO",
                   );
+                  setCanjeEdited(true);
                   setManualCanje(null);
                 }}
                 items={[
@@ -5227,6 +5236,7 @@ function SaleEditModal({
                     setPlanchaMultiplier(
                       Math.max(1, Math.min(4, Number(event.target.value) || 1)),
                     );
+                    setCanjeEdited(true);
                     setManualCanje(null);
                   }}
                   data-testid="select-edit-plancha-multiplier"
@@ -5273,7 +5283,10 @@ function SaleEditModal({
                 <div className="modal-actions" style={{ marginTop: 8 }}>
                   <Btn
                     variant="outline"
-                    onClick={() => setManualCanje(null)}
+                    onClick={() => {
+                      setCanjeEdited(true);
+                      setManualCanje(null);
+                    }}
                     testId="button-reset-edit-canje"
                   >
                     <RefreshCw /> Volver al cálculo automático
@@ -5288,9 +5301,10 @@ function SaleEditModal({
             <select
               className="select"
               value={redemptionCount}
-              onChange={(event) =>
-                setRedemptionCount(Number(event.target.value))
-              }
+              onChange={(event) => {
+                setRedemptionCount(Number(event.target.value));
+                setCanjeEdited(true);
+              }}
               data-testid="select-edit-redemption-count"
             >
               <option value={1}>1 canje</option>
@@ -5347,9 +5361,9 @@ function SaleEditModal({
         </div>
       </div>
       <p className="modal-hint">
-        Los productos y cantidades vendidas se conservan. Si no modificas el
-        canje, el stock existente no se vuelve a validar ni recalcular. Solo si
-        cambias las cantidades del canje se ajusta el Almacén al guardar.
+        Los productos y cantidades vendidas se conservan. Mientras no toques
+        ningún campo de canje, el stock existente no se valida ni recalcula.
+        Solo al modificar el canje se ajusta el Almacén al guardar.
       </p>
       <div className="modal-actions">
         <Btn variant="outline" onClick={close}>

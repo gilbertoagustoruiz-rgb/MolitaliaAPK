@@ -4675,6 +4675,12 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       ? currentMarketResult.rows[0].data
       : {};
     const punoWithoutCanje = isPunoSouthMarketData(currentMarketData);
+    const hasCanjeEditedFlag = Object.prototype.hasOwnProperty.call(
+      input,
+      "canjeEdited",
+    );
+    const canjeEdited = input.canjeEdited === true;
+    delete input.canjeEdited;
     if (punoWithoutCanje) {
       enforceSaleWithoutCanje(input);
     } else {
@@ -4751,7 +4757,14 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     );
     const canjePresenceChanged =
       Boolean(value(currentSale.data, "bonus")) !== Boolean(value(input, "bonus"));
-    const canjeChanged = canjeQuantitiesChanged || canjePresenceChanged;
+    const inferredCanjeChanged =
+      canjeQuantitiesChanged || canjePresenceChanged;
+    const canjeChanged =
+      punoWithoutCanje ||
+      (hasCanjeEditedFlag ? canjeEdited : inferredCanjeChanged);
+    const shouldUpdateCanjeFields =
+      punoWithoutCanje ||
+      (hasCanjeEditedFlag ? canjeEdited : inferredCanjeChanged);
 
     if (canjeChanged) {
       await restoreWarehouseStockMovements(
@@ -4778,19 +4791,55 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       amountSoles,
       date: saleDate.toISOString(),
       comment: value(input, "comment") || undefined,
-      bonus: value(input, "bonus") || undefined,
-      redemptionCount: value(input, "bonus")
-        ? Math.max(1, Math.floor(numeric(input, "redemptionCount")))
-        : 0,
-      redemptionItems: value(input, "bonus") ? requested : undefined,
+      bonus:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "bonus") || undefined
+            : value(currentSale.data, "bonus") || undefined,
+      redemptionCount:
+        punoWithoutCanje
+          ? 0
+          : shouldUpdateCanjeFields
+            ? value(input, "bonus")
+              ? Math.max(1, Math.floor(numeric(input, "redemptionCount")))
+              : 0
+            : Math.max(0, Math.floor(numeric(currentSale.data, "redemptionCount"))),
+      redemptionItems:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "bonus")
+              ? requested
+              : undefined
+            : isRecord(currentSale.data.redemptionItems)
+              ? currentSale.data.redemptionItems
+              : undefined,
       planchaAccessory:
-        saleMode === "PLANCHAS" ? requestedAccessory : undefined,
+        saleMode === "PLANCHAS"
+          ? punoWithoutCanje
+            ? "NINGUNO"
+            : shouldUpdateCanjeFields
+              ? requestedAccessory
+              : value(currentSale.data, "planchaAccessory") || undefined
+          : undefined,
       planchaMultiplier:
-        saleMode === "PLANCHAS" ? requestedMultiplier : undefined,
+        saleMode === "PLANCHAS"
+          ? punoWithoutCanje
+            ? 1
+            : shouldUpdateCanjeFields
+              ? requestedMultiplier
+              : Math.max(1, Math.floor(numeric(currentSale.data, "planchaMultiplier")) || 1)
+          : undefined,
       receiptPhoto: value(input, "receiptPhoto"),
-      exchangePhoto: value(input, "bonus")
-        ? value(input, "exchangePhoto") || undefined
-        : undefined,
+      exchangePhoto:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "bonus")
+              ? value(input, "exchangePhoto") || undefined
+              : undefined
+            : value(currentSale.data, "exchangePhoto") || undefined,
       status: "SINCRONIZADA",
       updatedAt,
     };
