@@ -87,6 +87,29 @@ export async function ensureDatabaseSchema() {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS redemption_rules (
+      id text PRIMARY KEY,
+      code text NOT NULL UNIQUE,
+      name text NOT NULL,
+      sale_mode text NOT NULL,
+      quantity_basis text NOT NULL DEFAULT 'PLANCHAS',
+      min_quantity numeric NOT NULL DEFAULT 0,
+      max_quantity numeric,
+      min_exclusive boolean NOT NULL DEFAULT false,
+      repeatable boolean NOT NULL DEFAULT false,
+      step_quantity numeric,
+      eligible_skus text[] NOT NULL DEFAULT '{}',
+      accessory text NOT NULL DEFAULT 'NINGUNO',
+      items jsonb NOT NULL DEFAULT '{}',
+      valid_from timestamptz,
+      valid_to timestamptz,
+      priority integer NOT NULL DEFAULT 100,
+      status text NOT NULL DEFAULT 'ACTIVO',
+      data jsonb NOT NULL DEFAULT '{}',
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS trade_approvals (
       id text PRIMARY KEY,
       promoter_id text NOT NULL DEFAULT '',
@@ -348,6 +371,57 @@ export async function ensureDatabaseSchema() {
       ('CONFETI','CONFETI','ACTIVO','{"id":"CONFETI","name":"CONFETI","status":"ACTIVO"}',now())
     ON CONFLICT (id) DO NOTHING;
 
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES
+      (
+        'RR-ESC-001','ESCALA_1','Escala 1','PLANCHAS','UNITS',24,24,false,
+        false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],
+        'NINGUNO','{"AVENA":2}'::jsonb,10,'ACTIVO',
+        '{"description":"24 unidades mini = 1/2 plancha"}'::jsonb
+      ),
+      (
+        'RR-ESC-002','ESCALA_2','Escala 2','UNIDADES','UNITS',2,null,false,
+        true,2,ARRAY['COSTA-800','COSTA-BOLSA-800','TODINNO-TODINNITO','PASQUALINO-800','TODINNO-900-BOLSA-TODINNITO','TODINNO-LATA-900'],
+        'NINGUNO','{"AVENA":1}'::jsonb,20,'ACTIVO',
+        '{"description":"Cada 2 unidades elegibles"}'::jsonb
+      ),
+      (
+        'RR-ESC-003','ESCALA_3','Escala 3','PLANCHAS','PLANCHAS',1,1,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":3,"SPAGHETTI":1}'::jsonb,30,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-004','ESCALA_4','Escala 4','PLANCHAS','PLANCHAS',4,4,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":12,"SPAGHETTI":3}'::jsonb,40,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005','ESCALA_5','Escala 5','PLANCHAS','PLANCHAS',10,10,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":24,"SPAGHETTI":10}'::jsonb,50,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-M','ESCALA_5_MANDIL','Escala 5 + Mandil','PLANCHAS','PLANCHAS',10,10,false,
+        false,null,ARRAY[]::text[],'MANDIL','{"AVENA":24,"SPAGHETTI":10,"MANDIL":1}'::jsonb,51,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-B','ESCALA_5_BATEA','Escala 5 + Batea','PLANCHAS','PLANCHAS',10,10,false,
+        false,null,ARRAY[]::text[],'BATEA','{"AVENA":24,"SPAGHETTI":10,"BATEA":1}'::jsonb,52,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-006','ESCALA_6','Escala 6','PLANCHAS','PLANCHAS',80,null,true,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":144,"SPAGHETTI":100}'::jsonb,60,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-006-M','ESCALA_6_MANDIL','Escala 6 + Mandil','PLANCHAS','PLANCHAS',80,null,true,
+        false,null,ARRAY[]::text[],'MANDIL','{"AVENA":144,"SPAGHETTI":100,"MANDIL":4}'::jsonb,61,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-006-B','ESCALA_6_BATEA','Escala 6 + Batea','PLANCHAS','PLANCHAS',80,null,true,
+        false,null,ARRAY[]::text[],'BATEA','{"AVENA":144,"SPAGHETTI":100,"BATEA":4}'::jsonb,62,'ACTIVO','{}'::jsonb
+      )
+    ON CONFLICT (id) DO NOTHING;
+
+    CREATE INDEX IF NOT EXISTS idx_redemption_rules_active ON redemption_rules(status,priority);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_name ON warehouses(upper(name));
     CREATE INDEX IF NOT EXISTS idx_warehouse_movements_warehouse_date ON warehouse_movements(warehouse_id,movement_date DESC);
     CREATE INDEX IF NOT EXISTS idx_transfers_source_date ON transfers(source_warehouse_id,transfer_date DESC);
