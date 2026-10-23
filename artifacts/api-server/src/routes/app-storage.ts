@@ -19,6 +19,22 @@ const miniHalfPlanchaSkus = new Set([
   "MINI-COSTA-JURASSIC-80",
 ]);
 
+function isMiniHalfPlanchaLine(line: StoredRecord) {
+  const sku = value(line, "sku");
+  if (miniHalfPlanchaSkus.has(sku)) return true;
+  const normalized = `${sku} ${value(line, "product")}`
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+  return (
+    /TODINNITO\s*85(?:G|GR)?\b/.test(normalized) ||
+    /MINI\s*COSTA\s*MINIONS\s*80(?:G|GR)?\b/.test(normalized) ||
+    /MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)
+  );
+}
+
 type StoredRecord = Record<string, unknown>;
 type QueryClient = {
   query: (
@@ -4399,11 +4415,11 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       : [];
     const miniOnlyPlancha =
       inputPlanchaLines.length > 0 &&
-      inputPlanchaLines.every((line) => miniHalfPlanchaSkus.has(value(line, "sku")));
+      inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line));
     const miniEligibleUnits = inputPlanchaLines.reduce(
       (sum, line) =>
         sum +
-        (miniHalfPlanchaSkus.has(value(line, "sku"))
+        (isMiniHalfPlanchaLine(line)
           ? Math.max(0, Math.floor(numeric(line, "units")))
           : 0),
       0,
