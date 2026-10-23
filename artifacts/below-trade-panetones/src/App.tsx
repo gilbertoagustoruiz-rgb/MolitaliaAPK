@@ -11517,6 +11517,28 @@ function PromoterApp({
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/app-storage/redemption-rules")
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok)
+          throw new Error(payload.message || "No se pudieron cargar las Escalas de Canje.");
+        if (!cancelled) {
+          setRedemptionRules(Array.isArray(payload.rules) ? payload.rules : []);
+          setRedemptionRulesLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRedemptionRules([]);
+          setRedemptionRulesLoaded(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const promoterAssignment = assignments.find((assignment) =>
     assignmentMatchesUser(assignment, user),
   );
@@ -11564,6 +11586,8 @@ function PromoterApp({
   const [planchaAccessory, setPlanchaAccessory] = useState<"MANDIL" | "BATEA" | "NINGUNO">("NINGUNO");
   const [planchaMultiplier, setPlanchaMultiplier] = useState(1);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [redemptionRules, setRedemptionRules] = useState<RedemptionRule[]>([]);
+  const [redemptionRulesLoaded, setRedemptionRulesLoaded] = useState(false);
   const [comment, setComment] = useState("");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [exchange, setExchange] = useState<File | null>(null);
@@ -11789,18 +11813,6 @@ function PromoterApp({
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
   const punoWithoutCanje = isPunoSouthMarket(selectedMarket);
-  const bonusProducts = punoWithoutCanje
-    ? []
-    : bonusProductsFor(
-        mode,
-        total,
-        planchas,
-        warehouseRedemptionStock,
-        administrative ? new Date(administrative.date + "-05:00") : new Date(),
-      );
-  const selectedBonusProduct =
-    bonusProducts.find((product) => product.id === selectedBonusProductId) ||
-    bonusProducts[0];
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
@@ -11831,34 +11843,71 @@ function PromoterApp({
   useEffect(() => {
     if (planchas < 80 && planchaMultiplier !== 1) setPlanchaMultiplier(1);
   }, [planchas, planchaMultiplier]);
+
+  const masterRuleMatch =
+    !punoWithoutCanje && redemptionRulesLoaded
+      ? resolveRedemptionRule(redemptionRules, {
+          mode,
+          units: total,
+          planchas,
+          skus:
+            mode === "UNIDADES"
+              ? [selectedProduct?.sku].filter(Boolean)
+              : normalizedPlanchaLines.map((line) => line.sku),
+          accessory:
+            mode === "PLANCHAS" ? effectivePlanchaAccessory : "NINGUNO",
+          date: saleDate,
+          multiplier: planchaMultiplier,
+        })
+      : null;
+
+  const bonusProducts =
+    punoWithoutCanje || redemptionRulesLoaded
+      ? []
+      : bonusProductsFor(
+          mode,
+          total,
+          planchas,
+          warehouseRedemptionStock,
+          saleDate,
+        );
+  const selectedBonusProduct =
+    bonusProducts.find((product) => product.id === selectedBonusProductId) ||
+    bonusProducts[0];
   const automaticUnitCanjeCount =
     mode === "UNIDADES" ? Math.floor(unitQty / 2) : 0;
-  const canjeCount = mode === "UNIDADES"
-    ? (selectedBonusProduct ? automaticUnitCanjeCount : 0)
-    : (planchas >= 1 || miniHalfPlanchaCanje)
-      ? 1
-      : 0;
-  const planchaRequirements = punoWithoutCanje
-    ? ({} as Partial<RedemptionStock>)
-    : miniHalfPlanchaCanje
-      ? ({ AVENA: 2 } as Partial<RedemptionStock>)
-      : planchaCanjeRequirements(
-          planchas,
-          saleDate,
-          effectivePlanchaAccessory,
-          planchaMultiplier,
-        );
+  const canjeCount = masterRuleMatch
+    ? mode === "UNIDADES"
+      ? masterRuleMatch.appliedFactor
+      : 1
+    : mode === "UNIDADES"
+      ? (selectedBonusProduct ? automaticUnitCanjeCount : 0)
+      : (planchas >= 1 || miniHalfPlanchaCanje)
+        ? 1
+        : 0;
+  const legacyPlanchaRequirements = miniHalfPlanchaCanje
+    ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+    : planchaCanjeRequirements(
+        planchas,
+        saleDate,
+        effectivePlanchaAccessory,
+        planchaMultiplier,
+      );
   const requiredRedemptions =
     punoWithoutCanje
       ? ({} as Partial<RedemptionStock>)
-      : mode === "PLANCHAS"
-        ? planchaRequirements
-        : multiplyRedemptionRequirements(
-            selectedBonusProduct?.components || {},
-            canjeCount,
-          );
+      : masterRuleMatch
+        ? masterRuleMatch.items
+        : redemptionRulesLoaded
+          ? ({} as Partial<RedemptionStock>)
+          : mode === "PLANCHAS"
+            ? legacyPlanchaRequirements
+            : multiplyRedemptionRequirements(
+                selectedBonusProduct?.components || {},
+                canjeCount,
+              );
   const bonus =
-    mode === "PLANCHAS" && requiredRedemptionEntries(requiredRedemptions).length
+    requiredRedemptionEntries(requiredRedemptions).length
       ? canjeRequirementsLabel(requiredRedemptions)
       : selectedBonusProduct?.label;
   const hasCanje = Boolean(
@@ -12217,6 +12266,18 @@ function PromoterApp({
         mode === "PLANCHAS"
           ? Object.fromEntries(normalizedPlanchaLines.map((line) => [line.product.label, line.units]))
           : { [selectedProduct.brand]: unitQty },
+      redemptionRuleId: masterRuleMatch?.rule.id,
+      redemptionRuleCode: masterRuleMatch?.rule.code,
+      redemptionRuleName: masterRuleMatch?.rule.name,
+      redemptionRuleSnapshot: masterRuleMatch
+        ? {
+            code: masterRuleMatch.rule.code,
+            name: masterRuleMatch.rule.name,
+            items: masterRuleMatch.items,
+            accessory: masterRuleMatch.rule.accessory,
+            appliedFactor: masterRuleMatch.appliedFactor,
+          }
+        : undefined,
       bonus,
       redemptionCount: mode === "PLANCHAS" ? 1 : canjeCount,
       redemptionItems: hasCanje ? redemptionsToConsume : undefined,
@@ -12914,6 +12975,11 @@ function PromoterApp({
                   )
                   .join(" · ")}{" "}
                 · ${redemptionTotal} disponibles
+              </small>
+            )}
+            {masterRuleMatch && (
+              <small>
+                Escala aplicada: {masterRuleMatch.rule.name} ({masterRuleMatch.rule.code})
               </small>
             )}
             {bonus && mode === "PLANCHAS" && (
