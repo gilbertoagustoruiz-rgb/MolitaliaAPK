@@ -205,6 +205,16 @@ type Sale = {
   bonus?: string;
   redemptionCount?: number;
   redemptionItems?: Partial<RedemptionStock>;
+  redemptionRuleId?: string;
+  redemptionRuleCode?: string;
+  redemptionRuleName?: string;
+  redemptionRuleSnapshot?: {
+    code: string;
+    name: string;
+    items: Partial<RedemptionStock>;
+    accessory?: "MANDIL" | "BATEA" | "NINGUNO";
+    appliedFactor?: number;
+  };
   /** Solo se envía desde edición Admin/Analista; el backend no lo persiste. */
   canjeEdited?: boolean;
   /** Cantidades teóricas de la dinámica; no necesariamente fueron descontadas del Almacén. */
@@ -218,6 +228,26 @@ type Sale = {
   updatedAt?: string;
   status: SyncStatus;
 };
+type RedemptionRule = {
+  id: string;
+  code: string;
+  name: string;
+  saleMode: "UNIDADES" | "PLANCHAS";
+  quantityBasis: "UNITS" | "PLANCHAS";
+  minQuantity: number;
+  maxQuantity: number | null;
+  minExclusive?: boolean;
+  repeatable?: boolean;
+  stepQuantity?: number | null;
+  eligibleSkus: string[];
+  accessory: "MANDIL" | "BATEA" | "NINGUNO";
+  items: Partial<RedemptionStock>;
+  validFrom?: string | null;
+  validTo?: string | null;
+  priority: number;
+  status: Status;
+};
+
 type TrackingEventType =
   | "TRACKING"
   | "ENTRADA"
@@ -2488,6 +2518,92 @@ function saleRedemptionRequirements(sale: Sale) {
     Math.max(1, Math.floor(Number(sale.redemptionCount) || 1)),
   );
 }
+function redemptionRuleFactor(rule: RedemptionRule, quantity: number) {
+  if (!rule.repeatable) return 1;
+  const step = Math.max(0, Number(rule.stepQuantity) || Number(rule.minQuantity) || 0);
+  return step > 0 ? Math.max(1, Math.floor(quantity / step)) : 1;
+}
+function redemptionRuleMatches(
+  rule: RedemptionRule,
+  input: {
+    mode: "UNIDADES" | "PLANCHAS";
+    units: number;
+    planchas: number;
+    skus: string[];
+    accessory: "MANDIL" | "BATEA" | "NINGUNO";
+    date: Date;
+  },
+) {
+  if (rule.status !== "ACTIVO" || rule.saleMode !== input.mode) return false;
+  const time = input.date.getTime();
+  if (rule.validFrom && time < new Date(rule.validFrom).getTime()) return false;
+  if (rule.validTo && time > new Date(rule.validTo).getTime()) return false;
+  if (rule.accessory !== input.accessory) return false;
+  if (
+    rule.eligibleSkus.length &&
+    input.skus.some((sku) => !rule.eligibleSkus.includes(sku))
+  )
+    return false;
+  const quantity = rule.quantityBasis === "UNITS" ? input.units : input.planchas;
+  if (rule.minExclusive ? quantity <= rule.minQuantity : quantity < rule.minQuantity)
+    return false;
+  if (rule.maxQuantity != null && quantity > rule.maxQuantity) return false;
+  if (rule.repeatable) {
+    const step = Math.max(0, Number(rule.stepQuantity) || Number(rule.minQuantity) || 0);
+    if (step <= 0 || quantity < step) return false;
+  }
+  return true;
+}
+function resolveRedemptionRule(
+  rules: RedemptionRule[],
+  input: {
+    mode: "UNIDADES" | "PLANCHAS";
+    units: number;
+    planchas: number;
+    skus: string[];
+    accessory: "MANDIL" | "BATEA" | "NINGUNO";
+    date: Date;
+    multiplier?: number;
+  },
+) {
+  const rule = [...rules]
+    .filter((candidate) => redemptionRuleMatches(candidate, input))
+    .sort((a, b) => a.priority - b.priority || a.code.localeCompare(b.code))[0];
+  if (!rule) return null;
+  const repeatFactor = redemptionRuleFactor(
+    rule,
+    rule.quantityBasis === "UNITS" ? input.units : input.planchas,
+  );
+  const tradeFactor =
+    input.mode === "PLANCHAS" && input.planchas > 80
+      ? Math.max(1, Math.min(4, Number(input.multiplier) || 1))
+      : 1;
+  const appliedFactor = repeatFactor * tradeFactor;
+  const items = redemptionItems.reduce(
+    (result, item) => ({
+      ...result,
+      [item.id]:
+        Math.max(0, Math.floor(Number(rule.items[item.id]) || 0)) * appliedFactor,
+    }),
+    {} as Partial<RedemptionStock>,
+  );
+  return { rule, items, appliedFactor };
+}
+function inferRedemptionRuleForSale(sale: Sale, rules: RedemptionRule[]) {
+  if (sale.redemptionRuleId)
+    return rules.find((rule) => rule.id === sale.redemptionRuleId) || null;
+  const requirements = saleRedemptionRequirements(sale);
+  return (
+    rules.find((rule) =>
+      redemptionItems.every(
+        (item) =>
+          Math.max(0, Number(requirements[item.id]) || 0) ===
+          Math.max(0, Number(rule.items[item.id]) || 0),
+      ),
+    ) || null
+  );
+}
+
 function planchaCanjeRequirements(
   planchas: number,
   date: Date,
