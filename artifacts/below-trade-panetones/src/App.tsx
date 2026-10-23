@@ -478,6 +478,20 @@ const MINI_HALF_PLANCHA_SKUS = new Set([
   "MINI-COSTA-MINIONS-80",
   "MINI-COSTA-JURASSIC-80",
 ]);
+function isMiniHalfPlanchaProduct(sku?: string, label?: string) {
+  if (MINI_HALF_PLANCHA_SKUS.has(String(sku || "").trim())) return true;
+  const normalized = `${sku || ""} ${label || ""}`
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+  return (
+    /TODINNITO\s*85(?:G|GR)?\b/.test(normalized) ||
+    /MINI\s*COSTA\s*MINIONS\s*80(?:G|GR)?\b/.test(normalized) ||
+    /MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)
+  );
+}
 const DEFAULT_PRODUCT_PRESENTATION_BY_SKU: Record<string, "CAJA" | "BOLSA" | "LATA"> = {
   "COSTA-800": "CAJA",
   "COSTA-BOLSA-800": "BOLSA",
@@ -4968,7 +4982,7 @@ function SaleEditModal({
   const parsedAmount = Number(amountSoles);
   const parsedDate = new Date(saleDate);
   const saleMiniLines = (sale.planchaLines || []).filter((line) =>
-    MINI_HALF_PLANCHA_SKUS.has(line.sku),
+    isMiniHalfPlanchaProduct(line.sku, line.product),
   );
   const saleMiniOnly =
     Boolean(sale.planchaLines?.length) &&
@@ -11583,12 +11597,14 @@ function PromoterApp({
       : 0;
   const miniEligibleUnits = normalizedPlanchaLines.reduce(
     (sum, line) =>
-      sum + (MINI_HALF_PLANCHA_SKUS.has(line.sku) ? line.units : 0),
+      sum + (isMiniHalfPlanchaProduct(line.sku, line.product?.label) ? line.units : 0),
     0,
   );
   const miniOnlyPlancha =
     normalizedPlanchaLines.length > 0 &&
-    normalizedPlanchaLines.every((line) => MINI_HALF_PLANCHA_SKUS.has(line.sku));
+    normalizedPlanchaLines.every((line) =>
+      isMiniHalfPlanchaProduct(line.sku, line.product?.label),
+    );
   const miniHalfPlanchaCanje =
     mode === "PLANCHAS" && miniOnlyPlancha && miniEligibleUnits === 24;
 
@@ -11745,7 +11761,10 @@ function PromoterApp({
         normalizedPlanchaLines[0].units ===
           requestedFlatPlanchas * (unitsPerPlanchaBySku[normalizedPlanchaLines[0].sku] || 6) &&
         (requestedFlatPlanchas >= 1 ||
-          (MINI_HALF_PLANCHA_SKUS.has(normalizedPlanchaLines[0].sku) &&
+          (isMiniHalfPlanchaProduct(
+            normalizedPlanchaLines[0].sku,
+            normalizedPlanchaLines[0].product?.label,
+          ) &&
             requestedFlatPlanchas === 0.5))
       : normalizedPlanchaLines.length >= 2 &&
         normalizedPlanchaLines.every((line) => line.units > 0) &&
@@ -12571,15 +12590,33 @@ function PromoterApp({
                       return;
                     }
                     const currentSku = planchaLines[0]?.sku;
-                    const halfPlanchaEligible = MINI_HALF_PLANCHA_SKUS.has(currentSku);
+                    const currentProduct = saleCatalogProducts.find((item) => item.sku === currentSku);
+                    const halfPlanchaEligible = isMiniHalfPlanchaProduct(
+                      currentSku,
+                      currentProduct?.label,
+                    );
                     const numericValue = Number(value);
                     const normalized = halfPlanchaEligible
                       ? Math.max(0.5, Math.round(numericValue * 2) / 2)
                       : Math.max(1, Math.trunc(numericValue));
                     setPlanchasInput(String(normalized));
                   }}
-                  min={MINI_HALF_PLANCHA_SKUS.has(planchaLines[0]?.sku) ? 0.5 : 1}
-                  step={MINI_HALF_PLANCHA_SKUS.has(planchaLines[0]?.sku) ? 0.5 : 1}
+                  min={
+                    isMiniHalfPlanchaProduct(
+                      planchaLines[0]?.sku,
+                      saleCatalogProducts.find((item) => item.sku === planchaLines[0]?.sku)?.label,
+                    )
+                      ? 0.5
+                      : 1
+                  }
+                  step={
+                    isMiniHalfPlanchaProduct(
+                      planchaLines[0]?.sku,
+                      saleCatalogProducts.find((item) => item.sku === planchaLines[0]?.sku)?.label,
+                    )
+                      ? 0.5
+                      : 1
+                  }
                   testId="input-sale-planchas"
                 />
               </Field>
@@ -12670,8 +12707,8 @@ function PromoterApp({
                   </div>
                   <p className="formula">
                     {product.label} · {unitsPerPlancha} unidades por plancha
-                    {MINI_HALF_PLANCHA_SKUS.has(line.sku)
-                      ? " · 24 und (1/2 plancha) activa 2 Avena Clásica"
+                    {isMiniHalfPlanchaProduct(line.sku, product?.label)
+                      ? " · 24 und (1/2 plancha) activa 2 Avena Clásica · 48 und = 1 plancha"
                       : ""}
                   </p>
                   {planchaType === "MIX" && planchaLines.length > 2 && (
