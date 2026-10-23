@@ -81,6 +81,7 @@ export async function ensureDatabaseSchema() {
       status text NOT NULL DEFAULT 'SINCRONIZADA',
       receipt_photo text,
       exchange_photo text,
+      redemption_rule_id text,
       data jsonb NOT NULL DEFAULT '{}',
       record_updated_at timestamptz,
       created_at timestamptz NOT NULL DEFAULT now(),
@@ -109,6 +110,8 @@ export async function ensureDatabaseSchema() {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE sales ADD COLUMN IF NOT EXISTS redemption_rule_id text;
 
     CREATE TABLE IF NOT EXISTS trade_approvals (
       id text PRIMARY KEY,
@@ -428,6 +431,7 @@ export async function ensureDatabaseSchema() {
     CREATE INDEX IF NOT EXISTS idx_transfers_destination_date ON transfers(destination_warehouse_id,transfer_date DESC);
     CREATE INDEX IF NOT EXISTS idx_trade_approvals_status_requested ON trade_approvals(status,requested_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(sale_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_sales_redemption_rule ON sales(redemption_rule_id);
     CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(event_date DESC);
     CREATE INDEX IF NOT EXISTS idx_tracking_promoter_date ON promoter_location_tracking(promoter_id,recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tracking_market_date ON promoter_location_tracking(market_id,recorded_at DESC);
@@ -485,6 +489,20 @@ export async function ensureDatabaseSchema() {
         ALTER TABLE sales ADD CONSTRAINT sales_market_fk
           FOREIGN KEY (market_id) REFERENCES markets(id) NOT VALID;
         ALTER TABLE sales VALIDATE CONSTRAINT sales_market_fk;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname='sales_redemption_rule_fk'
+      ) AND NOT EXISTS (
+        SELECT 1
+        FROM sales s
+        LEFT JOIN redemption_rules r ON r.id=s.redemption_rule_id
+        WHERE s.redemption_rule_id IS NOT NULL AND r.id IS NULL
+      ) THEN
+        ALTER TABLE sales ADD CONSTRAINT sales_redemption_rule_fk
+          FOREIGN KEY (redemption_rule_id) REFERENCES redemption_rules(id)
+          ON UPDATE CASCADE ON DELETE SET NULL NOT VALID;
+        ALTER TABLE sales VALIDATE CONSTRAINT sales_redemption_rule_fk;
       END IF;
 
       IF NOT EXISTS (
