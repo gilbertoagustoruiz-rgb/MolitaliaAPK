@@ -4734,16 +4734,41 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         Math.max(0, Math.floor(Number(requestedSource[itemId]) || 0)),
       ]),
     );
-    await restoreWarehouseStockMovements(client as unknown as QueryClient, `SALE:${id}`, currentSale.promoter_id);
-    if (value(input, "bonus")) {
-      await applyWarehouseStockMovement(
+    const currentRequestedSource = isRecord(currentSale.data.redemptionItems)
+      ? currentSale.data.redemptionItems
+      : {};
+    const currentRequested = Object.fromEntries(
+      ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"].map((itemId) => [
+        itemId,
+        Math.max(
+          0,
+          Math.floor(Number(currentRequestedSource[itemId]) || 0),
+        ),
+      ]),
+    );
+    const canjeQuantitiesChanged = ["AVENA", "SPAGHETTI", "BATEA", "MANDIL"].some(
+      (itemId) => currentRequested[itemId] !== requested[itemId],
+    );
+    const canjePresenceChanged =
+      Boolean(value(currentSale.data, "bonus")) !== Boolean(value(input, "bonus"));
+    const canjeChanged = canjeQuantitiesChanged || canjePresenceChanged;
+
+    if (canjeChanged) {
+      await restoreWarehouseStockMovements(
         client as unknown as QueryClient,
-        currentSale.market_id,
-        requested,
-        "CANJE",
-        currentSale.promoter_id,
         `SALE:${id}`,
+        currentSale.promoter_id,
       );
+      if (value(input, "bonus")) {
+        await applyWarehouseStockMovement(
+          client as unknown as QueryClient,
+          currentSale.market_id,
+          requested,
+          "CANJE",
+          currentSale.promoter_id,
+          `SALE:${id}`,
+        );
+      }
     }
     const updatedAt = new Date().toISOString();
     const sale = {
@@ -4787,12 +4812,14 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     await replaceSaleItems(client as unknown as QueryClient, id, sale, {
       allowLegacyWithoutSku: true,
     });
-    await client.query(
-      "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
-      [movementPrefix],
-    );
+    if (canjeChanged) {
+      await client.query(
+        "DELETE FROM inventory_movements WHERE kind='CANJE' AND left(id,length($1))=$1",
+        [movementPrefix],
+      );
+    }
     for (const itemId of itemIds) {
-      if (punoWithoutCanje || !requested[itemId]) continue;
+      if (!canjeChanged || punoWithoutCanje || !requested[itemId]) continue;
       const movement = {
         id: `${movementPrefix}${itemId}`,
         marketId: currentSale.market_id,
