@@ -754,6 +754,12 @@ const degustacionProducts: { id: DegustacionProductId; label: string }[] = [
 function emptyRedemptionStock(): RedemptionStock {
   return { ...DEFAULT_CAMPAIGN_REDEMPTION_STOCK_BY_ITEM };
 }
+function zeroRedemptionStock(): RedemptionStock {
+  return redemptionItems.reduce(
+    (result, item) => ({ ...result, [item.id]: 0 }),
+    {} as RedemptionStock,
+  );
+}
 function userRedemptionStock(user: AppUser): RedemptionStock {
   const source = user.redemptionStock || emptyRedemptionStock();
   return redemptionItems.reduce(
@@ -4980,7 +4986,7 @@ function SaleEditModal({
   );
   const calculatedRequirements =
     punoWithoutCanje
-      ? emptyRedemptionStock()
+      ? zeroRedemptionStock()
       : sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
@@ -4998,7 +5004,7 @@ function SaleEditModal({
         : emptyRedemptionStock();
   const effectiveRequirements: Partial<RedemptionStock> =
     punoWithoutCanje
-      ? emptyRedemptionStock()
+      ? zeroRedemptionStock()
       : sale.mode === "UNIDADES" && !selectedCanje
       ? emptyRedemptionStock()
       : sale.mode === "PLANCHAS" && manualCanje
