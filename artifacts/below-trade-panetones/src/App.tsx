@@ -5009,7 +5009,7 @@ function SaleEditModal({
       ? canjeRequirementsLabel(effectiveRequirements) || undefined
       : selectedCanje?.label;
   const missingStock =
-    sale.mode === "UNIDADES" && !selectedCanje
+    punoWithoutCanje || (sale.mode === "UNIDADES" && !selectedCanje)
       ? undefined
       : requiredRedemptionEntries(effectiveRequirements).find(
           ([itemId, quantity]) => restoredStock[itemId] < quantity,
@@ -5061,28 +5061,39 @@ function SaleEditModal({
           amountSoles: parsedAmount,
           date: parsedDate.toISOString(),
           comment: comment.trim() || undefined,
-          bonus:
-            sale.mode === "UNIDADES" && !selectedCanje
+          bonus: punoWithoutCanje
+            ? undefined
+            : sale.mode === "UNIDADES" && !selectedCanje
               ? undefined
               : editedBonus,
-          redemptionCount:
-            sale.mode === "PLANCHAS"
+          redemptionCount: punoWithoutCanje
+            ? 0
+            : sale.mode === "PLANCHAS"
               ? editedBonus
                 ? 1
                 : 0
               : selectedCanje
                 ? redemptionCount
                 : 0,
-          redemptionItems:
-            sale.mode === "UNIDADES" && !selectedCanje
+          redemptionItems: punoWithoutCanje
+            ? undefined
+            : sale.mode === "UNIDADES" && !selectedCanje
               ? undefined
               : editedBonus
                 ? effectiveRequirements
                 : undefined,
           planchaAccessory:
-            sale.mode === "PLANCHAS" ? planchaAccessory : undefined,
+            sale.mode === "PLANCHAS"
+              ? punoWithoutCanje
+                ? "NINGUNO"
+                : planchaAccessory
+              : undefined,
           planchaMultiplier:
-            sale.mode === "PLANCHAS" ? planchaMultiplier : undefined,
+            sale.mode === "PLANCHAS"
+              ? punoWithoutCanje
+                ? 1
+                : planchaMultiplier
+              : undefined,
           receiptPhoto: receipt ? `BOLETA - ${sale.id}.jpg` : sale.receiptPhoto,
           exchangePhoto: exchangeEvidenceRequired
             ? exchange
@@ -5148,7 +5159,7 @@ function SaleEditModal({
             testId="input-edit-sale-date"
           />
         </Field>
-        {sale.mode === "UNIDADES" ? (
+        {!punoWithoutCanje && sale.mode === "UNIDADES" ? (
           <SelectField
             label="Canje"
             value={canjeProductId}
@@ -5161,7 +5172,7 @@ function SaleEditModal({
               })),
             ]}
           />
-        ) : (
+        ) : !punoWithoutCanje && sale.mode === "PLANCHAS" ? (
           <>
             {(sale.planchas || 0) >= 10 && (
               <SelectField
@@ -5244,8 +5255,8 @@ function SaleEditModal({
               )}
             </Field>
           </>
-        )}
-        {sale.mode === "UNIDADES" && selectedCanje && (
+        ) : null}
+        {!punoWithoutCanje && sale.mode === "UNIDADES" && selectedCanje && (
           <Field label="Número de canjes *">
             <select
               className="select"
@@ -5272,7 +5283,7 @@ function SaleEditModal({
           />
         </Field>
       </div>
-      {sale.mode !== "UNIDADES" || selectedCanje ? (
+      {!punoWithoutCanje && (sale.mode !== "UNIDADES" || selectedCanje) ? (
         missingStock && (
         <div className="stock-warning">
           <PackageCheck /> Stock insuficiente de{" "}
