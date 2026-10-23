@@ -5028,8 +5028,15 @@ function SaleEditModal({
     sale.mode === "PLANCHAS"
       ? canjeRequirementsLabel(effectiveRequirements) || undefined
       : selectedCanje?.label;
+  const canjeQuantitiesChanged = redemptionItems.some(
+    (item) =>
+      Math.max(0, Math.floor(Number(originalRequirements[item.id]) || 0)) !==
+      Math.max(0, Math.floor(Number(effectiveRequirements[item.id]) || 0)),
+  );
   const missingStock =
-    punoWithoutCanje || (sale.mode === "UNIDADES" && !selectedCanje)
+    punoWithoutCanje ||
+    !canjeQuantitiesChanged ||
+    (sale.mode === "UNIDADES" && !selectedCanje)
       ? undefined
       : requiredRedemptionEntries(effectiveRequirements).find(
           ([itemId, quantity]) => restoredStock[itemId] < quantity,
@@ -5340,8 +5347,9 @@ function SaleEditModal({
         </div>
       </div>
       <p className="modal-hint">
-        Los productos y cantidades vendidas se conservan. El canje anterior se
-        restaura y el nuevo consumo se recalcula contra el Almacén al guardar.
+        Los productos y cantidades vendidas se conservan. Si no modificas el
+        canje, el stock existente no se vuelve a validar ni recalcular. Solo si
+        cambias las cantidades del canje se ajusta el Almacén al guardar.
       </p>
       <div className="modal-actions">
         <Btn variant="outline" onClick={close}>
