@@ -11761,7 +11761,10 @@ function PromoterApp({
         normalizedPlanchaLines[0].units ===
           requestedFlatPlanchas * (unitsPerPlanchaBySku[normalizedPlanchaLines[0].sku] || 6) &&
         (requestedFlatPlanchas >= 1 ||
-          (MINI_HALF_PLANCHA_SKUS.has(normalizedPlanchaLines[0].sku) &&
+          (isMiniHalfPlanchaProduct(
+            normalizedPlanchaLines[0].sku,
+            normalizedPlanchaLines[0].product?.label,
+          ) &&
             requestedFlatPlanchas === 0.5))
       : normalizedPlanchaLines.length >= 2 &&
         normalizedPlanchaLines.every((line) => line.units > 0) &&
