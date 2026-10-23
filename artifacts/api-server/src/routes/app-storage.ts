@@ -4617,17 +4617,6 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     });
     return;
   }
-  try {
-    requireFinalClientForCanje(input);
-  } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Nombre Cliente Final es obligatorio cuando existe canje.",
-    });
-    return;
-  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -4670,7 +4659,22 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       ? currentMarketResult.rows[0].data
       : {};
     const punoWithoutCanje = isPunoSouthMarketData(currentMarketData);
-    if (punoWithoutCanje) enforceSaleWithoutCanje(input);
+    if (punoWithoutCanje) {
+      enforceSaleWithoutCanje(input);
+    } else {
+      try {
+        requireFinalClientForCanje(input);
+      } catch (error) {
+        await client.query("ROLLBACK");
+        res.status(400).json({
+          message:
+            error instanceof Error
+              ? error.message
+              : "Nombre Cliente Final es obligatorio cuando existe canje.",
+        });
+        return;
+      }
+    }
     const saleMode = value(currentSale.data, "mode");
     const salePlanchas = Math.max(0, Math.floor(numeric(currentSale.data, "planchas")));
     const requestedAccessoryRaw = value(input, "planchaAccessory");
@@ -4772,7 +4776,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       [movementPrefix],
     );
     for (const itemId of itemIds) {
-      if (!requested[itemId]) continue;
+      if (punoWithoutCanje || !requested[itemId]) continue;
       const movement = {
         id: `${movementPrefix}${itemId}`,
         marketId: currentSale.market_id,
