@@ -104,6 +104,7 @@ export const salesTable = pgTable(
     status: text("status").notNull().default("SINCRONIZADA"),
     receiptPhoto: text("receipt_photo"),
     exchangePhoto: text("exchange_photo"),
+    redemptionRuleId: text("redemption_rule_id"),
     data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
     recordUpdatedAt,
     ...timestamps,
