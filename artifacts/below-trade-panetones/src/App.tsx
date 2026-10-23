@@ -6000,6 +6000,26 @@ function AdminCanjesModule({
   notify: (message: string, error?: boolean) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [redemptionRules, setRedemptionRules] = useState<RedemptionRule[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/app-storage/redemption-rules")
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || "No se pudieron cargar las escalas.");
+        if (!cancelled) setRedemptionRules(Array.isArray(payload.rules) ? payload.rules : []);
+      })
+      .catch(() => {
+        if (!cancelled) setRedemptionRules([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const scaleForCanje = (canje: AdminCanje) => {
+    if (!canje.sale) return null;
+    return inferRedemptionRuleForSale(canje.sale, redemptionRules);
+  };
   const visibleCanjes = canjes.filter((canje) => {
     const promoter = canje.promoterId
       ? users.find((current) => current.id === canje.promoterId)
@@ -6017,6 +6037,9 @@ function AdminCanjesModule({
       promoter?.dni,
       canje.actorName,
       marketMap[canje.marketId]?.name || "Mercado no identificado",
+      canje.sale?.redemptionRuleName ||
+        canje.sale?.redemptionRuleCode ||
+        scaleForCanje(canje)?.name,
       canjeProductLabel(
         canje.canjeProductId,
         canje.canjeProductLabel ||
@@ -6029,11 +6052,15 @@ function AdminCanjesModule({
   const exportCanjes = () => {
     downloadCsv(
       `canjes-${peruDateKey()}.csv`,
-      ["Fecha", "Origen", "Mercado", "Producto", "Cantidad", "Responsable"],
+      ["Fecha", "Origen", "Mercado", "Escala", "Producto", "Cantidad", "Responsable"],
       canjes.map((canje) => [
         formatDate(canje.date),
         canje.source === "sale" ? "Venta" : "Movimiento",
         marketMap[canje.marketId]?.name || "Mercado",
+        canje.sale?.redemptionRuleName ||
+          canje.sale?.redemptionRuleCode ||
+          scaleForCanje(canje)?.name ||
+          "Histórico / sin clasificar",
         canjeProductLabel(
           canje.canjeProductId,
           canje.canjeProductLabel ||
@@ -6084,8 +6111,9 @@ function AdminCanjesModule({
           {visibleCanjes.length ? (
             <div className="module-table-wrap">
               <div className="module-table">
-                <div className="module-table-row module-table-header cols-6">
+                <div className="module-table-row module-table-header cols-8">
                   <span>Código</span>
+                  <span>Escala</span>
                   <span>Producto</span>
                   <span>Responsable</span>
                   <span>Origen</span>
@@ -6099,12 +6127,25 @@ function AdminCanjesModule({
                     : undefined;
                   return (
                     <article
-                      className="module-table-row cols-7"
+                      className="module-table-row cols-8"
                       key={`${canje.source}-${canje.canjeId}`}
                     >
                       <span>
                         <b className="module-table-id">{canje.canjeId}</b>
                         <small>{canje.status}</small>
+                      </span>
+                      <span>
+                        <strong>
+                          {canje.sale?.redemptionRuleName ||
+                            canje.sale?.redemptionRuleCode ||
+                            scaleForCanje(canje)?.name ||
+                            "Histórico"}
+                        </strong>
+                        <small>
+                          {canje.sale?.redemptionRuleCode ||
+                            scaleForCanje(canje)?.code ||
+                            "Sin ID de escala"}
+                        </small>
                       </span>
                       <span>
                         <strong>
