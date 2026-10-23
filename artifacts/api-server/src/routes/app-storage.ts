@@ -1156,7 +1156,7 @@ async function validateSubmittedRedemptionRule(
 
   const saleSkus = saleItemDrafts(sale).map((item) => item.sku);
   const eligibleSkus = Array.isArray(rule.eligible_skus)
-    ? rule.eligible_skus.map((sku) => String(sku))
+    ? rule.eligible_skus.map((sku: unknown) => String(sku))
     : [];
   if (
     eligibleSkus.length &&
