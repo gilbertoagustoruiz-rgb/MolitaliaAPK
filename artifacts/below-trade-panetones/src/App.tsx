@@ -7847,6 +7847,9 @@ function CoordinatorApp({
     ["almacen", "Almacén"],
     ["clientes", "Clientes"],
     ["canjes", "Canjes"],
+    ...(["ADMIN", "ANALISTA"].includes(user.role)
+      ? [["tabla-canjes", "Tabla Canjes"]]
+      : []),
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
@@ -11132,6 +11135,13 @@ function AnalystApp({
             )}
           </div>
         </section>
+      )}
+      {tab === "tabla-canjes" && (
+        <RedemptionRulesModule
+          user={user}
+          productPrices={productPrices}
+          notify={notify}
+        />
       )}
       {tab === "canjes" && (
         <AdminCanjesModule
