@@ -131,6 +131,10 @@ function stripCanjeFromSale(record: StoredRecord): StoredRecord {
     suggestedRedemptionItems: _suggestedRedemptionItems,
     exchangePhoto: _exchangePhoto,
     finalClientName: _finalClientName,
+    redemptionRuleId: _redemptionRuleId,
+    redemptionRuleCode: _redemptionRuleCode,
+    redemptionRuleName: _redemptionRuleName,
+    redemptionRuleSnapshot: _redemptionRuleSnapshot,
     ...rest
   } = record;
   return {
@@ -149,6 +153,10 @@ function enforceSaleWithoutCanje(record: StoredRecord) {
   delete record.suggestedRedemptionItems;
   delete record.exchangePhoto;
   delete record.finalClientName;
+  delete record.redemptionRuleId;
+  delete record.redemptionRuleCode;
+  delete record.redemptionRuleName;
+  delete record.redemptionRuleSnapshot;
   Object.assign(record, clean);
 }
 
@@ -2402,6 +2410,197 @@ router.delete("/app-storage/transfers/:id", async (req, res): Promise<void> => {
     });
   } finally {
     db.release();
+  }
+});
+
+function normalizeRedemptionRuleRow(row: Record<string, unknown>) {
+  const data = isRecord(row.data) ? row.data : {};
+  return {
+    ...data,
+    id: String(row.id || ""),
+    code: String(row.code || ""),
+    name: String(row.name || ""),
+    saleMode: String(row.sale_mode || "PLANCHAS"),
+    quantityBasis: String(row.quantity_basis || "PLANCHAS"),
+    minQuantity: Number(row.min_quantity || 0),
+    maxQuantity:
+      row.max_quantity === null || row.max_quantity === undefined
+        ? null
+        : Number(row.max_quantity),
+    minExclusive: Boolean(row.min_exclusive),
+    repeatable: Boolean(row.repeatable),
+    stepQuantity:
+      row.step_quantity === null || row.step_quantity === undefined
+        ? null
+        : Number(row.step_quantity),
+    eligibleSkus: Array.isArray(row.eligible_skus) ? row.eligible_skus : [],
+    accessory: String(row.accessory || "NINGUNO"),
+    items: isRecord(row.items) ? row.items : {},
+    validFrom: row.valid_from ? new Date(String(row.valid_from)).toISOString() : null,
+    validTo: row.valid_to ? new Date(String(row.valid_to)).toISOString() : null,
+    priority: Number(row.priority || 100),
+    status: String(row.status || "ACTIVO"),
+    updatedAt: row.updated_at ? new Date(String(row.updated_at)).toISOString() : undefined,
+  };
+}
+
+router.get("/app-storage/redemption-rules", async (_req, res): Promise<void> => {
+  try {
+    const result = await pool.query(
+      `SELECT id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,
+              min_exclusive,repeatable,step_quantity,eligible_skus,accessory,
+              items,valid_from,valid_to,priority,status,data,updated_at
+       FROM redemption_rules
+       ORDER BY priority,code`,
+    );
+    res.json({ rules: result.rows.map(normalizeRedemptionRuleRow) });
+  } catch (error) {
+    console.error("Unable to read redemption rules", error);
+    res.status(500).json({ message: "No se pudieron leer las Escalas de Canje." });
+  }
+});
+
+router.post("/app-storage/redemption-rules", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor)
+    return void res.status(403).json({
+      message: "Solo Admin o Analista puede administrar Escalas de Canje.",
+    });
+  const input = isRecord(req.body?.rule) ? req.body.rule : {};
+  const id = value(input, "id") || `RR-${randomUUID()}`;
+  const code = value(input, "code").toUpperCase().replace(/\s+/g, "_");
+  const name = value(input, "name");
+  const saleMode = value(input, "saleMode") === "UNIDADES" ? "UNIDADES" : "PLANCHAS";
+  const quantityBasis = value(input, "quantityBasis") === "UNITS" ? "UNITS" : "PLANCHAS";
+  const minQuantity = Math.max(0, Number(input.minQuantity) || 0);
+  const maxRaw = input.maxQuantity;
+  const maxQuantity =
+    maxRaw === null || maxRaw === undefined || String(maxRaw).trim() === ""
+      ? null
+      : Math.max(0, Number(maxRaw) || 0);
+  const accessory = ["NINGUNO", "MANDIL", "BATEA"].includes(value(input, "accessory"))
+    ? value(input, "accessory")
+    : "NINGUNO";
+  const itemsSource = isRecord(input.items) ? input.items : {};
+  const items = Object.fromEntries(
+    redemptionItemIds.map((itemId) => [
+      itemId,
+      Math.max(0, Math.floor(Number(itemsSource[itemId]) || 0)),
+    ]),
+  );
+  if (!code || !name || minQuantity <= 0)
+    return void res.status(400).json({
+      message: "Completa código, nombre y cantidad mínima de la escala.",
+    });
+  if (maxQuantity !== null && maxQuantity < minQuantity)
+    return void res.status(400).json({
+      message: "La cantidad máxima no puede ser menor que la mínima.",
+    });
+  if (!Object.values(items).some((quantity) => quantity > 0))
+    return void res.status(400).json({
+      message: "La escala debe bonificar al menos un producto.",
+    });
+  const eligibleSkus = Array.isArray(input.eligibleSkus)
+    ? input.eligibleSkus.map((sku) => String(sku || "").trim()).filter(Boolean)
+    : [];
+  const validFrom = value(input, "validFrom") ? new Date(value(input, "validFrom")) : null;
+  const validTo = value(input, "validTo") ? new Date(value(input, "validTo")) : null;
+  if (validFrom && Number.isNaN(validFrom.getTime()))
+    return void res.status(400).json({ message: "Vigencia desde no válida." });
+  if (validTo && Number.isNaN(validTo.getTime()))
+    return void res.status(400).json({ message: "Vigencia hasta no válida." });
+  if (validFrom && validTo && validTo < validFrom)
+    return void res.status(400).json({ message: "La vigencia final no puede ser anterior a la inicial." });
+
+  const rule = {
+    ...input,
+    id,
+    code,
+    name,
+    saleMode,
+    quantityBasis,
+    minQuantity,
+    maxQuantity,
+    minExclusive: Boolean(input.minExclusive),
+    repeatable: Boolean(input.repeatable),
+    stepQuantity:
+      input.stepQuantity === null || input.stepQuantity === undefined || String(input.stepQuantity).trim() === ""
+        ? null
+        : Math.max(0, Number(input.stepQuantity) || 0),
+    eligibleSkus,
+    accessory,
+    items,
+    validFrom: validFrom?.toISOString() || null,
+    validTo: validTo?.toISOString() || null,
+    priority: Math.max(0, Math.floor(Number(input.priority) || 100)),
+    status: value(input, "status") === "INACTIVO" ? "INACTIVO" : "ACTIVO",
+    updatedAt: new Date().toISOString(),
+    updatedBy: actor.id,
+  };
+  try {
+    const result = await pool.query(
+      `INSERT INTO redemption_rules
+        (id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+         repeatable,step_quantity,eligible_skus,accessory,items,valid_from,valid_to,
+         priority,status,data,updated_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now())
+       ON CONFLICT(id) DO UPDATE SET
+         code=EXCLUDED.code,name=EXCLUDED.name,sale_mode=EXCLUDED.sale_mode,
+         quantity_basis=EXCLUDED.quantity_basis,min_quantity=EXCLUDED.min_quantity,
+         max_quantity=EXCLUDED.max_quantity,min_exclusive=EXCLUDED.min_exclusive,
+         repeatable=EXCLUDED.repeatable,step_quantity=EXCLUDED.step_quantity,
+         eligible_skus=EXCLUDED.eligible_skus,accessory=EXCLUDED.accessory,
+         items=EXCLUDED.items,valid_from=EXCLUDED.valid_from,valid_to=EXCLUDED.valid_to,
+         priority=EXCLUDED.priority,status=EXCLUDED.status,data=EXCLUDED.data,updated_at=now()
+       RETURNING id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,
+                 min_exclusive,repeatable,step_quantity,eligible_skus,accessory,
+                 items,valid_from,valid_to,priority,status,data,updated_at`,
+      [
+        id,code,name,saleMode,quantityBasis,minQuantity,maxQuantity,
+        rule.minExclusive,rule.repeatable,rule.stepQuantity,eligibleSkus,accessory,
+        items,rule.validFrom,rule.validTo,rule.priority,rule.status,rule,
+      ],
+    );
+    res.json({ rule: normalizeRedemptionRuleRow(result.rows[0]) });
+  } catch (error) {
+    res.status(409).json({
+      message:
+        error instanceof Error && /unique/i.test(error.message)
+          ? "Ya existe una escala con ese código."
+          : error instanceof Error
+            ? error.message
+            : "No se pudo guardar la Escala de Canje.",
+    });
+  }
+});
+
+router.delete("/app-storage/redemption-rules/:id", async (req, res): Promise<void> => {
+  const actor = await authorizedTradeActor(req);
+  if (!actor)
+    return void res.status(403).json({
+      message: "Solo Admin o Analista puede administrar Escalas de Canje.",
+    });
+  const id = String(req.params.id || "").trim();
+  if (!id) return void res.status(400).json({ message: "Escala no válida." });
+  try {
+    const used = await pool.query(
+      "SELECT 1 FROM sales WHERE data->>'redemptionRuleId'=$1 LIMIT 1",
+      [id],
+    );
+    if (used.rows.length) {
+      await pool.query(
+        "UPDATE redemption_rules SET status='INACTIVO',updated_at=now() WHERE id=$1",
+        [id],
+      );
+      res.json({ id, status: "INACTIVO", preservedHistory: true });
+      return;
+    }
+    await pool.query("DELETE FROM redemption_rules WHERE id=$1", [id]);
+    res.json({ id, deleted: true });
+  } catch (error) {
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo eliminar la escala.",
+    });
   }
 });
 
