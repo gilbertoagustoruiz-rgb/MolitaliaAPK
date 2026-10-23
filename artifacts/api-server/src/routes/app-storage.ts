@@ -5156,6 +5156,34 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
             : isRecord(currentSale.data.redemptionItems)
               ? currentSale.data.redemptionItems
               : undefined,
+      redemptionRuleId:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "redemptionRuleId") || undefined
+            : value(currentSale.data, "redemptionRuleId") || undefined,
+      redemptionRuleCode:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "redemptionRuleCode") || undefined
+            : value(currentSale.data, "redemptionRuleCode") || undefined,
+      redemptionRuleName:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? value(input, "redemptionRuleName") || undefined
+            : value(currentSale.data, "redemptionRuleName") || undefined,
+      redemptionRuleSnapshot:
+        punoWithoutCanje
+          ? undefined
+          : shouldUpdateCanjeFields
+            ? isRecord(input.redemptionRuleSnapshot)
+              ? input.redemptionRuleSnapshot
+              : undefined
+            : isRecord(currentSale.data.redemptionRuleSnapshot)
+              ? currentSale.data.redemptionRuleSnapshot
+              : undefined,
       planchaAccessory:
         saleMode === "PLANCHAS"
           ? punoWithoutCanje
