@@ -1087,6 +1087,115 @@ async function authorizedTradeActor(req: Request) {
   return { id: String(actor.id), role: actorRole, data: actorData };
 }
 
+async function validateSubmittedRedemptionRule(
+  client: QueryClient,
+  sale: StoredRecord,
+  saleDate: Date,
+) {
+  const ruleId = value(sale, "redemptionRuleId");
+  if (!ruleId) return null;
+  const result = await client.query(
+    `SELECT id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,
+            min_exclusive,repeatable,step_quantity,eligible_skus,accessory,
+            items,valid_from,valid_to,priority,status
+     FROM redemption_rules
+     WHERE id=$1 AND status='ACTIVO'
+     LIMIT 1`,
+    [ruleId],
+  );
+  const rule = result.rows[0];
+  if (!rule) throw new Error("La Escala de Canje seleccionada ya no está activa.");
+
+  if (String(rule.sale_mode) !== value(sale, "mode"))
+    throw new Error("La Escala de Canje no corresponde al tipo de venta.");
+
+  const validFrom = rule.valid_from ? new Date(String(rule.valid_from)) : null;
+  const validTo = rule.valid_to ? new Date(String(rule.valid_to)) : null;
+  if (validFrom && saleDate < validFrom)
+    throw new Error("La Escala de Canje aún no está vigente para esta fecha.");
+  if (validTo && saleDate > validTo)
+    throw new Error("La Escala de Canje ya no está vigente para esta fecha.");
+
+  const accessory =
+    value(sale, "mode") === "PLANCHAS"
+      ? value(sale, "planchaAccessory") || "NINGUNO"
+      : "NINGUNO";
+  if (String(rule.accessory || "NINGUNO") !== accessory)
+    throw new Error("La Escala de Canje no corresponde al accesorio seleccionado.");
+
+  const quantity =
+    String(rule.quantity_basis) === "UNITS"
+      ? numeric(sale, "units")
+      : numeric(sale, "planchas");
+  const minQuantity = Number(rule.min_quantity || 0);
+  const maxQuantity =
+    rule.max_quantity === null || rule.max_quantity === undefined
+      ? null
+      : Number(rule.max_quantity);
+  if (Boolean(rule.min_exclusive) ? quantity <= minQuantity : quantity < minQuantity)
+    throw new Error("La compra no alcanza la cantidad mínima de esta escala.");
+  if (maxQuantity !== null && quantity > maxQuantity)
+    throw new Error("La compra supera la cantidad máxima de esta escala.");
+
+  const saleSkus = saleItemDrafts(sale).map((item) => item.sku);
+  const eligibleSkus = Array.isArray(rule.eligible_skus)
+    ? rule.eligible_skus.map((sku) => String(sku))
+    : [];
+  if (
+    eligibleSkus.length &&
+    (saleSkus.length === 0 || saleSkus.some((sku) => !eligibleSkus.includes(sku)))
+  )
+    throw new Error("Uno o más productos no pertenecen a la Escala de Canje seleccionada.");
+
+  let factor = 1;
+  if (Boolean(rule.repeatable)) {
+    const step = Math.max(
+      0,
+      Number(rule.step_quantity || 0) || Number(rule.min_quantity || 0),
+    );
+    if (step <= 0) throw new Error("La escala repetible no tiene un paso válido.");
+    factor = Math.max(1, Math.floor(quantity / step));
+  }
+  if (value(sale, "mode") === "PLANCHAS" && numeric(sale, "planchas") > 80) {
+    factor *= Math.max(1, Math.min(4, Math.floor(numeric(sale, "planchaMultiplier") || 1)));
+  }
+
+  const ruleItems = isRecord(rule.items) ? rule.items : {};
+  const requestedItems = isRecord(sale.redemptionItems) ? sale.redemptionItems : {};
+  for (const itemId of redemptionItemIds) {
+    const expected =
+      Math.max(0, Math.floor(Number(ruleItems[itemId]) || 0)) * factor;
+    const requested = Math.max(
+      0,
+      Math.floor(Number(requestedItems[itemId]) || 0),
+    );
+    if (expected !== requested)
+      throw new Error(
+        `El canje no coincide con ${String(rule.name || rule.code)}: ${itemId} debe ser ${expected}.`,
+      );
+  }
+
+  const expectedHasCanje = redemptionItemIds.some(
+    (itemId) => Math.max(0, Number(ruleItems[itemId]) || 0) * factor > 0,
+  );
+  if (expectedHasCanje !== Boolean(value(sale, "bonus")))
+    throw new Error("La venta no conserva la bonificación definida por la escala.");
+
+  return {
+    id: String(rule.id),
+    code: String(rule.code),
+    name: String(rule.name),
+    items: Object.fromEntries(
+      redemptionItemIds.map((itemId) => [
+        itemId,
+        Math.max(0, Math.floor(Number(ruleItems[itemId]) || 0)) * factor,
+      ]),
+    ),
+    accessory: String(rule.accessory || "NINGUNO"),
+    appliedFactor: factor,
+  };
+}
+
 async function authorizedWarehouseActor(req: Request) {
   return authorizedTradeActor(req);
 }
