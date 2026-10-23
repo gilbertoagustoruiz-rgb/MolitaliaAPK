@@ -4675,7 +4675,11 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       ? currentMarketResult.rows[0].data
       : {};
     const punoWithoutCanje = isPunoSouthMarketData(currentMarketData);
-    const canjeEdited = Boolean(input.canjeEdited);
+    const hasCanjeEditedFlag = Object.prototype.hasOwnProperty.call(
+      input,
+      "canjeEdited",
+    );
+    const canjeEdited = input.canjeEdited === true;
     delete input.canjeEdited;
     if (punoWithoutCanje) {
       enforceSaleWithoutCanje(input);
@@ -4753,8 +4757,14 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     );
     const canjePresenceChanged =
       Boolean(value(currentSale.data, "bonus")) !== Boolean(value(input, "bonus"));
+    const inferredCanjeChanged =
+      canjeQuantitiesChanged || canjePresenceChanged;
     const canjeChanged =
-      punoWithoutCanje || (canjeEdited && (canjeQuantitiesChanged || canjePresenceChanged));
+      punoWithoutCanje ||
+      (hasCanjeEditedFlag ? canjeEdited : inferredCanjeChanged);
+    const shouldUpdateCanjeFields =
+      punoWithoutCanje ||
+      (hasCanjeEditedFlag ? canjeEdited : inferredCanjeChanged);
 
     if (canjeChanged) {
       await restoreWarehouseStockMovements(
@@ -4784,13 +4794,13 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       bonus:
         punoWithoutCanje
           ? undefined
-          : canjeEdited
+          : shouldUpdateCanjeFields
             ? value(input, "bonus") || undefined
             : value(currentSale.data, "bonus") || undefined,
       redemptionCount:
         punoWithoutCanje
           ? 0
-          : canjeEdited
+          : shouldUpdateCanjeFields
             ? value(input, "bonus")
               ? Math.max(1, Math.floor(numeric(input, "redemptionCount")))
               : 0
@@ -4798,7 +4808,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       redemptionItems:
         punoWithoutCanje
           ? undefined
-          : canjeEdited
+          : shouldUpdateCanjeFields
             ? value(input, "bonus")
               ? requested
               : undefined
@@ -4809,7 +4819,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         saleMode === "PLANCHAS"
           ? punoWithoutCanje
             ? "NINGUNO"
-            : canjeEdited
+            : shouldUpdateCanjeFields
               ? requestedAccessory
               : value(currentSale.data, "planchaAccessory") || undefined
           : undefined,
@@ -4817,7 +4827,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         saleMode === "PLANCHAS"
           ? punoWithoutCanje
             ? 1
-            : canjeEdited
+            : shouldUpdateCanjeFields
               ? requestedMultiplier
               : Math.max(1, Math.floor(numeric(currentSale.data, "planchaMultiplier")) || 1)
           : undefined,
@@ -4825,7 +4835,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       exchangePhoto:
         punoWithoutCanje
           ? undefined
-          : canjeEdited
+          : shouldUpdateCanjeFields
             ? value(input, "bonus")
               ? value(input, "exchangePhoto") || undefined
               : undefined
