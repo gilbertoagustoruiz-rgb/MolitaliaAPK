@@ -1005,6 +1005,23 @@ async function syncSnapshot(
           }
           if (isNewRecord && name === "sales") {
             if (isPunoSouthSaleRecord(record)) enforceSaleWithoutCanje(record);
+            const validatedRule = await validateSubmittedRedemptionRule(
+              client as unknown as QueryClient,
+              record,
+              dateValue(record),
+            );
+            if (validatedRule) {
+              record.redemptionRuleId = validatedRule.id;
+              record.redemptionRuleCode = validatedRule.code;
+              record.redemptionRuleName = validatedRule.name;
+              record.redemptionRuleSnapshot = {
+                code: validatedRule.code,
+                name: validatedRule.name,
+                items: validatedRule.items,
+                accessory: validatedRule.accessory,
+                appliedFactor: validatedRule.appliedFactor,
+              };
+            }
             requireFinalClientForCanje(record);
           }
           if (isNewRecord && name === "sales" && hasRedemptionConsumption(record)) {
@@ -4629,17 +4646,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     res.status(400).json({ message: "Venta no válida." });
     return;
   }
-  try {
-    requireFinalClientForCanje(input);
-  } catch (error) {
-    res.status(400).json({
-      message:
-        error instanceof Error
-          ? error.message
-          : "Nombre Cliente Final es obligatorio cuando existe canje.",
-    });
-    return;
-  }
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
@@ -4713,6 +4719,8 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       input.marketRegion = value(marketData, "region");
       input.marketDepartment = value(marketData, "department");
       enforceSaleWithoutCanje(input);
+    } else {
+      requireFinalClientForCanje(input);
     }
     const date = new Date(value(input, "date"));
     const units = Number(input.units);
@@ -4770,7 +4778,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       !validMiniFullPlancha &&
       (!Number.isInteger(planchas) ||
         planchas < 1 ||
-        planchas > 80 ||
         units !== planchas * 6)
     )
       throw new Error(
@@ -4809,7 +4816,27 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       (bonus && !Object.values(requested).some((n) => n > 0))
     )
       throw new Error("Los componentes del canje no son válidos.");
+    const validatedRule = punoWithoutCanje
+      ? null
+      : await validateSubmittedRedemptionRule(
+          db as unknown as QueryClient,
+          input,
+          date,
+        );
+    if (validatedRule) {
+      input.redemptionRuleId = validatedRule.id;
+      input.redemptionRuleCode = validatedRule.code;
+      input.redemptionRuleName = validatedRule.name;
+      input.redemptionRuleSnapshot = {
+        code: validatedRule.code,
+        name: validatedRule.name,
+        items: validatedRule.items,
+        accessory: validatedRule.accessory,
+        appliedFactor: validatedRule.appliedFactor,
+      };
+    }
     if (
+      !validatedRule &&
       mode === "UNIDADES" &&
       (requested.AVENA !== count ||
         requested.BATEA ||
@@ -4817,7 +4844,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         requested.SPAGHETTI)
     )
       throw new Error("En unidades corresponde una avena cada 2 unidades.");
-    if (mode === "PLANCHAS" && !punoWithoutCanje) {
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje) {
       const month = Number(
         new Intl.DateTimeFormat("en-US", {
           timeZone: "America/Lima",
