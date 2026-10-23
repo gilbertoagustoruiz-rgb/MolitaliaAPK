@@ -5202,6 +5202,12 @@ function SaleEditModal({
         {
           ...sale,
           canjeEdited,
+          redemptionRuleId: canjeEdited ? undefined : sale.redemptionRuleId,
+          redemptionRuleCode: canjeEdited ? undefined : sale.redemptionRuleCode,
+          redemptionRuleName: canjeEdited ? undefined : sale.redemptionRuleName,
+          redemptionRuleSnapshot: canjeEdited
+            ? undefined
+            : sale.redemptionRuleSnapshot,
           clientId,
           finalClientName: editedBonus
             ? finalClientName.trim()
@@ -12321,7 +12327,9 @@ function PromoterApp({
           planchas,
           skus:
             mode === "UNIDADES"
-              ? [selectedProduct?.sku].filter(Boolean)
+              ? [selectedProduct?.sku].filter(
+                  (value): value is string => Boolean(value),
+                )
               : normalizedPlanchaLines.map((line) => line.sku),
           accessory:
             mode === "PLANCHAS" ? effectivePlanchaAccessory : "NINGUNO",
