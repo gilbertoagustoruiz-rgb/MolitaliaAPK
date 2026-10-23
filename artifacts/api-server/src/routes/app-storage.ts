@@ -1186,9 +1186,15 @@ async function validateSubmittedRedemptionRule(
       0,
       Math.floor(Number(requestedItems[itemId]) || 0),
     );
-    if (expected !== requested)
+    const optionalAccessory = itemId === "MANDIL" || itemId === "BATEA";
+    const validQuantity = optionalAccessory
+      ? requested >= 0 && requested <= expected
+      : requested === expected;
+    if (!validQuantity)
       throw new Error(
-        `El canje no coincide con ${String(rule.name || rule.code)}: ${itemId} debe ser ${expected}.`,
+        optionalAccessory
+          ? `El canje no coincide con ${String(rule.name || rule.code)}: ${itemId} no puede superar ${expected}.`
+          : `El canje no coincide con ${String(rule.name || rule.code)}: ${itemId} debe ser ${expected}.`,
       );
   }
 
