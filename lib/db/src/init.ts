@@ -424,6 +424,68 @@ export async function ensureDatabaseSchema() {
       )
     ON CONFLICT (id) DO NOTHING;
 
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES
+      (
+        'RR-ESC-003-2-3','ESCALA_3_2_3','Escala 3 · 2 a 3 planchas','PLANCHAS','PLANCHAS',2,3,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":6,"SPAGHETTI":2}'::jsonb,31,'ACTIVO',
+        '{"description":"Compatibilidad con dinámica anterior para 2-3 planchas"}'::jsonb
+      ),
+      (
+        'RR-ESC-004-5-7','ESCALA_4_5_7','Escala 4 · 5 a 7 planchas','PLANCHAS','PLANCHAS',5,7,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":15,"SPAGHETTI":4}'::jsonb,41,'ACTIVO',
+        '{"description":"Compatibilidad con dinámica anterior para 5-7 planchas"}'::jsonb
+      ),
+      (
+        'RR-ESC-004-8-9','ESCALA_4_8_9','Escala 4 · 8 a 9 planchas','PLANCHAS','PLANCHAS',8,9,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":24,"SPAGHETTI":6}'::jsonb,42,'ACTIVO',
+        '{"description":"Compatibilidad con dinámica anterior para 8-9 planchas"}'::jsonb
+      ),
+      (
+        'RR-ESC-005-11-13','ESCALA_5_11_13','Escala 5 · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":27,"SPAGHETTI":11}'::jsonb,53,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-11-13-M','ESCALA_5_11_13_MANDIL','Escala 5 · 11 a 13 + Mandil','PLANCHAS','PLANCHAS',11,13,false,
+        false,null,ARRAY[]::text[],'MANDIL','{"AVENA":27,"SPAGHETTI":11,"MANDIL":1}'::jsonb,54,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-11-13-B','ESCALA_5_11_13_BATEA','Escala 5 · 11 a 13 + Batea','PLANCHAS','PLANCHAS',11,13,false,
+        false,null,ARRAY[]::text[],'BATEA','{"AVENA":27,"SPAGHETTI":11,"BATEA":1}'::jsonb,55,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-14-19','ESCALA_5_14_19','Escala 5 · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":36,"SPAGHETTI":13}'::jsonb,56,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-14-19-M','ESCALA_5_14_19_MANDIL','Escala 5 · 14 a 19 + Mandil','PLANCHAS','PLANCHAS',14,19,false,
+        false,null,ARRAY[]::text[],'MANDIL','{"AVENA":36,"SPAGHETTI":13,"MANDIL":1}'::jsonb,57,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-14-19-B','ESCALA_5_14_19_BATEA','Escala 5 · 14 a 19 + Batea','PLANCHAS','PLANCHAS',14,19,false,
+        false,null,ARRAY[]::text[],'BATEA','{"AVENA":36,"SPAGHETTI":13,"BATEA":1}'::jsonb,58,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-20-79','ESCALA_5_20_79','Escala 5 · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":48,"SPAGHETTI":20}'::jsonb,59,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-20-79-M','ESCALA_5_20_79_MANDIL','Escala 5 · 20 a 79 + Mandil','PLANCHAS','PLANCHAS',20,79,false,
+        false,null,ARRAY[]::text[],'MANDIL','{"AVENA":48,"SPAGHETTI":20,"MANDIL":2}'::jsonb,59,'ACTIVO','{}'::jsonb
+      ),
+      (
+        'RR-ESC-005-20-79-B','ESCALA_5_20_79_BATEA','Escala 5 · 20 a 79 + Batea','PLANCHAS','PLANCHAS',20,79,false,
+        false,null,ARRAY[]::text[],'BATEA','{"AVENA":48,"SPAGHETTI":20,"BATEA":2}'::jsonb,59,'ACTIVO','{}'::jsonb
+      )
+    ON CONFLICT (id) DO NOTHING;
+
+    UPDATE redemption_rules
+    SET min_exclusive=false, updated_at=now()
+    WHERE id IN ('RR-ESC-006','RR-ESC-006-M','RR-ESC-006-B')
+      AND min_exclusive=true;
+
     CREATE INDEX IF NOT EXISTS idx_redemption_rules_active ON redemption_rules(status,priority);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_name ON warehouses(upper(name));
     CREATE INDEX IF NOT EXISTS idx_warehouse_movements_warehouse_date ON warehouse_movements(warehouse_id,movement_date DESC);
