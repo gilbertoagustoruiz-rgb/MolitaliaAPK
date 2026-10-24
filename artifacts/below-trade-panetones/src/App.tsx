@@ -12420,16 +12420,18 @@ function PromoterApp({
   const requiredRedemptions =
     punoWithoutCanje
       ? ({} as Partial<RedemptionStock>)
-      : masterRuleMatch
-        ? masterRuleMatch.items
-        : redemptionRulesLoaded
-          ? ({} as Partial<RedemptionStock>)
-          : mode === "PLANCHAS"
-            ? legacyPlanchaRequirements
-            : multiplyRedemptionRequirements(
-                selectedBonusProduct?.components || {},
-                canjeCount,
-              );
+      : miniHalfPlanchaCanje
+        ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+        : masterRuleMatch
+          ? masterRuleMatch.items
+          : redemptionRulesLoaded
+            ? ({} as Partial<RedemptionStock>)
+            : mode === "PLANCHAS"
+              ? legacyPlanchaRequirements
+              : multiplyRedemptionRequirements(
+                  selectedBonusProduct?.components || {},
+                  canjeCount,
+                );
   const bonus =
     requiredRedemptionEntries(requiredRedemptions).length
       ? canjeRequirementsLabel(requiredRedemptions)
