@@ -2575,7 +2575,7 @@ function resolveRedemptionRule(
     rule.quantityBasis === "UNITS" ? input.units : input.planchas,
   );
   const tradeFactor =
-    input.mode === "PLANCHAS" && input.planchas > 80
+    input.mode === "PLANCHAS" && input.planchas >= 80
       ? Math.max(1, Math.min(4, Number(input.multiplier) || 1))
       : 1;
   const appliedFactor = repeatFactor * tradeFactor;
