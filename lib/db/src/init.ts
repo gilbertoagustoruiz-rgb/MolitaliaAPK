@@ -386,9 +386,9 @@ export async function ensureDatabaseSchema() {
       ),
       (
         'RR-ESC-002','ESCALA_2','Escala 2','UNIDADES','UNITS',1,2,false,
-        true,1,ARRAY['COSTA-800','COSTA-BOLSA-800','TODINNO-TODINNITO','PASQUALINO-800','TODINNO-900-BOLSA-TODINNITO','TODINNO-LATA-900'],
+        true,1,ARRAY[]::text[],
         'NINGUNO','{"AVENA":1}'::jsonb,20,'ACTIVO',
-        '{"description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje"}'::jsonb
+        '{"description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje; aplica a todos los productos del módulo Unidades"}'::jsonb
       ),
       (
         'RR-ESC-003','ESCALA_3','Escala 3','PLANCHAS','PLANCHAS',1,1,false,
@@ -492,11 +492,12 @@ export async function ensureDatabaseSchema() {
         min_exclusive=false,
         repeatable=true,
         step_quantity=1,
+        eligible_skus=ARRAY[]::text[],
         items='{"AVENA":1}'::jsonb,
         data=jsonb_set(
           COALESCE(data,'{}'::jsonb),
           '{description}',
-          to_jsonb('1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje'::text),
+          to_jsonb('1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje; aplica a todos los productos del módulo Unidades'::text),
           true
         ),
         updated_at=now()
