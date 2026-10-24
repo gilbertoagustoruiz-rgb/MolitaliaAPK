@@ -1175,7 +1175,7 @@ async function validateSubmittedRedemptionRule(
     if (step <= 0) throw new Error("La escala repetible no tiene un paso válido.");
     factor = Math.max(1, Math.floor(quantity / step));
   }
-  if (value(sale, "mode") === "PLANCHAS" && numeric(sale, "planchas") > 80) {
+  if (value(sale, "mode") === "PLANCHAS" && numeric(sale, "planchas") >= 80) {
     factor *= Math.max(1, Math.min(4, Math.floor(numeric(sale, "planchaMultiplier") || 1)));
   }
 
