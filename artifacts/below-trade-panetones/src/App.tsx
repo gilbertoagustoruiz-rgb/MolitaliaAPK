@@ -510,6 +510,43 @@ const MINI_HALF_PLANCHA_SKUS = new Set([
   "MINI-COSTA-MINIONS-80",
   "MINI-COSTA-JURASSIC-80",
 ]);
+
+function isHistoricalMiniHalfPlanchaCanje(sale: Sale) {
+  if (sale.bonus || sale.mode !== "PLANCHAS") return false;
+  if (
+    normalizeLocationValue(sale.marketRegion) === "SUR" &&
+    normalizeLocationValue(sale.marketDepartment) === "PUNO"
+  )
+    return false;
+  const lines = (sale.planchaLines || []).filter(
+    (line) => Number(line.units) > 0,
+  );
+  if (!lines.length) return false;
+  const totalMiniUnits = lines.reduce(
+    (sum, line) => sum + Math.max(0, Number(line.units) || 0),
+    0,
+  );
+  return (
+    totalMiniUnits === 24 &&
+    lines.every((line) => MINI_HALF_PLANCHA_SKUS.has(String(line.sku || "").trim()))
+  );
+}
+
+function effectiveSaleBonus(sale: Sale) {
+  return sale.bonus || (isHistoricalMiniHalfPlanchaCanje(sale) ? "2 Avena" : undefined);
+}
+
+function effectiveSaleRedemptionCount(sale: Sale) {
+  return effectiveSaleBonus(sale)
+    ? sale.redemptionCount || 1
+    : 0;
+}
+
+function effectiveSaleRedemptionRequirements(sale: Sale) {
+  return isHistoricalMiniHalfPlanchaCanje(sale)
+    ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+    : saleRedemptionRequirements(sale);
+}
 function isMiniHalfPlanchaProduct(sku?: string, label?: string) {
   if (MINI_HALF_PLANCHA_SKUS.has(String(sku || "").trim())) return true;
   const normalized = `${sku || ""} ${label || ""}`
@@ -7861,7 +7898,7 @@ function CoordinatorApp({
   const allowedMovements = movements.filter((item) =>
     allowedMarketIds.has(item.marketId),
   );
-  const allowedCanjes = allowedSales.filter((sale) => Boolean(sale.bonus));
+  const allowedCanjes = allowedSales.filter((sale) => Boolean(effectiveSaleBonus(sale)));
   const allowedDegustaciones = allowedMovements.filter(
     (movement) => movement.kind === "DEGUSTACION",
   );
@@ -7987,8 +8024,8 @@ function CoordinatorApp({
         marketMap[sale.marketId]?.name || "",
         clientMap[sale.clientId]?.name || "",
         sale.redemptionRuleName || sale.redemptionRuleCode || "Histórico",
-        sale.bonus || "",
-        sale.redemptionCount || 1,
+        effectiveSaleBonus(sale) || "",
+        effectiveSaleRedemptionCount(sale) || 1,
         photoExportLink(sale.exchangePhoto),
       ]),
     );
@@ -8172,7 +8209,7 @@ function CoordinatorApp({
                 <article className="record" key={sale.id}>
                   <span className="record-icon"><Gift /></span>
                   <div className="record-main">
-                    <strong>{sale.bonus}</strong>
+                    <strong>{effectiveSaleBonus(sale)}</strong>
                     <small>{userMap[sale.promoterId]?.name || "Promotor"} · {clientMap[sale.clientId]?.name || "Cliente"}</small>
                     <em>{marketMap[sale.marketId]?.name || "Mercado"} · {formatDate(sale.date)}</em>
                   </div>
@@ -9344,8 +9381,8 @@ function AnalystApp({
           (sale.amountSoles ?? 0).toFixed(2),
           sale.redemptionRuleName || "",
           sale.redemptionRuleCode || "",
-          sale.bonus || "Sin canje",
-          sale.redemptionCount ?? (sale.bonus ? 1 : 0),
+          effectiveSaleBonus(sale) || "Sin canje",
+          effectiveSaleRedemptionCount(sale),
           sale.comment || "",
           userTastingStock(
             promoter || {
@@ -10628,20 +10665,20 @@ function AnalystApp({
   });
   const adminCanjes: AdminCanje[] = [
     ...sales
-      .filter((sale) => Boolean(sale.bonus))
+      .filter((sale) => Boolean(effectiveSaleBonus(sale)))
       .map((sale) => ({
         id: `CAN-${sale.id}`,
         marketId: sale.marketId,
         kind: "CANJE" as const,
         itemId: undefined,
-        quantity: sale.redemptionCount || 1,
+        quantity: effectiveSaleRedemptionCount(sale) || 1,
         actorId: sale.promoterId,
         actorName:
           users.find((current) => current.id === sale.promoterId)?.name ||
           "Promotor",
         promoterId: sale.promoterId,
-        canjeProductLabel: sale.bonus,
-        canjeComponents: saleRedemptionRequirements(sale),
+        canjeProductLabel: effectiveSaleBonus(sale),
+        canjeComponents: effectiveSaleRedemptionRequirements(sale),
         date: sale.date,
         status: sale.status,
         source: "sale" as const,
@@ -11413,14 +11450,14 @@ function AnalystApp({
                           </small>
                         </span>
                         <span>
-                          {sale.bonus ? (
+                          {effectiveSaleBonus(sale) ? (
                             <b className="sales-flag yes">SÍ</b>
                           ) : (
                             <b className="sales-flag no">NO</b>
                           )}
                           <small>
-                            {sale.bonus
-                              ? `${sale.redemptionCount ?? 1} · ${sale.bonus}`
+                            {effectiveSaleBonus(sale)
+                              ? `${effectiveSaleRedemptionCount(sale) || 1} · ${effectiveSaleBonus(sale)}`
                               : "Sin canje"}
                           </small>
                         </span>
