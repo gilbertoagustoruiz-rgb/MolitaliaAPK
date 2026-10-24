@@ -385,10 +385,10 @@ export async function ensureDatabaseSchema() {
         '{"description":"24 unidades mini = 1/2 plancha"}'::jsonb
       ),
       (
-        'RR-ESC-002','ESCALA_2','Escala 2','UNIDADES','UNITS',2,null,false,
-        true,2,ARRAY['COSTA-800','COSTA-BOLSA-800','TODINNO-TODINNITO','PASQUALINO-800','TODINNO-900-BOLSA-TODINNITO','TODINNO-LATA-900'],
+        'RR-ESC-002','ESCALA_2','Escala 2','UNIDADES','UNITS',1,2,false,
+        true,1,ARRAY['COSTA-800','COSTA-BOLSA-800','TODINNO-TODINNITO','PASQUALINO-800','TODINNO-900-BOLSA-TODINNITO','TODINNO-LATA-900'],
         'NINGUNO','{"AVENA":1}'::jsonb,20,'ACTIVO',
-        '{"description":"Cada 2 unidades elegibles"}'::jsonb
+        '{"description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje"}'::jsonb
       ),
       (
         'RR-ESC-003','ESCALA_3','Escala 3','PLANCHAS','PLANCHAS',1,1,false,
@@ -485,6 +485,22 @@ export async function ensureDatabaseSchema() {
     SET min_exclusive=false, updated_at=now()
     WHERE id IN ('RR-ESC-006','RR-ESC-006-M','RR-ESC-006-B')
       AND min_exclusive=true;
+
+    UPDATE redemption_rules
+    SET min_quantity=1,
+        max_quantity=2,
+        min_exclusive=false,
+        repeatable=true,
+        step_quantity=1,
+        items='{"AVENA":1}'::jsonb,
+        data=jsonb_set(
+          COALESCE(data,'{}'::jsonb),
+          '{description}',
+          to_jsonb('1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje'::text),
+          true
+        ),
+        updated_at=now()
+    WHERE id='RR-ESC-002';
 
     CREATE INDEX IF NOT EXISTS idx_redemption_rules_active ON redemption_rules(status,priority);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_warehouses_name ON warehouses(upper(name));
