@@ -2675,7 +2675,7 @@ function bonusProductsFor(
 ) {
   const activeProducts = activeCanjeProducts(date, stock);
   if (mode === "UNIDADES")
-    return total >= 2
+    return total >= 1 && total <= 2
       ? canjeProducts.filter((product) => product.id === "CANJE_AVENA_1")
       : [];
   if (planchas >= 80) {
@@ -12362,7 +12362,7 @@ function PromoterApp({
     bonusProducts.find((product) => product.id === selectedBonusProductId) ||
     bonusProducts[0];
   const automaticUnitCanjeCount =
-    mode === "UNIDADES" ? Math.floor(unitQty / 2) : 0;
+    mode === "UNIDADES" && unitQty >= 1 && unitQty <= 2 ? unitQty : 0;
   const canjeCount = masterRuleMatch
     ? mode === "UNIDADES"
       ? masterRuleMatch.appliedFactor
