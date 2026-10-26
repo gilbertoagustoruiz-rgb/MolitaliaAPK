@@ -12122,6 +12122,7 @@ function PromoterApp({
   const [markPhoto, setMarkPhoto] = useState<File | null>(null);
   const [markPhotoUrl, setMarkPhotoUrl] = useState("");
   const [markPhotoUploading, setMarkPhotoUploading] = useState(false);
+  const [attendanceSaving, setAttendanceSaving] = useState(false);
   const [tastingExitPrompt, setTastingExitPrompt] = useState(false);
   const [search, setSearch] = useState("");
   const [modeFilter, setModeFilter] = useState<
@@ -12948,124 +12949,52 @@ function PromoterApp({
   const finalizeAttendance = async (
     usage = { paneton900g: 0, paneton85g: 0, contacts: 0 },
   ) => {
-    const tasting900g = Math.max(0, Math.trunc(usage.paneton900g || 0));
-    const tasting85g = Math.max(0, Math.trunc(usage.paneton85g || 0));
-    const tastingUsed = tasting900g + tasting85g;
-    const contacts = tasting900g * 80 + tasting85g * 10;
-    if (tasting900g > 2 || tasting85g > 8) {
-      notify("La degustación supera el máximo permitido por presentación.", true);
-      return;
-    }
-    if (tasting900g > warehouseTastingStock.PANETON_900G || tasting85g > warehouseTastingStock.PANETON_85G) {
-      notify(`Stock insuficiente en ${selectedWarehouse?.name || "el Almacén del Mercado"} para la degustación indicada.`, true);
-      return;
-    }
-    const now = new Date();
-    const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`;
-    const type = markType;
-    const attendanceClientId = markClientId;
-    const item: Attendance = {
-      id,
-      promoterId: user.id,
-      promoterDni: user.dni,
-      promoterRole: user.role,
-      promoterRoleLabel: user.roleLabel || user.role,
-      clientId: attendanceClientId,
-      marketId: selectedMarketId,
-      type,
-      photo: markPhotoUrl,
-      date: now.toISOString(),
-      status: syncStatus(),
-    };
-    void captureTrackingPoint(
-      user,
-      type === "ENTRADA" ? "ENTRADA" : "SALIDA",
-      selectedMarketId,
-      attendanceClientId,
-      id,
-    );
-    if (type === "SALIDA" && tastingUsed > 0) {
-      void captureTrackingPoint(
-        user,
-        "DEGUSTACION",
-        selectedMarketId,
-        attendanceClientId,
-        `CLOSE-${id}`,
-      );
-    }
-    const next = [item, ...attendance];
-    setAttendance(next);
-    writeStore("bt-attendance", next);
-    if (type === "SALIDA") {
-      const tastingMovements: InventoryMovement[] = [
-        ...(tasting900g > 0 ? [{
-          id: `DEG-${id}-900G`,
-          marketId: selectedMarketId,
-          kind: "DEGUSTACION" as const,
-          quantity: tasting900g,
-          actorId: user.id,
-          actorName: user.name,
-          promoterId: user.id,
-          degustacionProductId: "PANETON_900G" as const,
-          degustacionProductLabel: "Panetón 900 g",
-          date: now.toISOString(),
-          status: syncStatus(),
-        }] : []),
-        ...(tasting85g > 0 ? [{
-          id: `DEG-${id}-85G`,
-          marketId: selectedMarketId,
-          kind: "DEGUSTACION" as const,
-          quantity: tasting85g,
-          actorId: user.id,
-          actorName: user.name,
-          promoterId: user.id,
-          degustacionProductId: "PANETON_85G" as const,
-          degustacionProductLabel: "Panetón 85 g",
-          date: now.toISOString(),
-          status: syncStatus(),
-        }] : []),
-      ];
-      const nextMovements = [...tastingMovements, ...movements];
-      setMovements(nextMovements);
-      writeStore("bt-inventory-movements", nextMovements);
-      if (LOCAL_WAREHOUSE_DEMO && selectedWarehouse) {
-        const nextWarehouses = warehouses.map((warehouse) =>
-          warehouse.id === selectedWarehouse.id
-            ? {
-                ...warehouse,
-                stock: {
-                  ...warehouse.stock,
-                  PANETON_900G: Math.max(0, Number(warehouse.stock.PANETON_900G) - tasting900g),
-                  PANETON_85G: Math.max(0, Number(warehouse.stock.PANETON_85G) - tasting85g),
-                },
-                updatedAt: now.toISOString(),
-              }
-            : warehouse,
-        );
-        setWarehouses(nextWarehouses);
-        writeStore("bt-demo-warehouses", nextWarehouses);
+    if (attendanceSaving) return;
+    setAttendanceSaving(true);
+    try {
+      const tasting900g = Math.max(0, Math.trunc(usage.paneton900g || 0));
+      const tasting85g = Math.max(0, Math.trunc(usage.paneton85g || 0));
+      const tastingUsed = tasting900g + tasting85g;
+      const contacts = tasting900g * 80 + tasting85g * 10;
+      if (tasting900g > 2 || tasting85g > 8) {
+        notify("La degustación supera el máximo permitido por presentación.", true);
+        return;
       }
-      const closure: SessionClosure = {
-        id: `CLOSE-${id}`,
+      if (
+        tasting900g > warehouseTastingStock.PANETON_900G ||
+        tasting85g > warehouseTastingStock.PANETON_85G
+      ) {
+        notify(
+          `Stock insuficiente en ${selectedWarehouse?.name || "el Almacén del Mercado"} para la degustación indicada.`,
+          true,
+        );
+        return;
+      }
+
+      const now = new Date();
+      const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`;
+      const type = markType;
+      const attendanceClientId = markClientId;
+      const item: Attendance = {
+        id,
         promoterId: user.id,
+        promoterDni: user.dni,
         promoterRole: user.role,
         promoterRoleLabel: user.roleLabel || user.role,
-        marketId: selectedMarketId,
         clientId: attendanceClientId,
-        tastingUsed,
-        tasting900g,
-        tasting85g,
-        leads: contacts,
-        closureType: "MANUAL",
+        marketId: selectedMarketId,
+        type,
+        photo: markPhotoUrl,
         date: now.toISOString(),
         status: syncStatus(),
       };
-      const closures = readStore<SessionClosure[]>("bt-session-closures", []);
-      writeStore("bt-session-closures", [closure, ...closures]);
-    }
-    let confirmedItem: Attendance | null = null;
-    if (navigator.onLine) {
-      try {
+
+      let savedItem: Attendance = item;
+      let confirmedOnline = false;
+
+      // Online: PostgreSQL confirma primero. No se agrega optimistamente al
+      // estado local para evitar una marcación fantasma si el backend rechaza.
+      if (navigator.onLine) {
         const response = await fetch(APP_STORAGE_SYNC, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -13083,51 +13012,161 @@ function PromoterApp({
           throw new Error(
             payload.message || "No se pudo sincronizar la marcación.",
           );
-        confirmedItem =
+
+        const confirmedItem =
           payload.snapshot?.attendance?.find(
             (serverItem) => serverItem.id === item.id,
           ) || null;
         if (!confirmedItem || confirmedItem.status !== "SINCRONIZADA")
-          throw new Error("PostgreSQL no confirmó la marcación.");
+          throw new Error(
+            "PostgreSQL no confirmó la marcación. Actualiza la aplicación e inténtalo nuevamente.",
+          );
+        savedItem = confirmedItem;
+        confirmedOnline = true;
+      }
 
-        const confirmedAttendance = next.map((currentItem) =>
-          currentItem.id === item.id ? confirmedItem! : currentItem,
-        );
-        setAttendance(confirmedAttendance);
-        writeStore("bt-attendance", confirmedAttendance);
-      } catch (error) {
-        notify(
-          error instanceof Error
-            ? `Marcación guardada localmente. Pendiente de sincronización: ${error.message}`
-            : "Marcación guardada localmente. Pendiente de sincronización.",
-          true,
+      const next = [
+        savedItem,
+        ...attendance.filter((currentItem) => currentItem.id !== savedItem.id),
+      ];
+      setAttendance(next);
+      writeStore("bt-attendance", next);
+
+      void captureTrackingPoint(
+        user,
+        type === "ENTRADA" ? "ENTRADA" : "SALIDA",
+        selectedMarketId,
+        attendanceClientId,
+        id,
+      );
+
+      if (type === "SALIDA" && tastingUsed > 0) {
+        void captureTrackingPoint(
+          user,
+          "DEGUSTACION",
+          selectedMarketId,
+          attendanceClientId,
+          `CLOSE-${id}`,
         );
       }
-    }
 
-    setMarkPhoto(null);
-    setMarkPhotoUrl("");
-    setMarkType(type === "ENTRADA" ? "SALIDA" : "ENTRADA");
-    setView("LISTA");
+      if (type === "SALIDA") {
+        const tastingMovements: InventoryMovement[] = [
+          ...(tasting900g > 0
+            ? [
+                {
+                  id: `DEG-${id}-900G`,
+                  marketId: selectedMarketId,
+                  kind: "DEGUSTACION" as const,
+                  quantity: tasting900g,
+                  actorId: user.id,
+                  actorName: user.name,
+                  promoterId: user.id,
+                  degustacionProductId: "PANETON_900G" as const,
+                  degustacionProductLabel: "Panetón 900 g",
+                  date: now.toISOString(),
+                  status: syncStatus(),
+                },
+              ]
+            : []),
+          ...(tasting85g > 0
+            ? [
+                {
+                  id: `DEG-${id}-85G`,
+                  marketId: selectedMarketId,
+                  kind: "DEGUSTACION" as const,
+                  quantity: tasting85g,
+                  actorId: user.id,
+                  actorName: user.name,
+                  promoterId: user.id,
+                  degustacionProductId: "PANETON_85G" as const,
+                  degustacionProductLabel: "Panetón 85 g",
+                  date: now.toISOString(),
+                  status: syncStatus(),
+                },
+              ]
+            : []),
+        ];
+        const nextMovements = [...tastingMovements, ...movements];
+        setMovements(nextMovements);
+        writeStore("bt-inventory-movements", nextMovements);
 
-    if (confirmedItem) {
+        if (LOCAL_WAREHOUSE_DEMO && selectedWarehouse) {
+          const nextWarehouses = warehouses.map((warehouse) =>
+            warehouse.id === selectedWarehouse.id
+              ? {
+                  ...warehouse,
+                  stock: {
+                    ...warehouse.stock,
+                    PANETON_900G: Math.max(
+                      0,
+                      Number(warehouse.stock.PANETON_900G) - tasting900g,
+                    ),
+                    PANETON_85G: Math.max(
+                      0,
+                      Number(warehouse.stock.PANETON_85G) - tasting85g,
+                    ),
+                  },
+                  updatedAt: now.toISOString(),
+                }
+              : warehouse,
+          );
+          setWarehouses(nextWarehouses);
+          writeStore("bt-demo-warehouses", nextWarehouses);
+        }
+
+        const closure: SessionClosure = {
+          id: `CLOSE-${id}`,
+          promoterId: user.id,
+          promoterRole: user.role,
+          promoterRoleLabel: user.roleLabel || user.role,
+          marketId: selectedMarketId,
+          clientId: attendanceClientId,
+          tastingUsed,
+          tasting900g,
+          tasting85g,
+          leads: contacts,
+          closureType: "MANUAL",
+          date: now.toISOString(),
+          status: syncStatus(),
+        };
+        const currentClosures = readStore<SessionClosure[]>(
+          "bt-session-closures",
+          [],
+        );
+        writeStore("bt-session-closures", [closure, ...currentClosures]);
+      }
+
+      setMarkPhoto(null);
+      setMarkPhotoUrl("");
+      setMarkType(type === "ENTRADA" ? "SALIDA" : "ENTRADA");
+      setView("LISTA");
+
       notify(
-        type === "SALIDA"
-          ? "Salida sincronizada correctamente. Sesión finalizada."
-          : "Entrada sincronizada correctamente",
+        confirmedOnline
+          ? type === "SALIDA"
+            ? "Salida sincronizada correctamente. Sesión finalizada."
+            : "Entrada sincronizada correctamente"
+          : type === "SALIDA"
+            ? "Salida guardada en el dispositivo. Se sincronizará al recuperar conexión."
+            : "Entrada guardada en el dispositivo. Se sincronizará al recuperar conexión.",
+        !confirmedOnline,
       );
-    } else if (!navigator.onLine) {
+
+      if (type === "SALIDA") onLogout();
+    } catch (error) {
       notify(
-        type === "SALIDA"
-          ? "Salida guardada en el dispositivo. Se sincronizará al recuperar conexión."
-          : "Entrada guardada en el dispositivo. Se sincronizará al recuperar conexión.",
+        error instanceof Error
+          ? `No se guardó la marcación: ${error.message}`
+          : "No se guardó la marcación.",
         true,
       );
+    } finally {
+      setAttendanceSaving(false);
     }
-
-    if (type === "SALIDA") onLogout();
   };
   const saveAttendance = () => {
+    if (attendanceSaving) return;
     if (!markClientId || !markPhoto || !markPhotoUrl || markPhotoUploading) {
       notify(
         markPhotoUploading
@@ -13859,7 +13898,12 @@ function PromoterApp({
                           <span>
                             <strong>
                               {sale.mode === "PLANCHAS"
-                                ? `${sale.planchas} plancha(s) · Mix de marcas`
+                                ? `${sale.planchas} plancha(s) · ${
+                                    sale.planchaType === "MIX" ||
+                                    (!sale.planchaType && (sale.planchaLines?.length || 0) > 1)
+                                      ? "Mix de marcas"
+                                      : "Plancha Flat"
+                                  }`
                                 : `${sale.units} unidad(es)`}
                             </strong>
                             <small>
@@ -14092,12 +14136,13 @@ function PromoterApp({
                     !markClientId ||
                     !markPhotoUrl ||
                     markPhotoUploading ||
+                    attendanceSaving ||
                     attendanceLimitReached(markType)
                   }
                   onClick={saveAttendance}
                   testId="button-save-attendance"
                 >
-                  <CheckCircle2 /> Guardar marcación
+                  <CheckCircle2 /> {attendanceSaving ? "Guardando..." : "Guardar marcación"}
                 </Btn>
               </div>
             </section>
