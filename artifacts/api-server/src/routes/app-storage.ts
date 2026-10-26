@@ -845,6 +845,14 @@ async function validateNewAttendance(
 
   const campaignDay = campaignDateParts(date).day;
   const bounds = campaignDayBounds(campaignDay);
+
+  // Serializa las marcaciones del mismo promotor/mercado/día para evitar
+  // dos ENTRADA o dos SALIDA simultáneas con IDs distintos.
+  await db.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+    [`attendance:${promoterId}:${marketId}:${campaignDay}`],
+  );
+
   const count = await db.query(
     `SELECT COUNT(*)::int AS count
        FROM attendance
@@ -860,28 +868,17 @@ async function validateNewAttendance(
       `Ya existe el máximo de 3 ${type === "ENTRADA" ? "entradas" : "salidas"} para ese día.`,
     );
 
-  const isRotative = role === "PROMOTOR ROTATIVO";
   const latest = await db.query(
-    isRotative
-      ? `SELECT event_type
-           FROM attendance
-          WHERE promoter_id=$1
-            AND market_id=$2
-            AND event_date >= $3::timestamptz
-            AND event_date < $4::timestamptz
-            AND id<>$5
-          ORDER BY event_date DESC,created_at DESC
-          LIMIT 1`
-      : `SELECT event_type
-           FROM attendance
-          WHERE promoter_id=$1
-            AND client_id=$2
-            AND event_date >= $3::timestamptz
-            AND event_date < $4::timestamptz
-            AND id<>$5
-          ORDER BY event_date DESC,created_at DESC
-          LIMIT 1`,
-    [promoterId, isRotative ? marketId : clientId, bounds.start, date.toISOString(), value(record, "id")],
+    `SELECT event_type
+       FROM attendance
+      WHERE promoter_id=$1
+        AND market_id=$2
+        AND event_date >= $3::timestamptz
+        AND event_date < $4::timestamptz
+        AND id<>$5
+      ORDER BY event_date DESC,created_at DESC
+      LIMIT 1`,
+    [promoterId, marketId, bounds.start, date.toISOString(), value(record, "id")],
   );
   const latestType = String(latest.rows[0]?.event_type || "");
   if (type === "SALIDA" && latestType !== "ENTRADA")
