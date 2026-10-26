@@ -3194,8 +3194,29 @@ async function validateTradeSale(
 router.get("/app-storage/trade-approvals", async (_req, res): Promise<void> => {
   try {
     const result = await pool.query(
-      "SELECT data,status,requested_at,resolved_at,resolved_by,resolution_comment FROM trade_approvals ORDER BY requested_at DESC,created_at DESC",
+      `WITH pending AS (
+         SELECT data,status,requested_at,resolved_at,resolved_by,resolution_comment,created_at
+           FROM trade_approvals
+          WHERE status='PENDIENTE'
+       ),
+       recent_resolved AS (
+         SELECT data,status,requested_at,resolved_at,resolved_by,resolution_comment,created_at
+           FROM trade_approvals
+          WHERE status<>'PENDIENTE'
+          ORDER BY requested_at DESC,created_at DESC
+          LIMIT 200
+       )
+       SELECT data,status,requested_at,resolved_at,resolved_by,resolution_comment
+         FROM (
+           SELECT * FROM pending
+           UNION ALL
+           SELECT * FROM recent_resolved
+         ) approvals
+        ORDER BY CASE WHEN status='PENDIENTE' THEN 0 ELSE 1 END,
+                 requested_at DESC,
+                 created_at DESC`,
     );
+    res.set("Cache-Control", "private, max-age=15");
     res.json({
       approvals: result.rows.map((row) => ({
         ...(isRecord(row.data) ? row.data : {}),

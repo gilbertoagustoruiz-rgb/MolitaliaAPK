@@ -9168,6 +9168,7 @@ function AnalystApp({
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
+  const tradeApprovalsRequestInFlight = useRef(false);
   const [marketWarehouses, setMarketWarehouses] = useState<Warehouse[]>([]);
   useEffect(() => {
     void fetch("/api/app-storage/warehouses")
@@ -9180,6 +9181,8 @@ function AnalystApp({
   }, []);
   const marketWarehouseMap = Object.fromEntries(marketWarehouses.map((warehouse) => [warehouse.id, warehouse.name]));
   const loadTradeApprovals = async () => {
+    if (tradeApprovalsRequestInFlight.current) return;
+    tradeApprovalsRequestInFlight.current = true;
     setTradeApprovalsLoading(true);
     try {
       const response = await fetch("/api/app-storage/trade-approvals");
@@ -9189,12 +9192,13 @@ function AnalystApp({
     } catch (error) {
       notify(error instanceof Error ? error.message : "No se pudieron cargar las aprobaciones Trade.", true);
     } finally {
+      tradeApprovalsRequestInFlight.current = false;
       setTradeApprovalsLoading(false);
     }
   };
   useEffect(() => {
     void loadTradeApprovals();
-    const timer = window.setInterval(() => void loadTradeApprovals(), 15000);
+    const timer = window.setInterval(() => void loadTradeApprovals(), 60000);
     return () => window.clearInterval(timer);
   }, []);
   const resolveTradeApproval = async (approval: TradeApproval, decision: "APROBADA" | "RECHAZADA") => {
