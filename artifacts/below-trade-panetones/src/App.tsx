@@ -1004,16 +1004,46 @@ function normalizedProducts(
   });
 }
 
+function safeStorageGet(key: string) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    return window.safeStorageGet(key);
+  } catch {
+    return null;
+  }
+}
+function safeStorageSet(key: string, value: string) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    window.safeStorageSet(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function safeStorageRemove(key: string) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    window.safeStorageRemove(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function readStore<T>(key: string, fallback: T): T {
   try {
-    const value = localStorage.getItem(key);
+    const value = safeStorageGet(key);
     return value ? (JSON.parse(value) as T) : fallback;
   } catch {
     return fallback;
   }
 }
 function writeStore(key: string, value: unknown) {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    return safeStorageSet(key, JSON.stringify(value));
+  } catch {
+    return false;
+  }
 }
 function assignmentMatchesUser(assignment: PromoterAssignment, user: AppUser) {
   return (
@@ -1331,34 +1361,34 @@ const CATALOG_REVISION_STORE_KEY = "bt-catalog-revision";
 const USERS_CLEARED_KEY = "bt-users-cleared-v1";
 function clearTestDataOnce() {
   if (
-    typeof localStorage === "undefined" ||
-    localStorage.getItem(TEST_DATA_CLEARED_KEY)
+    
+    safeStorageGet(TEST_DATA_CLEARED_KEY)
   )
     return;
-  APP_DATA_KEYS.forEach((key) => localStorage.removeItem(key));
-  localStorage.setItem(TEST_DATA_CLEARED_KEY, "true");
+  APP_DATA_KEYS.forEach((key) => safeStorageRemove(key));
+  safeStorageSet(TEST_DATA_CLEARED_KEY, "true");
 }
 function clearCatalogDataOnce() {
   if (
-    typeof localStorage === "undefined" ||
-    localStorage.getItem(CATALOG_DATA_CLEARED_KEY)
+    
+    safeStorageGet(CATALOG_DATA_CLEARED_KEY)
   )
     return;
-  localStorage.removeItem("bt-markets");
-  localStorage.removeItem("bt-clients");
-  localStorage.removeItem("bt-sales");
-  localStorage.removeItem("bt-attendance");
-  localStorage.removeItem("bt-inventory");
-  localStorage.removeItem("bt-inventory-movements");
-  localStorage.removeItem("bt-promoter-assignments");
-  localStorage.removeItem("bt-session-closures");
-  localStorage.removeItem(DEFAULT_STOCK_SEED_KEY);
-  localStorage.setItem(CATALOG_DATA_CLEARED_KEY, "true");
+  safeStorageRemove("bt-markets");
+  safeStorageRemove("bt-clients");
+  safeStorageRemove("bt-sales");
+  safeStorageRemove("bt-attendance");
+  safeStorageRemove("bt-inventory");
+  safeStorageRemove("bt-inventory-movements");
+  safeStorageRemove("bt-promoter-assignments");
+  safeStorageRemove("bt-session-closures");
+  safeStorageRemove(DEFAULT_STOCK_SEED_KEY);
+  safeStorageSet(CATALOG_DATA_CLEARED_KEY, "true");
 }
 function keepAnalystUsersOnce() {
   if (
-    typeof localStorage === "undefined" ||
-    localStorage.getItem(USERS_CLEARED_KEY)
+    
+    safeStorageGet(USERS_CLEARED_KEY)
   )
     return;
   const localUsers = readStore<AppUser[]>("bt-users", []);
@@ -1366,7 +1396,7 @@ function keepAnalystUsersOnce() {
     "bt-users",
     localUsers.filter((user) => user.role === "ANALISTA"),
   );
-  localStorage.setItem(USERS_CLEARED_KEY, "true");
+  safeStorageSet(USERS_CLEARED_KEY, "true");
 }
 function csvValue(value: unknown) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
@@ -9888,7 +9918,7 @@ function AnalystApp({
   };
   const persistImportedSnapshot = async (snapshot: Partial<CloudSnapshot>) => {
     let revision =
-      localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined;
+      safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const response = await fetch(APP_STORAGE_SYNC, {
         method: "POST",
@@ -9904,7 +9934,7 @@ function AnalystApp({
           payload.message || "No se pudo guardar la actualización",
         );
       if (payload.catalogRevision) {
-        localStorage.setItem(
+        safeStorageSet(
           CATALOG_REVISION_STORE_KEY,
           payload.catalogRevision,
         );
@@ -10182,7 +10212,7 @@ function AnalystApp({
     const headers = new Headers(init?.headers);
     headers.set("X-Admin-Dni", user.dni);
     headers.set("X-Admin-Key", sessionAdminKey(user));
-    const catalogRevision = localStorage.getItem(CATALOG_REVISION_STORE_KEY);
+    const catalogRevision = safeStorageGet(CATALOG_REVISION_STORE_KEY);
     if (catalogRevision) headers.set("X-Catalog-Revision", catalogRevision);
     const response = await fetch(`${APP_STORAGE_ADMIN}${path}`, {
       ...init,
@@ -10196,7 +10226,7 @@ function AnalystApp({
     if (!response.ok)
       throw new Error(payload.message || "No se pudo guardar el cambio");
     if (payload.catalogRevision)
-      localStorage.setItem(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
+      safeStorageSet(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
     const saleDeletePrefix = "/sales/";
     const removedSaleId =
       init?.method === "DELETE" && path.startsWith(saleDeletePrefix)
@@ -10567,7 +10597,7 @@ function AnalystApp({
           confirmation: "LIMPIAR_MERCADOS_CLIENTES_CANJES",
         }),
       });
-      localStorage.removeItem(DEFAULT_STOCK_SEED_KEY);
+      safeStorageRemove(DEFAULT_STOCK_SEED_KEY);
       notify("Marcaciones, inventario y demás datos operativos eliminados.");
     } catch (error) {
       notify(
@@ -13025,7 +13055,7 @@ function PromoterApp({
           body: JSON.stringify({
             snapshot: { attendance: [item] },
             catalogRevision:
-              localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined,
+              safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined,
           }),
         });
         const payload = (await response.json().catch(() => ({}))) as {
@@ -14341,7 +14371,7 @@ export default function App() {
   clearCatalogDataOnce();
   keepAnalystUsersOnce();
   const [theme, setTheme] = useState<"light" | "dark">(() =>
-    localStorage.getItem("bt-theme") === "dark" ? "dark" : "light",
+    safeStorageGet("bt-theme") === "dark" ? "dark" : "light",
   );
   const [user, setUser] = useState<AppUser | null>(() =>
     readStore<AppUser | null>("bt-session", null),
@@ -14499,7 +14529,7 @@ export default function App() {
         };
         if (cancelled || !payload.snapshot) return;
         if (payload.catalogRevision)
-          localStorage.setItem(
+          safeStorageSet(
             CATALOG_REVISION_STORE_KEY,
             payload.catalogRevision,
           );
@@ -14703,7 +14733,7 @@ export default function App() {
       if (running || cancelled || !navigator.onLine) return;
       running = true;
       const catalogRevision =
-        localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined;
+        safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined;
 
       const syncOne = async (
         snapshot: Partial<CloudSnapshot>,
@@ -14817,7 +14847,7 @@ export default function App() {
         body: JSON.stringify({
           snapshot,
           catalogRevision:
-            localStorage.getItem(CATALOG_REVISION_STORE_KEY) || undefined,
+            safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined,
         }),
       })
         .then(async (response) => {
@@ -14897,7 +14927,7 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
-    localStorage.setItem("bt-theme", theme);
+    safeStorageSet("bt-theme", theme);
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute("content", theme === "dark" ? "#0f1726" : "#192d47");
@@ -15024,7 +15054,7 @@ export default function App() {
   ]);
 
   const logoutImmediately = () => {
-    localStorage.removeItem("bt-session");
+    safeStorageRemove("bt-session");
     setPromoterSession({ marketId: "", clientId: "" });
     setUser(null);
   };
