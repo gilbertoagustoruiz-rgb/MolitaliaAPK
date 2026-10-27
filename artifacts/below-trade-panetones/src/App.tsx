@@ -1007,7 +1007,7 @@ function normalizedProducts(
 function safeStorageGet(key: string) {
   try {
     if (typeof window === "undefined" || !window.localStorage) return null;
-    return window.safeStorageGet(key);
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
@@ -1015,7 +1015,7 @@ function safeStorageGet(key: string) {
 function safeStorageSet(key: string, value: string) {
   try {
     if (typeof window === "undefined" || !window.localStorage) return false;
-    window.safeStorageSet(key, value);
+    window.localStorage.setItem(key, value);
     return true;
   } catch {
     return false;
@@ -1024,7 +1024,7 @@ function safeStorageSet(key: string, value: string) {
 function safeStorageRemove(key: string) {
   try {
     if (typeof window === "undefined" || !window.localStorage) return false;
-    window.safeStorageRemove(key);
+    window.localStorage.removeItem(key);
     return true;
   } catch {
     return false;
