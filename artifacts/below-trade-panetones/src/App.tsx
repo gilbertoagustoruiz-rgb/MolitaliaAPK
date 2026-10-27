@@ -32,6 +32,26 @@ import {
   X,
 } from "lucide-react";
 
+function appRandomId() {
+  const cryptoApi = globalThis.crypto as Crypto & {
+    randomUUID?: () => string;
+  };
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    cryptoApi.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+
 type Role =
   | "ANALISTA"
   | "PROMOTOR"
@@ -434,7 +454,7 @@ async function captureTrackingPoint(
       trackingBattery(),
     ]);
     const point: TrackingPoint = {
-      id: `TRK-${crypto.randomUUID()}`,
+      id: `TRK-${appRandomId()}`,
       promoterId: user.id,
       marketId,
       clientId,
@@ -458,7 +478,7 @@ async function captureTrackingPoint(
     // del motivo por el que no pudo obtener ubicación.
     const detail = trackingErrorDetails(error);
     const diagnostic: TrackingDiagnostic = {
-      id: `TRKERR-${crypto.randomUUID()}`,
+      id: `TRKERR-${appRandomId()}`,
       promoterId: user.id,
       marketId,
       clientId,
@@ -584,7 +604,7 @@ type PlanchaLine = {
 };
 function newPlanchaLine(index = 0): PlanchaLine {
   return {
-    id: crypto.randomUUID(),
+    id: appRandomId(),
     sku: UNIT_SALE_PRODUCTS[index]?.sku || UNIT_SALE_PRODUCTS[0].sku,
     units: "",
     unitPrice: "",
@@ -1281,9 +1301,9 @@ async function uploadEvidenceFile(
 ) {
   const optimized = await compressEvidencePhoto(file);
   return uploadPhoto({
-    id: `${entityType}:${crypto.randomUUID()}:${field}`,
+    id: `${entityType}:${appRandomId()}:${field}`,
     entityType,
-    entityId: `${entityType}-${crypto.randomUUID()}`,
+    entityId: `${entityType}-${appRandomId()}`,
     field,
     ...context,
     fileName: optimized.name || `${field}.jpg`,
@@ -2927,7 +2947,7 @@ function SelectField({
         className="select"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        data-testid={`select-${label.toLowerCase().replaceAll(" ", "-")}`}
+        data-testid={`select-${label.toLowerCase().replace(/ /g, "-")}`}
       >
         <option value="">{placeholder}</option>
         {items.map((item) => (
@@ -3072,7 +3092,7 @@ function PhotoField({
   return (
     <label
       className={`photo-field ${uploadedUrl ? "ready" : file ? "pending" : ""} ${disabled ? "disabled" : ""}`}
-      data-testid={`photo-field-${label.toLowerCase().replaceAll(" ", "-")}`}
+      data-testid={`photo-field-${label.toLowerCase().replace(/ /g, "-")}`}
     >
       <input
         type="file"
@@ -3381,7 +3401,7 @@ function Stat({
   return (
     <article
       className="stat"
-      data-testid={`metric-${label.toLowerCase().replaceAll(" ", "-")}`}
+      data-testid={`metric-${label.toLowerCase().replace(/ /g, "-")}`}
     >
       <span className="stat-icon">{icon}</span>
       <div>
@@ -12013,7 +12033,7 @@ function PromoterApp({
   }, []);
   const [savingAdminSale, setSavingAdminSale] = useState(false);
   const adminSaleId = useRef(
-    `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`,
+    `VTA-${new Date().getFullYear()}-${appRandomId()}`,
   );
   useEffect(() => {
     let cancelled = false;
@@ -12758,7 +12778,7 @@ function PromoterApp({
     }
     const id = administrative
       ? adminSaleId.current
-      : `VTA-${new Date().getFullYear()}-${crypto.randomUUID()}`;
+      : `VTA-${new Date().getFullYear()}-${appRandomId()}`;
     const now = new Date().toISOString();
     const sale: Sale = {
       id,
@@ -12836,7 +12856,7 @@ function PromoterApp({
         if (LOCAL_WAREHOUSE_DEMO) {
           const current = readStore<TradeApproval[]>("bt-demo-trade-approvals", []);
           const approval: TradeApproval = {
-            id: `TRADE-${crypto.randomUUID()}`,
+            id: `TRADE-${appRandomId()}`,
             promoterId: user.id,
             clientId: sale.clientId,
             marketId: sale.marketId,
@@ -12976,7 +12996,7 @@ function PromoterApp({
       }
 
       const now = new Date();
-      const id = `MAR-${now.getFullYear()}-${crypto.randomUUID()}`;
+      const id = `MAR-${now.getFullYear()}-${appRandomId()}`;
       const type = markType;
       const attendanceClientId = markClientId;
       const item: Attendance = {
