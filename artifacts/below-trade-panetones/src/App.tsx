@@ -13004,6 +13004,12 @@ function PromoterApp({
     usage = { paneton900g: 0, paneton85g: 0, contacts: 0 },
   ) => {
     if (attendanceSaving) return;
+    // La salida exige confirmación del servidor antes de cerrar sesión.
+    // Sin conexión se conserva la sesión y no se crea una salida pendiente.
+    if (markType === "SALIDA" && !navigator.onLine) {
+      notify("Necesitas conexión a internet para confirmar la salida y cerrar sesión. Inténtalo nuevamente cuando recuperes conexión.", true);
+      return;
+    }
     setAttendanceSaving(true);
     try {
       const tasting900g = Math.max(0, Math.trunc(usage.paneton900g || 0));
@@ -13207,7 +13213,8 @@ function PromoterApp({
         !confirmedOnline,
       );
 
-      if (type === "SALIDA") onLogout();
+      // No cerrar sesión por una salida local sin confirmar en PostgreSQL.
+      if (type === "SALIDA" && confirmedOnline) onLogout();
     } catch (error) {
       notify(
         error instanceof Error
