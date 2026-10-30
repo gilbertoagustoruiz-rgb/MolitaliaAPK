@@ -14683,7 +14683,7 @@ export default function App() {
         const response = await fetch(APP_STORAGE_SYNC, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ snapshot, catalogRevision }),
+          body: JSON.stringify({ snapshot, catalogRevision, compactSale: Array.isArray(snapshot.sales) && snapshot.sales.length === 1 && Object.keys(snapshot).length === 1, compactAttendance: Array.isArray(snapshot.attendance) && snapshot.attendance.length === 1 && Object.keys(snapshot).length === 1 }),
         });
         const payload = (await response.json().catch(() => ({}))) as {
           message?: string;
