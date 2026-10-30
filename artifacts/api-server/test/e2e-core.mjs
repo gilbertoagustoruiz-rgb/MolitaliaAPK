@@ -726,6 +726,35 @@ try {
     throw new Error("Missing final client rejection did not return the expected message.");
 
   await request("/app-storage/sync", { method: "POST", body: JSON.stringify({ snapshot: { sales: [unitSale] } }) });
+  // Una respuesta compacta debe confirmar el ID y no duplicar canjes
+  // ni descontar inventario cuando se reintenta la misma venta.
+  const stockBeforeRetry = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  const compactSaleResult = await request("/app-storage/sync", {
+    method: "POST",
+    body: JSON.stringify({ snapshot: { sales: [unitSale] }, compactSale: true }),
+  });
+  if (compactSaleResult.snapshot?.sales?.length !== 1 ||
+      compactSaleResult.snapshot.sales[0].id !== unitSale.id ||
+      compactSaleResult.snapshot.sales[0].status !== "SINCRONIZADA")
+    throw new Error("Compact sale sync did not confirm the original sale ID.");
+  if (compactSaleResult.snapshot.attendance ||
+      compactSaleResult.snapshot.clients ||
+      compactSaleResult.snapshot.markets)
+    throw new Error("Compact sale sync returned unrelated collections.");
+  const duplicateSale = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM sales WHERE id=$1", [unitSale.id],
+  );
+  if (duplicateSale.rows[0].count !== 1)
+    throw new Error("Retry duplicated the sale.");
+  const stockAfterRetry = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  if (JSON.stringify(stockBeforeRetry.rows[0].stock) !==
+      JSON.stringify(stockAfterRetry.rows[0].stock))
+    throw new Error("Retry changed warehouse stock for the same sale.");
+
 
   const canjeEditSale = {
     ...unitSale,
@@ -1072,6 +1101,23 @@ try {
 
   const itemRows = await pool.query("SELECT sale_id,sku,quantity FROM sale_items WHERE sale_id LIKE 'VTA-E2E-%' ORDER BY sale_id,line_no");
   if (itemRows.rows.length !== 5) throw new Error(`Expected 5 normalized sale_items rows, found ${itemRows.rows.length}.`);
+  // Los registros visibles en reportes deben corresponder a ventas reales
+  // y a líneas normalizadas, sin duplicarse tras una retransmisión.
+  const reportRows = await pool.query(
+    "SELECT id,mode,status FROM sales WHERE id = ANY($1::text[]) ORDER BY id",
+    [["VTA-E2E-UNIT", "VTA-E2E-PLANCHA", "VTA-E2E-TRADE"]],
+  );
+  if (reportRows.rows.length !== 3 ||
+      reportRows.rows.some((row) => row.status !== "SINCRONIZADA"))
+    throw new Error("Report source sales are missing or not synchronized.");
+  for (const row of reportRows.rows) {
+    const cloudSale = snapshot.snapshot.sales.find((sale) => sale.id === row.id);
+    if (!cloudSale || cloudSale.mode !== row.mode)
+      throw new Error(`Report snapshot mismatch for sale ${row.id}`);
+    if (!itemRows.rows.some((item) => item.sale_id === row.id))
+      throw new Error(`Report has no normalized items for sale ${row.id}`);
+  }
+
 
   await request("/app-storage/admin/catalog/products", {
     method: "POST",

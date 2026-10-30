@@ -1108,22 +1108,18 @@ function attendanceFreshness(item: Attendance) {
 }
 function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
   const next = new Map(incoming.map((item) => [item.id, item]));
-  const rescueCutoff = Date.now() - 48 * 60 * 60 * 1000;
   local.forEach((localItem) => {
     const cloudItem = next.get(localItem.id);
     if (!cloudItem) {
-      const itemTime = new Date(localItem.date).getTime();
-      if (
-        localItem.status === "PENDIENTE" ||
-        (Number.isFinite(itemTime) && itemTime >= rescueCutoff)
-      )
-        next.set(localItem.id, {
-          ...localItem,
-          status: "PENDIENTE",
-        });
+      // Solo rescatar marcaciones genuinamente pendientes. Una marcación
+      // sincronizada ausente del servidor puede haber sido eliminada por Admin.
+      if (localItem.status === "PENDIENTE")
+        next.set(localItem.id, localItem);
       return;
     }
-    if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
+    // PostgreSQL es la fuente de verdad para registros ya sincronizados.
+    if (localItem.status === "PENDIENTE" &&
+        attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
       next.set(localItem.id, localItem);
   });
   return sortNewestByDate(Array.from(next.values()));
@@ -14680,11 +14676,26 @@ export default function App() {
       const syncOne = async (
         snapshot: Partial<CloudSnapshot>,
       ): Promise<Partial<CloudSnapshot> | null> => {
-        const response = await fetch(APP_STORAGE_SYNC, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ snapshot, catalogRevision }),
-        });
+        // El mismo ID se conserva en los reintentos. Abortar la espera no
+        // implica que PostgreSQL haya cancelado una transacción ya iniciada.
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 20_000);
+        let response: Response;
+        try {
+          response = await fetch(APP_STORAGE_SYNC, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              snapshot,
+              catalogRevision,
+              compactSale: Array.isArray(snapshot.sales) && snapshot.sales.length === 1 && Object.keys(snapshot).length === 1,
+              compactAttendance: Array.isArray(snapshot.attendance) && snapshot.attendance.length === 1 && Object.keys(snapshot).length === 1,
+            }),
+          });
+        } finally {
+          window.clearTimeout(timeout);
+        }
         const payload = (await response.json().catch(() => ({}))) as {
           message?: string;
           snapshot?: Partial<CloudSnapshot>;
