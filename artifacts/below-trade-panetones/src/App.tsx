@@ -12963,6 +12963,7 @@ function PromoterApp({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             snapshot: { attendance: [item] },
+            compactAttendance: true,
             catalogRevision:
               safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined,
           }),
