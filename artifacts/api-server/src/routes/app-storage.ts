@@ -4013,6 +4013,12 @@ router.all(
             // Las salidas anteriores sin ID de cierre determinístico se protegen:
             // no se puede atribuir con seguridad el consumo de otra jornada.
             if (!linkedClosure) {
+              const orphanMovements = await db.query(
+                "SELECT 1 FROM inventory_movements WHERE id = ANY($1::text[]) LIMIT 1",
+                [[`DEG-${id}-900G`, `DEG-${id}-85G`]],
+              );
+              if (orphanMovements.rows.length)
+                throw new Error("La salida tiene degustaciones sin cierre asociado. Regulariza antes de eliminar.");
               const legacy = await db.query(
                 `SELECT 1 FROM session_closures
                   WHERE promoter_id=$1 AND market_id=$2
