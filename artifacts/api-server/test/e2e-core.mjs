@@ -726,6 +726,35 @@ try {
     throw new Error("Missing final client rejection did not return the expected message.");
 
   await request("/app-storage/sync", { method: "POST", body: JSON.stringify({ snapshot: { sales: [unitSale] } }) });
+  // Una respuesta compacta debe confirmar el ID y no duplicar canjes
+  // ni descontar inventario cuando se reintenta la misma venta.
+  const stockBeforeRetry = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  const compactSaleResult = await request("/app-storage/sync", {
+    method: "POST",
+    body: JSON.stringify({ snapshot: { sales: [unitSale] }, compactSale: true }),
+  });
+  if (compactSaleResult.snapshot?.sales?.length !== 1 ||
+      compactSaleResult.snapshot.sales[0].id !== unitSale.id ||
+      compactSaleResult.snapshot.sales[0].status !== "SINCRONIZADA")
+    throw new Error("Compact sale sync did not confirm the original sale ID.");
+  if (compactSaleResult.snapshot.attendance ||
+      compactSaleResult.snapshot.clients ||
+      compactSaleResult.snapshot.markets)
+    throw new Error("Compact sale sync returned unrelated collections.");
+  const duplicateSale = await pool.query(
+    "SELECT COUNT(*)::int AS count FROM sales WHERE id=$1", [unitSale.id],
+  );
+  if (duplicateSale.rows[0].count !== 1)
+    throw new Error("Retry duplicated the sale.");
+  const stockAfterRetry = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  if (JSON.stringify(stockBeforeRetry.rows[0].stock) !==
+      JSON.stringify(stockAfterRetry.rows[0].stock))
+    throw new Error("Retry changed warehouse stock for the same sale.");
+
 
   const canjeEditSale = {
     ...unitSale,
