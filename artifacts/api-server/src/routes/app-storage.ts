@@ -693,7 +693,9 @@ async function upsertRecord(
       `INSERT INTO inventory_movements (id,market_id,kind,item_id,quantity,actor_id,movement_date,status,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE inventory_movements.kind <> 'DEGUSTACION'
+          OR inventory_movements.record_updated_at <= EXCLUDED.record_updated_at`,
       [
         key,
         value(source, "marketId"),
@@ -727,8 +729,7 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO session_closures (id,promoter_id,market_id,client_id,tasting_used,leads,closure_date,status,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       ON CONFLICT (id) DO NOTHING`,
       [
         key,
         value(source, "promoterId"),
