@@ -12963,6 +12963,7 @@ function PromoterApp({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             snapshot: { attendance: [item] },
+            compactAttendance: true,
             catalogRevision:
               safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined,
           }),
@@ -14414,6 +14415,48 @@ export default function App() {
   useEffect(() => {
     setReferencesReady(true);
   }, []);
+  // Los mercados se consultan primero, sin esperar el snapshot operativo completo.
+  useEffect(() => {
+    if (!referencesReady) return;
+    let cancelled = false;
+    const refreshVisitCatalog = async () => {
+      if (!navigator.onLine) return;
+      try {
+        const response = await fetch("/api/app-storage/visit-catalog", { cache: "no-store" });
+        if (!response.ok) throw new Error("Catálogo de visitas no disponible");
+        const payload = (await response.json()) as {
+          catalogRevision?: string | null;
+          markets?: Market[];
+          clients?: Client[];
+          assignments?: PromoterAssignment[];
+        };
+        if (cancelled) return;
+        if (payload.catalogRevision) safeStorageSet(CATALOG_REVISION_STORE_KEY, payload.catalogRevision);
+        if (Array.isArray(payload.markets)) {
+          setMarkets(payload.markets);
+          writeStore("bt-markets", payload.markets);
+        }
+        if (Array.isArray(payload.clients)) {
+          setClients(payload.clients);
+          writeStore("bt-clients", payload.clients);
+        }
+        if (Array.isArray(payload.assignments)) {
+          setAssignments(payload.assignments);
+          writeStore("bt-promoter-assignments", payload.assignments);
+        }
+      } catch {
+        // Conservar los datos locales; reintentar al recuperar conexión.
+      }
+    };
+    void refreshVisitCatalog();
+    const retry = () => void refreshVisitCatalog();
+    window.addEventListener("online", retry);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", retry);
+    };
+  }, [referencesReady]);
+
   useEffect(() => {
     if (!referencesReady) return;
     let cancelled = false;

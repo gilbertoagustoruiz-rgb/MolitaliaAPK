@@ -191,7 +191,10 @@ function dateValue(record: StoredRecord) {
 }
 
 function recordDate(record: StoredRecord) {
-  return value(record, "updatedAt") || value(record, "date") || null;
+  const raw = record.updatedAt ?? record.date;
+  if (raw == null || raw === "") return null;
+  const parsed = raw instanceof Date ? raw : new Date(String(raw));
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function saleItemDrafts(source: StoredRecord) {
@@ -893,6 +896,7 @@ async function validateNewAttendance(
 async function syncSnapshot(
   incoming: Partial<StorageSnapshot>,
   incomingRevision?: string | null,
+  compactAttendance = false,
 ) {
   const client = await pool.connect();
   try {
@@ -1107,6 +1111,28 @@ async function syncSnapshot(
     throw error;
   } finally {
     client.release();
+  }
+  if (compactAttendance) {
+    // Confirmar únicamente la marcación y sus registros relacionados.
+    // La transacción ya fue confirmada; no cargar todas las tablas.
+    const ids = (Array.isArray(incoming.attendance) ? incoming.attendance : [])
+      .map((record) => value(record, "id")).filter(Boolean);
+    const attendance = await pool.query(
+      "SELECT data,status FROM attendance WHERE id = ANY($1::text[])", [ids],
+    );
+    const movementIds = ids.flatMap((id) => [`DEG-${id}-900G`, `DEG-${id}-85G`]);
+    const closureIds = ids.map((id) => `CLOSE-${id}`);
+    const [movements, closures] = await Promise.all([
+      pool.query("SELECT data,status FROM inventory_movements WHERE id = ANY($1::text[])", [movementIds]),
+      pool.query("SELECT data,status FROM session_closures WHERE id = ANY($1::text[])", [closureIds]),
+    ]);
+    const confirmed = (rows: Array<{ data: StoredRecord; status: string }>) =>
+      rows.map((row) => ({ ...row.data, status: row.status || "SINCRONIZADA" }));
+    return {
+      attendance: confirmed(attendance.rows),
+      movements: confirmed(movements.rows),
+      closures: confirmed(closures.rows),
+    };
   }
   return readSnapshot();
 }
@@ -3430,6 +3456,28 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
   }
 });
 
+// Catálogos ligeros para habilitar la selección de visita sin esperar ventas y fotos.
+router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
+  try {
+    const [markets, clients, assignments, revision] = await Promise.all([
+      pool.query("SELECT data FROM markets"),
+      pool.query("SELECT data FROM clients"),
+      pool.query("SELECT data FROM assignments"),
+      readCatalogRevision(),
+    ]);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      catalogRevision: revision,
+      markets: markets.rows.map((row) => row.data),
+      clients: clients.rows.map((row) => row.data),
+      assignments: assignments.rows.map((row) => row.data),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to read visit catalog");
+    res.status(500).json({ message: "No se pudieron cargar mercados y clientes." });
+  }
+});
+
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
     res.json({
@@ -3458,6 +3506,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
     const snapshot = await syncSnapshot(
       incoming as Partial<StorageSnapshot>,
       incomingRevision,
+      req.body?.compactAttendance === true && Array.isArray(incoming.attendance) && incoming.attendance.length === 1 && Object.keys(incoming).every((key) => key === "attendance"),
     );
     res.json({
       storage: "digitalocean-postgresql",
