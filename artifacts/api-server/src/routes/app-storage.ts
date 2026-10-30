@@ -191,7 +191,10 @@ function dateValue(record: StoredRecord) {
 }
 
 function recordDate(record: StoredRecord) {
-  return value(record, "updatedAt") || value(record, "date") || null;
+  const raw = record.updatedAt ?? record.date;
+  if (raw == null || raw === "") return null;
+  const parsed = raw instanceof Date ? raw : new Date(String(raw));
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function saleItemDrafts(source: StoredRecord) {
