@@ -1108,22 +1108,18 @@ function attendanceFreshness(item: Attendance) {
 }
 function mergeAttendance(local: Attendance[], incoming: Attendance[]) {
   const next = new Map(incoming.map((item) => [item.id, item]));
-  const rescueCutoff = Date.now() - 48 * 60 * 60 * 1000;
   local.forEach((localItem) => {
     const cloudItem = next.get(localItem.id);
     if (!cloudItem) {
-      const itemTime = new Date(localItem.date).getTime();
-      if (
-        localItem.status === "PENDIENTE" ||
-        (Number.isFinite(itemTime) && itemTime >= rescueCutoff)
-      )
-        next.set(localItem.id, {
-          ...localItem,
-          status: "PENDIENTE",
-        });
+      // Solo rescatar marcaciones genuinamente pendientes. Una marcación
+      // sincronizada ausente del servidor puede haber sido eliminada por Admin.
+      if (localItem.status === "PENDIENTE")
+        next.set(localItem.id, localItem);
       return;
     }
-    if (attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
+    // PostgreSQL es la fuente de verdad para registros ya sincronizados.
+    if (localItem.status === "PENDIENTE" &&
+        attendanceFreshness(localItem) > attendanceFreshness(cloudItem))
       next.set(localItem.id, localItem);
   });
   return sortNewestByDate(Array.from(next.values()));
