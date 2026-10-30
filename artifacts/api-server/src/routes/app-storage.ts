@@ -897,6 +897,7 @@ async function syncSnapshot(
   incoming: Partial<StorageSnapshot>,
   incomingRevision?: string | null,
   compactAttendance = false,
+  compactSale = false,
 ) {
   const client = await pool.connect();
   try {
@@ -1111,6 +1112,19 @@ async function syncSnapshot(
     throw error;
   } finally {
     client.release();
+  }
+  if (compactSale) {
+    const ids = (Array.isArray(incoming.sales) ? incoming.sales : [])
+      .map((record) => value(record, "id")).filter(Boolean);
+    const result = await pool.query(
+      "SELECT data,status FROM sales WHERE id = ANY($1::text[])", [ids],
+    );
+    return {
+      sales: result.rows.map((row) => ({
+        ...(row.data as StoredRecord),
+        status: String(row.status || "SINCRONIZADA"),
+      })),
+    };
   }
   if (compactAttendance) {
     // Confirmar únicamente la marcación y sus registros relacionados.
@@ -3507,6 +3521,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       incoming as Partial<StorageSnapshot>,
       incomingRevision,
       req.body?.compactAttendance === true && Array.isArray(incoming.attendance) && incoming.attendance.length === 1 && Object.keys(incoming).every((key) => key === "attendance"),
+      req.body?.compactSale === true && Array.isArray(incoming.sales) && incoming.sales.length === 1 && Object.keys(incoming).every((key) => key === "sales"),
     );
     res.json({
       storage: "digitalocean-postgresql",
