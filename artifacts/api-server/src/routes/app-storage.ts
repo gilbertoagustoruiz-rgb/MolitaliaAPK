@@ -3453,6 +3453,28 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
   }
 });
 
+// Catálogos ligeros para habilitar la selección de visita sin esperar ventas y fotos.
+router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
+  try {
+    const [markets, clients, assignments, revision] = await Promise.all([
+      pool.query("SELECT data FROM markets"),
+      pool.query("SELECT data FROM clients"),
+      pool.query("SELECT data FROM assignments"),
+      readCatalogRevision(),
+    ]);
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      catalogRevision: revision,
+      markets: markets.rows.map((row) => row.data),
+      clients: clients.rows.map((row) => row.data),
+      assignments: assignments.rows.map((row) => row.data),
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to read visit catalog");
+    res.status(500).json({ message: "No se pudieron cargar mercados y clientes." });
+  }
+});
+
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
     res.json({
