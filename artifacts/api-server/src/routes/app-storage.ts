@@ -1002,6 +1002,34 @@ async function syncSnapshot(
               record,
             );
           }
+          // Una salida nueva genera cierre y dos consumos editables en cero.
+          // Se ejecuta en la misma transacción de la marcación y con IDs estables.
+          if (isNewRecord && name === "attendance" && value(record, "type") === "SALIDA") {
+            const attendanceId = value(record, "id");
+            const promoterId = value(record, "promoterId");
+            const marketId = value(record, "marketId");
+            const clientId = value(record, "clientId");
+            const date = dateValue(record);
+            const closureId = `CLOSE-${attendanceId}`;
+            await upsertRecord(client as unknown as QueryClient, "closures", {
+              id: closureId, promoterId, marketId, clientId,
+              tastingUsed: 0, tasting900g: 0, tasting85g: 0, leads: 0,
+              closureType: "MANUAL", date, status: "SINCRONIZADA",
+            });
+            for (const [suffix, productId, label] of [
+              ["900G", "PANETON_900G", "Panetón 900 g"],
+              ["85G", "PANETON_85G", "Panetón 85 g"],
+            ]) {
+              await upsertRecord(client as unknown as QueryClient, "movements", {
+                id: `DEG-${attendanceId}-${suffix}`, marketId,
+                kind: "DEGUSTACION", quantity: 0,
+                actorId: promoterId, promoterId, closureId,
+                degustacionProductId: productId,
+                degustacionProductLabel: label,
+                date, status: "SINCRONIZADA",
+              });
+            }
+          }
           if (isNewRecord && name === "sales") {
             if (isPunoSouthSaleRecord(record)) enforceSaleWithoutCanje(record);
             const validatedRule = await validateSubmittedRedemptionRule(
@@ -5436,7 +5464,7 @@ router.put(
         : productId === "PANETON_85G"
           ? 8
           : 0;
-    if (!id || !maxQuantity || quantity < 1 || quantity > maxQuantity) {
+    if (!id || !maxQuantity || quantity > maxQuantity) {
       res.status(400).json({
         message: "Presentación o cantidad de degustación no válida.",
       });
@@ -5468,7 +5496,7 @@ router.put(
         `DEGUSTACION:${id}`,
         actor.id,
       );
-      await applyWarehouseStockMovement(
+      if (quantity > 0) await applyWarehouseStockMovement(
         db as unknown as QueryClient,
         marketId,
         { [productId === "PANETON" ? "PANETON_900G" : productId]: quantity },
