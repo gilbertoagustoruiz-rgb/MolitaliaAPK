@@ -3527,8 +3527,8 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
 
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
-    const { assignments } = await readSnapshot();
-    res.json({ storage: "digitalocean-postgresql", assignments });
+    const result = await pool.query("SELECT data FROM assignments");
+    res.json({ storage: "digitalocean-postgresql", assignments: result.rows.map((row) => row.data) });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read assignments");
     res.status(500).json({ message: "No se pudieron leer las asignaciones." });
