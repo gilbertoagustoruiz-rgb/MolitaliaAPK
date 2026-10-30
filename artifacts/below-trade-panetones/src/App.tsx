@@ -6584,102 +6584,6 @@ function AdminDegustacionesModule({
   );
 }
 
-function TastingExitModal({
-  available900g,
-  available85g,
-  onConfirm,
-  close,
-}: {
-  available900g: number;
-  available85g: number;
-  onConfirm: (usage: { paneton900g: number; paneton85g: number; contacts: number }) => void;
-  close: () => void;
-}) {
-  const [quantity900g, setQuantity900g] = useState("0");
-  const [quantity85g, setQuantity85g] = useState("0");
-  const paneton900g = quantity900g === "" ? NaN : Number(quantity900g);
-  const paneton85g = quantity85g === "" ? NaN : Number(quantity85g);
-  const contacts900g = Number.isFinite(paneton900g) ? paneton900g * 80 : 0;
-  const contacts85g = Number.isFinite(paneton85g) ? paneton85g * 10 : 0;
-  const contacts = contacts900g + contacts85g;
-  const valid900g =
-    Number.isInteger(paneton900g) && paneton900g >= 0 && paneton900g <= 2 && paneton900g <= available900g;
-  const valid85g =
-    Number.isInteger(paneton85g) && paneton85g >= 0 && paneton85g <= 8 && paneton85g <= available85g;
-  const valid = valid900g && valid85g;
-  return (
-    <Modal
-      title="Registrar salida del cliente"
-      detail="Registra los panetones utilizados en degustación. El consumo se descontará del Almacén del Mercado."
-      close={close}
-    >
-      <div className="logout-declaration">
-        <div className="stock-callout">
-          <PackageCheck />
-          <div>
-            <strong>Stock de degustación del Almacén</strong>
-            <small>900 g: {available900g} disponibles · 85 g: {available85g} disponibles</small>
-          </div>
-        </div>
-        <Field label="Panetón 900 g utilizado *">
-          <Input
-            type="number"
-            value={quantity900g}
-            onChange={(value) => setQuantity900g(value.replace(/\D/g, ""))}
-            min={0}
-            max={2}
-            step={1}
-            placeholder="0"
-            testId="input-tasting-900g"
-          />
-        </Field>
-        <p className="modal-hint">Máximo 2 · 80 contactos por cada Panetón 900 g.</p>
-        <Field label="Panetón 85 g utilizado *">
-          <Input
-            type="number"
-            value={quantity85g}
-            onChange={(value) => setQuantity85g(value.replace(/\D/g, ""))}
-            min={0}
-            max={8}
-            step={1}
-            placeholder="0"
-            testId="input-tasting-85g"
-          />
-        </Field>
-        <p className="modal-hint">Máximo 8 · 10 contactos por cada Panetón 85 g.</p>
-        <div className="stock-callout">
-          <Users />
-          <div>
-            <strong>{contacts} contactos calculados</strong>
-            <small>{contacts900g} por 900 g + {contacts85g} por 85 g</small>
-          </div>
-        </div>
-        {!valid900g && Number.isFinite(paneton900g) && (
-          <p className="modal-error">900 g: máximo 2 y no puede superar el stock disponible ({available900g}).</p>
-        )}
-        {!valid85g && Number.isFinite(paneton85g) && (
-          <p className="modal-error">85 g: máximo 8 y no puede superar el stock disponible ({available85g}).</p>
-        )}
-        {valid900g && valid85g && paneton900g + paneton85g === 0 && (
-          <p className="modal-hint">
-            No se registró degustación. Puedes cerrar la sesión con 0 panetones y 0 contactos.
-          </p>
-        )}
-      </div>
-      <div className="modal-actions">
-        <Btn variant="outline" onClick={close}>Cancelar</Btn>
-        <Btn
-          disabled={!valid}
-          onClick={() => onConfirm({ paneton900g, paneton85g, contacts })}
-          testId="button-confirm-client-exit"
-        >
-          <CheckCircle2 /> Confirmar salida
-        </Btn>
-      </div>
-    </Modal>
-  );
-}
-
 function AssignmentModule({
   user,
   markets,
@@ -12177,7 +12081,6 @@ function PromoterApp({
   const [markPhotoUrl, setMarkPhotoUrl] = useState("");
   const [markPhotoUploading, setMarkPhotoUploading] = useState(false);
   const [attendanceSaving, setAttendanceSaving] = useState(false);
-  const [tastingExitPrompt, setTastingExitPrompt] = useState(false);
   const [search, setSearch] = useState("");
   const [modeFilter, setModeFilter] = useState<
     "TODO" | "UNIDADES" | "PLANCHAS"
@@ -13259,10 +13162,7 @@ function PromoterApp({
       );
       return;
     }
-    if (markType === "SALIDA") {
-      setTastingExitPrompt(true);
-      return;
-    }
+    // La salida registra automáticamente 0 panetones y 0 contactos.
     void finalizeAttendance();
   };
   const saleForm = (
@@ -14209,17 +14109,6 @@ function PromoterApp({
             </section>
           )}
           {view === "NUEVA" && module === "VENTAS" && saleForm}
-          {tastingExitPrompt && (
-            <TastingExitModal
-              available900g={warehouseTastingStock.PANETON_900G}
-              available85g={warehouseTastingStock.PANETON_85G}
-              onConfirm={(usage) => {
-                setTastingExitPrompt(false);
-                void finalizeAttendance(usage);
-              }}
-              close={() => setTastingExitPrompt(false)}
-            />
-          )}
         </div>
       </div>
     </main>
