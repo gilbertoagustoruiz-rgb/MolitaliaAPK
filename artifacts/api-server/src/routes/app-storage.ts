@@ -3993,52 +3993,71 @@ router.all(
         const originalMarketId = value(old, "marketId");
         const originalDate = value(old, "date");
         if (originalType === "SALIDA" && originalPromoterId && originalMarketId && originalDate) {
+          const closureId = `CLOSE-${id}`;
           const closure = await db.query(
-            `SELECT id,tasting_used,data,closure_date
-               FROM session_closures
-              WHERE promoter_id=$1
-                AND market_id=$2
-                AND ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz))) <= 43200
-              ORDER BY ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz)))
-              LIMIT 1
-              FOR UPDATE`,
-            [originalPromoterId, originalMarketId, originalDate],
+            "SELECT id,tasting_used,data FROM session_closures WHERE id=$1 FOR UPDATE",
+            [closureId],
           );
           const linkedClosure = closure.rows[0];
-          if (linkedClosure) {
+          if (linkedClosure && !deleting) {
             const relationshipChanged =
-              !deleting &&
-              (
-                value(next, "promoterId") !== originalPromoterId ||
-                value(next, "marketId") !== originalMarketId ||
-                value(next, "clientId") !== value(old, "clientId") ||
-                value(next, "type") !== originalType ||
-                value(next, "date") !== originalDate
-              );
+              value(next, "promoterId") !== originalPromoterId ||
+              value(next, "marketId") !== originalMarketId ||
+              value(next, "clientId") !== value(old, "clientId") ||
+              value(next, "type") !== originalType ||
+              value(next, "date") !== originalDate;
             if (relationshipChanged)
-              throw new Error(
-                "Esta Salida ya tiene un cierre asociado. Solo puedes reemplazar la evidencia; para cambiar Promotor, Cliente, Mercado, tipo o fecha, regulariza primero el cierre.",
+              throw new Error("Esta Salida tiene un cierre asociado. Solo puedes reemplazar la evidencia.");
+          }
+          if (deleting) {
+            // Las salidas anteriores sin ID de cierre determinístico se protegen:
+            // no se puede atribuir con seguridad el consumo de otra jornada.
+            if (!linkedClosure) {
+              const orphanMovements = await db.query(
+                "SELECT 1 FROM inventory_movements WHERE id = ANY($1::text[]) LIMIT 1",
+                [[`DEG-${id}-900G`, `DEG-${id}-85G`]],
               );
-
-            if (deleting) {
-              const tastingUsed = Math.max(0, Number(linkedClosure.tasting_used) || 0);
-              const tastingMovement = await db.query(
-                `SELECT 1
-                   FROM inventory_movements
-                  WHERE kind='DEGUSTACION'
-                    AND market_id=$1
-                    AND COALESCE(data->>'promoterId',data->>'actorId','')=$2
-                    AND ABS(EXTRACT(EPOCH FROM (movement_date - $3::timestamptz))) <= 60
+              if (orphanMovements.rows.length)
+                throw new Error("La salida tiene degustaciones sin cierre asociado. Regulariza antes de eliminar.");
+              const legacy = await db.query(
+                `SELECT 1 FROM session_closures
+                  WHERE promoter_id=$1 AND market_id=$2
+                    AND ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz))) <= 43200
                   LIMIT 1`,
-                [originalMarketId, originalPromoterId, linkedClosure.closure_date],
+                [originalPromoterId, originalMarketId, originalDate],
               );
-              if (tastingUsed > 0 || tastingMovement.rows.length)
-                throw new Error(
-                  "Esta Salida tiene Degustación asociada. Elimina o regulariza primero la Degustación para restaurar correctamente el stock.",
+              if (legacy.rows.length)
+                throw new Error("Esta salida tiene un cierre histórico sin vínculo exacto. Requiere regularización manual para proteger el stock.");
+            } else {
+              const linkedMovements = await db.query(
+                `SELECT id FROM inventory_movements
+                  WHERE id = ANY($1::text[]) AND kind='DEGUSTACION'
+                  FOR UPDATE`,
+                [[`DEG-${id}-900G`, `DEG-${id}-85G`]],
+              );
+              const movements = linkedMovements.rows.map((row) => String(row.id));
+              for (const movementId of movements) {
+                await restoreWarehouseStockMovements(
+                  db as unknown as QueryClient,
+                  `DEGUSTACION:${movementId}`,
+                  actor.id,
                 );
+                await db.query("DELETE FROM inventory_movements WHERE id=$1", [movementId]);
+                await db.query(
+                  `INSERT INTO app_storage_tombstones(collection,record_id,deleted_at)
+                   VALUES('movements',$1,now())
+                   ON CONFLICT(collection,record_id) DO UPDATE SET deleted_at=now()`,
+                  [movementId],
+                );
+              }
+              if (Number(linkedClosure.tasting_used) > 0 && movements.length === 0)
+                throw new Error("La salida tiene consumo sin movimientos identificables. Regulariza antes de eliminar.");
+              await db.query("DELETE FROM session_closures WHERE id=$1", [closureId]);
               await db.query(
-                "DELETE FROM session_closures WHERE id=$1",
-                [linkedClosure.id],
+                `INSERT INTO app_storage_tombstones(collection,record_id,deleted_at)
+                 VALUES('closures',$1,now())
+                 ON CONFLICT(collection,record_id) DO UPDATE SET deleted_at=now()`,
+                [closureId],
               );
             }
           }
