@@ -6323,14 +6323,14 @@ function DegustacionEditModal({
   const [productId, setProductId] = useState<"PANETON_900G" | "PANETON_85G">(
     initialProduct,
   );
-  const [quantity, setQuantity] = useState(String(record.quantity || 1));
+  const [quantity, setQuantity] = useState(String(record.quantity ?? 0));
   const [saving, setSaving] = useState(false);
   const parsedQuantity = Number(quantity);
   const max = productId === "PANETON_900G" ? 2 : 8;
   const contactsPerUnit = productId === "PANETON_900G" ? 80 : 10;
   const valid =
     Number.isInteger(parsedQuantity) &&
-    parsedQuantity >= 1 &&
+    parsedQuantity >= 0 &&
     parsedQuantity <= max;
 
   return (
@@ -6354,7 +6354,7 @@ function DegustacionEditModal({
         <Field label="Cantidad *">
           <Input
             type="number"
-            min={1}
+            min={0}
             max={max}
             step={1}
             value={quantity}
@@ -6373,7 +6373,7 @@ function DegustacionEditModal({
       </div>
       {!valid && (
         <p className="modal-error">
-          Ingresa una cantidad entera entre 1 y {max}.
+          Ingresa una cantidad entera entre 0 y {max}.
         </p>
       )}
       <div className="modal-actions">
@@ -6422,8 +6422,7 @@ function AdminDegustacionesModule({
       .filter(
         (closure) =>
           closure.promoterId === promoterId &&
-          closure.marketId === consumo.marketId &&
-          Number(closure.tastingUsed) === Number(consumo.quantity),
+          closure.marketId === consumo.marketId,
       )
       .map((closure) => ({
         closure,
@@ -12954,6 +12953,7 @@ function PromoterApp({
 
       let savedItem: Attendance = item;
       let confirmedOnline = false;
+      let confirmedSnapshot: Partial<CloudSnapshot> | undefined;
 
       // Online: PostgreSQL confirma primero. No se agrega optimistamente al
       // estado local para evitar una marcación fantasma si el backend rechaza.
@@ -12986,6 +12986,7 @@ function PromoterApp({
           );
         savedItem = confirmedItem;
         confirmedOnline = true;
+        confirmedSnapshot = payload.snapshot;
       }
 
       const next = [
@@ -13014,7 +13015,9 @@ function PromoterApp({
       }
 
       if (type === "SALIDA") {
-        const tastingMovements: InventoryMovement[] = [
+        const tastingMovements: InventoryMovement[] = confirmedSnapshot?.movements?.filter(
+          (movement) => movement.id === `DEG-${id}-900G` || movement.id === `DEG-${id}-85G`,
+        ) || [
           ...(tasting900g > 0
             ? [
                 {
