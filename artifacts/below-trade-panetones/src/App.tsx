@@ -14680,11 +14680,26 @@ export default function App() {
       const syncOne = async (
         snapshot: Partial<CloudSnapshot>,
       ): Promise<Partial<CloudSnapshot> | null> => {
-        const response = await fetch(APP_STORAGE_SYNC, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ snapshot, catalogRevision, compactSale: Array.isArray(snapshot.sales) && snapshot.sales.length === 1 && Object.keys(snapshot).length === 1, compactAttendance: Array.isArray(snapshot.attendance) && snapshot.attendance.length === 1 && Object.keys(snapshot).length === 1 }),
-        });
+        // El mismo ID se conserva en los reintentos. Abortar la espera no
+        // implica que PostgreSQL haya cancelado una transacción ya iniciada.
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 20_000);
+        let response: Response;
+        try {
+          response = await fetch(APP_STORAGE_SYNC, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              snapshot,
+              catalogRevision,
+              compactSale: Array.isArray(snapshot.sales) && snapshot.sales.length === 1 && Object.keys(snapshot).length === 1,
+              compactAttendance: Array.isArray(snapshot.attendance) && snapshot.attendance.length === 1 && Object.keys(snapshot).length === 1,
+            }),
+          });
+        } finally {
+          window.clearTimeout(timeout);
+        }
         const payload = (await response.json().catch(() => ({}))) as {
           message?: string;
           snapshot?: Partial<CloudSnapshot>;
