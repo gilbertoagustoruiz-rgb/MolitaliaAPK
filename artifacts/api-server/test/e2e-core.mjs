@@ -1101,6 +1101,23 @@ try {
 
   const itemRows = await pool.query("SELECT sale_id,sku,quantity FROM sale_items WHERE sale_id LIKE 'VTA-E2E-%' ORDER BY sale_id,line_no");
   if (itemRows.rows.length !== 5) throw new Error(`Expected 5 normalized sale_items rows, found ${itemRows.rows.length}.`);
+  // Los registros visibles en reportes deben corresponder a ventas reales
+  // y a líneas normalizadas, sin duplicarse tras una retransmisión.
+  const reportRows = await pool.query(
+    "SELECT id,mode,status FROM sales WHERE id = ANY($1::text[]) ORDER BY id",
+    [["VTA-E2E-UNIT", "VTA-E2E-PLANCHA", "VTA-E2E-TRADE"]],
+  );
+  if (reportRows.rows.length !== 3 ||
+      reportRows.rows.some((row) => row.status !== "SINCRONIZADA"))
+    throw new Error("Report source sales are missing or not synchronized.");
+  for (const row of reportRows.rows) {
+    const cloudSale = snapshot.snapshot.sales.find((sale) => sale.id === row.id);
+    if (!cloudSale || cloudSale.mode !== row.mode)
+      throw new Error(`Report snapshot mismatch for sale ${row.id}`);
+    if (!itemRows.rows.some((item) => item.sale_id === row.id))
+      throw new Error(`Report has no normalized items for sale ${row.id}`);
+  }
+
 
   await request("/app-storage/admin/catalog/products", {
     method: "POST",
