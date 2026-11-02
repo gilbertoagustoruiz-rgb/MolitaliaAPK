@@ -3540,6 +3540,25 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
   }
 });
 
+// Consulta ligera para actualizar el historial sin descargar todo el snapshot.
+router.get("/app-storage/attendance", async (req, res): Promise<void> => {
+  try {
+    const result = await pool.query(
+      "SELECT data,status FROM attendance ORDER BY event_date DESC, created_at DESC LIMIT 5000",
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      attendance: result.rows.map((row) => ({
+        ...(row.data as StoredRecord),
+        status: String(row.status || "SINCRONIZADA"),
+      })),
+    });
+  } catch (error) {
+    console.error("Attendance refresh failed", error);
+    res.status(500).json({ message: "No se pudieron actualizar las marcaciones." });
+  }
+});
+
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
     const result = await pool.query("SELECT data FROM assignments");
