@@ -4272,7 +4272,7 @@ router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
       }
     }
     await upsertRecord(pool as unknown as QueryClient, "markets", market);
-    res.status(201).json({ market, snapshot: await readSnapshot() });
+    res.status(201).json({ market });
   } catch (error) {
     req.log.error({ err: error }, "Unable to create market");
     res.status(500).json({ message: "No se pudo crear el mercado." });
@@ -4495,7 +4495,7 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
     await db.query("COMMIT");
     res
       .status(201)
-      .json({ client: clientRecord, snapshot: await readSnapshot() });
+      .json({ client: clientRecord });
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to save client");
