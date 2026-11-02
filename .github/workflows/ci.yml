@@ -54,6 +54,9 @@ jobs:
           BASE_PATH: /
         run: pnpm run build
 
+      - name: Manual sync button contract
+        run: node artifacts/api-server/test/manual-sync-contract.mjs
+
       - name: Core end-to-end
         env:
           E2E_PORT: 8099
