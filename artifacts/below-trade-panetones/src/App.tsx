@@ -6765,6 +6765,7 @@ function AssignmentModule({
       const payload = (await response.json()) as {
         message?: string;
         assignments?: PromoterAssignment[];
+        assignment?: PromoterAssignment;
         snapshot?: Partial<CloudSnapshot>;
       };
       if (!response.ok)
@@ -6778,7 +6779,7 @@ function AssignmentModule({
                 !selectedPromoter ||
                 !assignmentMatchesUser(item, selectedPromoter),
             ),
-            assignment,
+            payload.assignment || assignment,
           ];
       setAssignments(nextAssignments);
       writeStore("bt-promoter-assignments", nextAssignments);
@@ -10135,7 +10136,7 @@ function AnalystApp({
     // Las altas de catálogos devuelven confirmación inmediata después del COMMIT.
     // La actualización del catálogo se consulta aparte, sin bloquear el cierre del modal.
     if (!payload.snapshot && init?.method === "POST" &&
-        ["/markets", "/clients", "/users"].includes(path)) {
+        ["/markets", "/clients", "/users", "/catalog/products", "/catalog/categories"].includes(path)) {
       void fetch(APP_STORAGE_READ, { cache: "no-store" })
         .then(async (refresh) => {
           if (!refresh.ok) return;
