@@ -14801,7 +14801,13 @@ export default function App() {
               throw new Error("PostgreSQL no confirmó la venta.");
             confirmedCount += 1;
             setSales((current) => {
-              const next = mergeSales(current, snapshot.sales || []);
+              // Respuesta compacta: confirmar solo el ID enviado, sin
+              // convertir otras ventas sincronizadas en pendientes.
+              const byId = new Map(current.map((entry) => [entry.id, entry]));
+              for (const entry of snapshot.sales || []) byId.set(entry.id, entry);
+              const next = Array.from(byId.values()).sort(
+                (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+              );
               writeStore("bt-sales", next);
               return next;
             });
