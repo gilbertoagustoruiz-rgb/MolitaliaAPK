@@ -12034,6 +12034,39 @@ function PromoterApp({
     administrative?.clientId || "",
   );
   const [module, setModule] = useState<"MARCACIONES" | "VENTAS">("MARCACIONES");
+  const [manualSyncBusy, setManualSyncBusy] = useState(false);
+  const [manualSyncMessage, setManualSyncMessage] = useState("");
+  const manualSyncTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (manualSyncTimer.current !== null) window.clearTimeout(manualSyncTimer.current);
+  }, []);
+  useEffect(() => {
+    const completed = (event: Event) => {
+      const detail = (event as CustomEvent<{ message: string }>).detail;
+      if (manualSyncTimer.current !== null) window.clearTimeout(manualSyncTimer.current);
+      manualSyncTimer.current = null;
+      setManualSyncBusy(false);
+      setManualSyncMessage(detail?.message || "Sincronización finalizada.");
+    };
+    window.addEventListener("bt-manual-sync-complete", completed);
+    return () => window.removeEventListener("bt-manual-sync-complete", completed);
+  }, []);
+  const requestManualSync = () => {
+    if (manualSyncBusy) return;
+    if (!navigator.onLine) {
+      setManualSyncMessage("Sin conexión. Los registros pendientes se conservarán.");
+      return;
+    }
+    setManualSyncBusy(true);
+    setManualSyncMessage("Sincronizando con PostgreSQL...");
+    manualSyncTimer.current = window.setTimeout(() => {
+      setManualSyncBusy(false);
+      setManualSyncMessage("La sincronización está tardando demasiado. Conservamos los pendientes; vuelve a intentar sin duplicar registros.");
+      manualSyncTimer.current = null;
+    }, 45_000);
+    window.dispatchEvent(new Event("bt-manual-sync-request"));
+  };
+
   const [view, setView] = useState<"LISTA" | "NUEVA">("LISTA");
   const available = clients.filter(
     (client) =>
@@ -13805,14 +13838,27 @@ function PromoterApp({
               </p>
             </div>
             {view === "LISTA" && (
-              <Btn
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <Btn variant="outline" onClick={requestManualSync} testId="button-manual-sync">
+                  <RefreshCw /> {manualSyncBusy ? "Sincronizando..." : "Sincronizar ahora"}
+                </Btn>
+                <Btn
                 onClick={() => setView("NUEVA")}
                 testId={`button-new-${module.toLowerCase()}`}
               >
                 <Plus /> Nueva {module === "VENTAS" ? "venta" : "marcación"}
-              </Btn>
+                </Btn>
+              </div>
             )}
           </div>
+          {view === "LISTA" && (
+            <div role="status" aria-live="polite" style={{ padding: "8px 0", fontSize: 13 }}>
+              {module === "VENTAS"
+                ? `${mineSales.filter((item) => item.status === "PENDIENTE").length} venta(s) pendiente(s)`
+                : `${mineAttendance.filter((item) => item.status === "PENDIENTE").length} marcación(es) pendiente(s)`}
+              {manualSyncMessage ? ` · ${manualSyncMessage}` : ""}
+            </div>
+          )}
           <div className="market-banner">
             <span className="market-pin">
               <MapPin />
@@ -14669,8 +14715,15 @@ export default function App() {
     let cancelled = false;
     let running = false;
 
-    const syncPendingOperationalRecords = async () => {
-      if (running || cancelled || !navigator.onLine) return;
+    const syncPendingOperationalRecords = async (manual = false) => {
+      let confirmedCount = 0;
+      let failedCount = 0;
+      if (running || cancelled || !navigator.onLine) {
+        if (manual) window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
+          detail: { message: running ? "Hay una sincronización en curso. Espera unos segundos." : "Sin conexión o sesión no disponible." },
+        }));
+        return;
+      }
       running = true;
       const catalogRevision =
         safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined;
@@ -14724,6 +14777,7 @@ export default function App() {
             );
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la marcación.");
+            confirmedCount += 1;
             setAttendance((current) => {
               // Respuesta compacta: actualizar solo los IDs confirmados.
               // No eliminar otras marcaciones sincronizadas del historial.
@@ -14735,6 +14789,7 @@ export default function App() {
               return next;
             });
           } catch (error) {
+            failedCount += 1;
             console.error(
               `No se pudo sincronizar marcación ${item.id}`,
               error,
@@ -14755,12 +14810,20 @@ export default function App() {
             );
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la venta.");
+            confirmedCount += 1;
             setSales((current) => {
-              const next = mergeSales(current, snapshot.sales || []);
+              // Respuesta compacta: confirmar solo el ID enviado, sin
+              // convertir otras ventas sincronizadas en pendientes.
+              const byId = new Map(current.map((entry) => [entry.id, entry]));
+              for (const entry of snapshot.sales || []) byId.set(entry.id, entry);
+              const next = Array.from(byId.values()).sort(
+                (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+              );
               writeStore("bt-sales", next);
               return next;
             });
           } catch (error) {
+            failedCount += 1;
             console.error(
               `No se pudo sincronizar venta ${sale.id}`,
               error,
@@ -14769,9 +14832,48 @@ export default function App() {
         }
       } finally {
         running = false;
+        if (manual) {
+          const remaining = readStore<Sale[]>("bt-sales", []).filter((entry) => entry.status === "PENDIENTE").length
+            + readStore<Attendance[]>("bt-attendance", []).filter((entry) => entry.status === "PENDIENTE").length;
+          let message = failedCount || remaining
+            ? `${confirmedCount} confirmado(s); ${remaining} registro(s) pendiente(s). No vuelvas a registrarlos. Reintenta sincronizar.`
+            : `${confirmedCount} confirmado(s). Sin pendientes locales.`;
+          if (!remaining && !failedCount && !cancelled) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), 12_000);
+            try {
+              const response = await fetch(APP_STORAGE_READ, {
+                cache: "no-store",
+                signal: controller.signal,
+              });
+              if (!response.ok) throw new Error("Consulta de historial no disponible");
+              const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
+              if (!Array.isArray(payload.snapshot?.sales) || !Array.isArray(payload.snapshot?.attendance))
+                throw new Error("Respuesta de historial incompleta");
+              const serverSales = new Set(payload.snapshot.sales.map((item) => item.id));
+              const serverAttendance = new Set(payload.snapshot.attendance.map((item) => item.id));
+              const localSales = readStore<Sale[]>("bt-sales", []);
+              const localAttendance = readStore<Attendance[]>("bt-attendance", []);
+              const missing = localSales.filter((item) => item.status === "SINCRONIZADA" && !serverSales.has(item.id)).length
+                + localAttendance.filter((item) => item.status === "SINCRONIZADA" && !serverAttendance.has(item.id)).length;
+              message = missing
+                ? `Atención: ${missing} registro(s) locales no aparecen en el historial del servidor. Contacta al analista; no los vuelvas a crear.`
+                : `Historial local contrastado con PostgreSQL: ${localSales.length} ventas y ${localAttendance.length} marcaciones sin faltantes detectados.`;
+            } catch {
+              message = "Pendientes enviados; no se pudo verificar el historial completo en PostgreSQL. Intenta nuevamente.";
+            } finally {
+              window.clearTimeout(timer);
+            }
+          }
+          window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
+            detail: { message },
+          }));
+        }
       }
     };
 
+    const onManualSync = () => void syncPendingOperationalRecords(true);
+    window.addEventListener("bt-manual-sync-request", onManualSync);
     void syncPendingOperationalRecords();
     const interval = window.setInterval(syncPendingOperationalRecords, 10_000);
     const retry = () => void syncPendingOperationalRecords();
@@ -14780,6 +14882,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("online", retry);
+      window.removeEventListener("bt-manual-sync-request", onManualSync);
     };
   }, [cloudReady, sales, attendance, cloudSyncTick]);
 
