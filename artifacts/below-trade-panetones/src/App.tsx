@@ -14624,12 +14624,14 @@ export default function App() {
           writeStore("bt-sales", next);
           return next;
         });
-        setAttendance((current) => {
-          const next = mergeAttendance(current, cloudAttendance);
-          if (JSON.stringify(next) === JSON.stringify(current)) return current;
-          writeStore("bt-attendance", next);
-          return next;
-        });
+        if (Array.isArray(payload.snapshot.attendance)) {
+          setAttendance((current) => {
+            const next = mergeAttendance(current, cloudAttendance);
+            if (JSON.stringify(next) === JSON.stringify(current)) return current;
+            writeStore("bt-attendance", next);
+            return next;
+          });
+        }
         setMovements((current) => {
           const next = mergeMovements(current, cloudMovements);
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
@@ -14723,7 +14725,12 @@ export default function App() {
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la marcación.");
             setAttendance((current) => {
-              const next = mergeAttendance(current, snapshot.attendance || []);
+              // Respuesta compacta: actualizar solo los IDs confirmados.
+              // No eliminar otras marcaciones sincronizadas del historial.
+              const byId = new Map(current.map((entry) => [entry.id, entry]));
+              for (const entry of snapshot.attendance || [])
+                byId.set(entry.id, entry);
+              const next = sortNewestByDate(Array.from(byId.values()));
               writeStore("bt-attendance", next);
               return next;
             });
@@ -14819,16 +14826,20 @@ export default function App() {
             writeStore("bt-sales", nextSales);
             return nextSales;
           });
-          setAttendance((current) => {
-            const nextAttendance = mergeAttendance(
-              current,
-              payload.snapshot?.attendance || [],
-            );
-            if (JSON.stringify(nextAttendance) === JSON.stringify(current))
-              return current;
-            writeStore("bt-attendance", nextAttendance);
-            return nextAttendance;
-          });
+          // Respuestas compactas de ventas pueden omitir attendance.
+          // La ausencia de la colección no significa que no existan marcaciones.
+          if (Array.isArray(payload.snapshot.attendance)) {
+            setAttendance((current) => {
+              const nextAttendance = mergeAttendance(
+                current,
+                payload.snapshot!.attendance!,
+              );
+              if (JSON.stringify(nextAttendance) === JSON.stringify(current))
+                return current;
+              writeStore("bt-attendance", nextAttendance);
+              return nextAttendance;
+            });
+          }
           setMovements((current) => {
             const nextMovements = mergeMovements(
               current,
@@ -15005,6 +15016,56 @@ export default function App() {
     promoterSession.marketId,
     promoterSession.clientId,
   ]);
+
+  useEffect(() => {
+    if (!activeUser || !isPromoterRole(activeUser.role)) return;
+    let cancelled = false;
+    let busy = false;
+    const refresh = async () => {
+      if (cancelled || busy || !navigator.onLine || document.hidden) return;
+      busy = true;
+      const started = Date.now();
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch("/api/app-storage/promoter/attendance", {
+          headers: {
+            "x-promoter-dni": activeUser.dni,
+            "x-promoter-key": sessionAdminKey(activeUser),
+          },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Actualización no disponible");
+        const payload = await response.json() as { attendance?: Attendance[] };
+        if (cancelled || !Array.isArray(payload.attendance)) return;
+        setAttendance((current) => {
+          const ownPending = current.filter((item) => item.promoterId === activeUser.id && item.status === "PENDIENTE");
+          const others = current.filter((item) => item.promoterId !== activeUser.id);
+          const next = sortNewestByDate([...others, ...mergeAttendance(ownPending, payload.attendance!)]);
+          if (JSON.stringify(next) !== JSON.stringify(current)) writeStore("bt-attendance", next);
+          return next;
+        });
+        console.info("[Molitalia] attendance refresh ms", Date.now() - started);
+      } catch (error) {
+        if (!cancelled) console.warn("[Molitalia] attendance refresh failed", Date.now() - started, error);
+      } finally {
+        window.clearTimeout(timer);
+        busy = false;
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 60000);
+    const onResume = () => void refresh();
+    window.addEventListener("online", onResume);
+    document.addEventListener("visibilitychange", onResume);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("online", onResume);
+      document.removeEventListener("visibilitychange", onResume);
+    };
+  }, [activeUser?.id, activeUser?.dni, activeUser?.role, activeUser?.password]);
 
   const logoutImmediately = () => {
     safeStorageRemove("bt-session");
