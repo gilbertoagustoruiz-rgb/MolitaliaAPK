@@ -14835,10 +14835,38 @@ export default function App() {
         if (manual) {
           const remaining = readStore<Sale[]>("bt-sales", []).filter((entry) => entry.status === "PENDIENTE").length
             + readStore<Attendance[]>("bt-attendance", []).filter((entry) => entry.status === "PENDIENTE").length;
+          let message = failedCount || remaining
+            ? `${confirmedCount} confirmado(s); ${remaining} registro(s) pendiente(s). No vuelvas a registrarlos. Reintenta sincronizar.`
+            : `${confirmedCount} confirmado(s). Sin pendientes locales.`;
+          if (!remaining && !failedCount && !cancelled) {
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), 12_000);
+            try {
+              const response = await fetch(APP_STORAGE_READ, {
+                cache: "no-store",
+                signal: controller.signal,
+              });
+              if (!response.ok) throw new Error("Consulta de historial no disponible");
+              const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
+              if (!Array.isArray(payload.snapshot?.sales) || !Array.isArray(payload.snapshot?.attendance))
+                throw new Error("Respuesta de historial incompleta");
+              const serverSales = new Set(payload.snapshot.sales.map((item) => item.id));
+              const serverAttendance = new Set(payload.snapshot.attendance.map((item) => item.id));
+              const localSales = readStore<Sale[]>("bt-sales", []);
+              const localAttendance = readStore<Attendance[]>("bt-attendance", []);
+              const missing = localSales.filter((item) => item.status === "SINCRONIZADA" && !serverSales.has(item.id)).length
+                + localAttendance.filter((item) => item.status === "SINCRONIZADA" && !serverAttendance.has(item.id)).length;
+              message = missing
+                ? `Atención: ${missing} registro(s) locales no aparecen en el historial del servidor. Contacta al analista; no los vuelvas a crear.`
+                : `Historial local contrastado con PostgreSQL: ${localSales.length} ventas y ${localAttendance.length} marcaciones sin faltantes detectados.`;
+            } catch {
+              message = "Pendientes enviados; no se pudo verificar el historial completo en PostgreSQL. Intenta nuevamente.";
+            } finally {
+              window.clearTimeout(timer);
+            }
+          }
           window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
-            detail: { message: failedCount || remaining
-              ? `${confirmedCount} confirmado(s); ${remaining} registro(s) pendiente(s). No vuelvas a registrarlos. Reintenta sincronizar.`
-              : `${confirmedCount} confirmado(s). Sin pendientes locales; historial completo aún no verificado contra PostgreSQL.` },
+            detail: { message },
           }));
         }
       }
