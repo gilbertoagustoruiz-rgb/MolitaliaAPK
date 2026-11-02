@@ -14624,12 +14624,14 @@ export default function App() {
           writeStore("bt-sales", next);
           return next;
         });
-        setAttendance((current) => {
-          const next = mergeAttendance(current, cloudAttendance);
-          if (JSON.stringify(next) === JSON.stringify(current)) return current;
-          writeStore("bt-attendance", next);
-          return next;
-        });
+        if (Array.isArray(payload.snapshot.attendance)) {
+          setAttendance((current) => {
+            const next = mergeAttendance(current, cloudAttendance);
+            if (JSON.stringify(next) === JSON.stringify(current)) return current;
+            writeStore("bt-attendance", next);
+            return next;
+          });
+        }
         setMovements((current) => {
           const next = mergeMovements(current, cloudMovements);
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
