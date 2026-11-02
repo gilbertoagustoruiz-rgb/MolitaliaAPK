@@ -4312,10 +4312,10 @@ function WarehouseTransfersModule({
       const payload = await response.json().catch(() => ({}));
       if (!response.ok)
         throw new Error(payload.message || "No se pudo guardar el traslado.");
-      await load();
       setModalOpen(false);
       setEditing(null);
       notify(isEdit ? "Traslado actualizado correctamente." : "Traslado registrado correctamente.");
+      void load();
       return true;
     } catch (error) {
       notify(
