@@ -12036,9 +12036,15 @@ function PromoterApp({
   const [module, setModule] = useState<"MARCACIONES" | "VENTAS">("MARCACIONES");
   const [manualSyncBusy, setManualSyncBusy] = useState(false);
   const [manualSyncMessage, setManualSyncMessage] = useState("");
+  const manualSyncTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (manualSyncTimer.current !== null) window.clearTimeout(manualSyncTimer.current);
+  }, []);
   useEffect(() => {
     const completed = (event: Event) => {
       const detail = (event as CustomEvent<{ message: string }>).detail;
+      if (manualSyncTimer.current !== null) window.clearTimeout(manualSyncTimer.current);
+      manualSyncTimer.current = null;
       setManualSyncBusy(false);
       setManualSyncMessage(detail?.message || "Sincronización finalizada.");
     };
@@ -12053,6 +12059,11 @@ function PromoterApp({
     }
     setManualSyncBusy(true);
     setManualSyncMessage("Sincronizando con PostgreSQL...");
+    manualSyncTimer.current = window.setTimeout(() => {
+      setManualSyncBusy(false);
+      setManualSyncMessage("La sincronización está tardando demasiado. Conservamos los pendientes; vuelve a intentar sin duplicar registros.");
+      manualSyncTimer.current = null;
+    }, 45_000);
     window.dispatchEvent(new Event("bt-manual-sync-request"));
   };
 
@@ -14821,11 +14832,15 @@ export default function App() {
         }
       } finally {
         running = false;
-        if (manual) window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
-          detail: { message: failedCount
-            ? `${confirmedCount} registro(s) confirmado(s); ${failedCount} pendiente(s) sin confirmar. No vuelvas a registrarlos: intenta sincronizar nuevamente.`
-            : `${confirmedCount} registro(s) confirmado(s) en PostgreSQL. Sin pendientes nuevos confirmados.` },
-        }));
+        if (manual) {
+          const remaining = readStore<Sale[]>("bt-sales", []).filter((entry) => entry.status === "PENDIENTE").length
+            + readStore<Attendance[]>("bt-attendance", []).filter((entry) => entry.status === "PENDIENTE").length;
+          window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
+            detail: { message: failedCount || remaining
+              ? `${confirmedCount} confirmado(s); ${remaining} registro(s) pendiente(s). No vuelvas a registrarlos. Reintenta sincronizar.`
+              : `${confirmedCount} confirmado(s). Sin pendientes locales; historial completo aún no verificado contra PostgreSQL.` },
+          }));
+        }
       }
     };
 
