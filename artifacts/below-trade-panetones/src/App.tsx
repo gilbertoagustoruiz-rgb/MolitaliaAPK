@@ -10075,8 +10075,9 @@ function AnalystApp({
       writeStore("bt-sales", nextSales);
     }
     if (Array.isArray(snapshot.attendance)) {
-      setAttendance(snapshot.attendance);
-      writeStore("bt-attendance", snapshot.attendance);
+      const nextAttendance = mergeAttendance(attendance, snapshot.attendance);
+      setAttendance(nextAttendance);
+      writeStore("bt-attendance", nextAttendance);
     }
     if (Array.isArray(snapshot.inventory)) {
       const nextInventory = reconcileInventory(
@@ -14819,16 +14820,20 @@ export default function App() {
             writeStore("bt-sales", nextSales);
             return nextSales;
           });
-          setAttendance((current) => {
-            const nextAttendance = mergeAttendance(
-              current,
-              payload.snapshot?.attendance || [],
-            );
-            if (JSON.stringify(nextAttendance) === JSON.stringify(current))
-              return current;
-            writeStore("bt-attendance", nextAttendance);
-            return nextAttendance;
-          });
+          // Una respuesta parcial de ventas NO representa el catálogo completo
+          // de marcaciones. No interpretar ausencia de attendance como lista vacía.
+          if (Array.isArray(payload.snapshot.attendance)) {
+            setAttendance((current) => {
+              const nextAttendance = mergeAttendance(
+                current,
+                payload.snapshot!.attendance!,
+              );
+              if (JSON.stringify(nextAttendance) === JSON.stringify(current))
+                return current;
+              writeStore("bt-attendance", nextAttendance);
+              return nextAttendance;
+            });
+          }
           setMovements((current) => {
             const nextMovements = mergeMovements(
               current,
