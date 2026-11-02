@@ -14723,7 +14723,12 @@ export default function App() {
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la marcación.");
             setAttendance((current) => {
-              const next = mergeAttendance(current, snapshot.attendance || []);
+              // Respuesta compacta: actualizar solo los IDs confirmados.
+              // No eliminar otras marcaciones sincronizadas del historial.
+              const byId = new Map(current.map((entry) => [entry.id, entry]));
+              for (const entry of snapshot.attendance || [])
+                byId.set(entry.id, entry);
+              const next = sortNewestByDate(Array.from(byId.values()));
               writeStore("bt-attendance", next);
               return next;
             });
