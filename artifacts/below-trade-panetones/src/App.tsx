@@ -15017,6 +15017,56 @@ export default function App() {
     promoterSession.clientId,
   ]);
 
+  useEffect(() => {
+    if (!activeUser || !isPromoterRole(activeUser.role)) return;
+    let cancelled = false;
+    let busy = false;
+    const refresh = async () => {
+      if (cancelled || busy || !navigator.onLine || document.hidden) return;
+      busy = true;
+      const started = Date.now();
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch("/api/app-storage/promoter/attendance", {
+          headers: {
+            "x-promoter-dni": activeUser.dni,
+            "x-promoter-key": sessionAdminKey(activeUser),
+          },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Actualización no disponible");
+        const payload = await response.json() as { attendance?: Attendance[] };
+        if (cancelled || !Array.isArray(payload.attendance)) return;
+        setAttendance((current) => {
+          const ownPending = current.filter((item) => item.promoterId === activeUser.id && item.status === "PENDIENTE");
+          const others = current.filter((item) => item.promoterId !== activeUser.id);
+          const next = sortNewestByDate([...others, ...mergeAttendance(ownPending, payload.attendance!)]);
+          if (JSON.stringify(next) !== JSON.stringify(current)) writeStore("bt-attendance", next);
+          return next;
+        });
+        console.info("[Molitalia] attendance refresh ms", Date.now() - started);
+      } catch (error) {
+        if (!cancelled) console.warn("[Molitalia] attendance refresh failed", Date.now() - started, error);
+      } finally {
+        window.clearTimeout(timer);
+        busy = false;
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 60000);
+    const onResume = () => void refresh();
+    window.addEventListener("online", onResume);
+    document.addEventListener("visibilitychange", onResume);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("online", onResume);
+      document.removeEventListener("visibilitychange", onResume);
+    };
+  }, [activeUser?.id, activeUser?.dni, activeUser?.role, activeUser?.password]);
+
   const logoutImmediately = () => {
     safeStorageRemove("bt-session");
     setPromoterSession({ marketId: "", clientId: "" });
