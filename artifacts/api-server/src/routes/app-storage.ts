@@ -3544,7 +3544,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
 router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> => {
   const dni = String(req.get("x-promoter-dni") || "").trim();
   const password = String(req.get("x-promoter-key") || "");
-  if (!/^\\d{8}$/.test(dni) || !password) {
+  if (!/^\d{8}$/.test(dni) || !password) {
     res.status(401).json({ message: "Sesión no válida." });
     return;
   }
