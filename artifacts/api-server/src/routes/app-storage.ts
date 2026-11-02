@@ -4370,7 +4370,6 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
     await upsertRecord(pool as unknown as QueryClient, "users", userRecord);
     res.status(201).json({
       user: publicUser(userRecord),
-      snapshot: await readSnapshot(),
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to create user");
