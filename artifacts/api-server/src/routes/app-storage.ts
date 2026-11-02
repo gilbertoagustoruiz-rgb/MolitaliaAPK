@@ -902,6 +902,10 @@ async function syncSnapshot(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // Evita que sincronizaciones concurrentes retengan conexiones indefinidamente.
+    // PostgreSQL revierte la transacción completa si se agota cualquiera de los límites.
+    await client.query("SET LOCAL lock_timeout = '8s'");
+    await client.query("SET LOCAL statement_timeout = '45s'");
     await client.query(
       "SELECT pg_advisory_xact_lock_shared(hashtextextended('catalog_revision',0))",
     );
