@@ -702,6 +702,22 @@ try {
     body: JSON.stringify({ snapshot: { attendance: [{ id: "ATT-E2E-IN", promoterId: promoter.id, promoterDni: promoter.dni, clientId: client.id, marketId: market.id, type: "ENTRADA", photo: "/api/e2e.jpg", date: now, status: "PENDIENTE" }] } }),
   });
 
+  const noCredentials = await fetch(base + "/app-storage/promoter/attendance");
+  if (noCredentials.status !== 401)
+    throw new Error("Attendance endpoint allowed unauthenticated access.");
+  const invalidCredentials = await fetch(base + "/app-storage/promoter/attendance", {
+    headers: { "x-promoter-dni": promoter.dni, "x-promoter-key": "wrong-key" },
+  });
+  if (invalidCredentials.status !== 403)
+    throw new Error("Attendance endpoint accepted an incorrect password.");
+  const ownAttendance = await request("/app-storage/promoter/attendance", {
+    headers: { "x-promoter-dni": promoter.dni, "x-promoter-key": promoter.password },
+  });
+  if (!ownAttendance.attendance.some((entry) => entry.id === "ATT-E2E-IN"))
+    throw new Error("Authenticated promoter cannot recover synchronized attendance.");
+  if (ownAttendance.attendance.some((entry) => entry.promoterId !== promoter.id))
+    throw new Error("Attendance endpoint leaked another promoter's data.");
+
   const unitSale = {
     id: "VTA-E2E-UNIT", promoterId: promoter.id, clientId: client.id, marketId: market.id,
     mode: "UNIDADES", units: 2, amountSoles: 20, weightKg: 1.8,
