@@ -3540,6 +3540,41 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
   }
 });
 
+// Historial privado del promotor: credenciales verificadas contra PostgreSQL.
+router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> => {
+  const dni = String(req.get("x-promoter-dni") || "").trim();
+  const password = String(req.get("x-promoter-key") || "");
+  if (!/^\\d{8}$/.test(dni) || !password) {
+    res.status(401).json({ message: "Sesión no válida." });
+    return;
+  }
+  try {
+    const credentials = await pool.query(
+      "SELECT id,role,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
+      [dni],
+    );
+    const actor = credentials.rows[0];
+    if (!actor || actor.status !== "ACTIVO" ||
+        !["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"].includes(String(actor.role || "").toUpperCase()) ||
+        !actor.password_hash || !(await verifyPassword(password, actor.password_hash))) {
+      res.status(403).json({ message: "No autorizado." });
+      return;
+    }
+    const rows = await pool.query(
+      "SELECT data,status FROM attendance WHERE promoter_id=$1 ORDER BY event_date DESC",
+      [String(actor.id)],
+    );
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ attendance: rows.rows.map((row) => ({
+      ...(row.data as StoredRecord),
+      status: String(row.status || "SINCRONIZADA"),
+    })) });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to refresh promoter attendance");
+    res.status(500).json({ message: "No se pudo actualizar la asistencia." });
+  }
+});
+
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
     const result = await pool.query("SELECT data FROM assignments");
