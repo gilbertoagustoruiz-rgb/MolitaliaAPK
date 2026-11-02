@@ -3679,12 +3679,10 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
     );
 
     await db.query("COMMIT");
-    const snapshot = await readSnapshot();
+    // El COMMIT es la confirmación. No bloquear la respuesta con readSnapshot().
     res.json({
       storage: "digitalocean-postgresql",
       assignment: normalized,
-      assignments: snapshot.assignments,
-      snapshot,
     });
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
@@ -4625,7 +4623,7 @@ router.post(
           record,
         );
       }
-      res.json({ snapshot: await readSnapshot() });
+      res.json({ saved: true, kind });
     } catch (error) {
       res.status(400).json({
         message:
