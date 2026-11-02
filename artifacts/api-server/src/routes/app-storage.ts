@@ -3679,12 +3679,10 @@ router.post("/app-storage/assignments", async (req, res): Promise<void> => {
     );
 
     await db.query("COMMIT");
-    const snapshot = await readSnapshot();
+    // El COMMIT es la confirmación. No bloquear la respuesta con readSnapshot().
     res.json({
       storage: "digitalocean-postgresql",
       assignment: normalized,
-      assignments: snapshot.assignments,
-      snapshot,
     });
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
@@ -4260,22 +4258,39 @@ router.post("/app-storage/admin/markets", async (req, res): Promise<void> => {
     status: "ACTIVO",
     updatedAt: new Date().toISOString(),
   };
+  const db = await pool.connect();
   try {
+    await db.query("BEGIN");
+    await db.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+      [`market-name:${market.name}`],
+    );
+    const duplicate = await db.query(
+      "SELECT id FROM markets WHERE UPPER(name)=UPPER($1) AND id<>$2 LIMIT 1",
+      [market.name, market.id],
+    );
+    if (duplicate.rows.length)
+      throw new Error("Ya existe otro mercado con ese nombre.");
+
     if (value(market, "warehouseId")) {
-      const warehouse = await pool.query(
+      const warehouse = await db.query(
         "SELECT id FROM warehouses WHERE id=$1 AND status='ACTIVO' LIMIT 1",
         [market.warehouseId],
       );
-      if (!warehouse.rows.length) {
-        res.status(400).json({ message: "El almacén seleccionado no existe o está inactivo." });
-        return;
-      }
+      if (!warehouse.rows.length)
+        throw new Error("El almacén seleccionado no existe o está inactivo.");
     }
-    await upsertRecord(pool as unknown as QueryClient, "markets", market);
-    res.status(201).json({ market, snapshot: await readSnapshot() });
+    await upsertRecord(db as unknown as QueryClient, "markets", market);
+    await db.query("COMMIT");
+    res.status(201).json({ market });
   } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to create market");
-    res.status(500).json({ message: "No se pudo crear el mercado." });
+    res.status(409).json({
+      message: error instanceof Error ? error.message : "No se pudo crear el mercado.",
+    });
+  } finally {
+    db.release();
   }
 });
 
@@ -4370,7 +4385,6 @@ router.post("/app-storage/admin/users", async (req, res): Promise<void> => {
     await upsertRecord(pool as unknown as QueryClient, "users", userRecord);
     res.status(201).json({
       user: publicUser(userRecord),
-      snapshot: await readSnapshot(),
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to create user");
@@ -4495,7 +4509,7 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
     await db.query("COMMIT");
     res
       .status(201)
-      .json({ client: clientRecord, snapshot: await readSnapshot() });
+      .json({ client: clientRecord });
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to save client");
@@ -4626,7 +4640,7 @@ router.post(
           record,
         );
       }
-      res.json({ snapshot: await readSnapshot() });
+      res.json({ saved: true, kind });
     } catch (error) {
       res.status(400).json({
         message:

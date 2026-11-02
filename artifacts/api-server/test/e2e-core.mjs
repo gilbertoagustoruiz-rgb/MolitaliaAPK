@@ -366,6 +366,95 @@ try {
     body: JSON.stringify({ initial: true, quantities: { PANETON_900G: 10, PANETON_85G: 10, AVENA: 1000, BATEA: 20, MANDIL: 20, SPAGHETTI: 1000 } }),
   });
 
+  await request("/app-storage/warehouses", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      warehouse: {
+        id: "ALM-E2E-DEST",
+        name: "ALMACEN E2E DESTINO",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+        status: "ACTIVO",
+      },
+    }),
+  });
+
+  const sourceBeforeTransfer = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  await request("/app-storage/transfers", {
+    method: "POST",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      transfer: {
+        id: "TRS-E2E",
+        sourceWarehouseId: "ALM-E2E",
+        destinationWarehouseId: "ALM-E2E-DEST",
+        items: { AVENA: 5 },
+        note: "E2E traslado",
+        date: new Date().toISOString(),
+      },
+    }),
+  });
+  const sourceAfterTransfer = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  const destinationAfterTransfer = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E-DEST'",
+  );
+  if (
+    Number(sourceAfterTransfer.rows[0].stock.AVENA) !==
+      Number(sourceBeforeTransfer.rows[0].stock.AVENA) - 5 ||
+    Number(destinationAfterTransfer.rows[0].stock.AVENA) !== 5
+  )
+    throw new Error("Warehouse transfer did not move stock exactly once.");
+
+  const duplicateTransfer = await fetch(base + "/app-storage/transfers", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...adminHeaders },
+    body: JSON.stringify({
+      transfer: {
+        id: "TRS-E2E",
+        sourceWarehouseId: "ALM-E2E",
+        destinationWarehouseId: "ALM-E2E-DEST",
+        items: { AVENA: 5 },
+        note: "E2E traslado duplicado",
+        date: new Date().toISOString(),
+      },
+    }),
+  });
+  if (duplicateTransfer.status !== 409)
+    throw new Error("Duplicate warehouse transfer ID was not rejected.");
+
+  await request("/app-storage/transfers/TRS-E2E", {
+    method: "PUT",
+    headers: adminHeaders,
+    body: JSON.stringify({
+      transfer: {
+        sourceWarehouseId: "ALM-E2E",
+        destinationWarehouseId: "ALM-E2E-DEST",
+        items: { AVENA: 3 },
+        note: "E2E traslado editado",
+        date: new Date().toISOString(),
+      },
+    }),
+  });
+  const sourceAfterTransferEdit = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E'",
+  );
+  const destinationAfterTransferEdit = await pool.query(
+    "SELECT stock FROM warehouses WHERE id='ALM-E2E-DEST'",
+  );
+  if (
+    Number(sourceAfterTransferEdit.rows[0].stock.AVENA) !==
+      Number(sourceBeforeTransfer.rows[0].stock.AVENA) - 3 ||
+    Number(destinationAfterTransferEdit.rows[0].stock.AVENA) !== 3
+  )
+    throw new Error("Warehouse transfer edit did not reverse and reapply stock correctly.");
+
   const duplicateWarehouseResponse = await fetch(base + "/app-storage/warehouses", {
     method: "POST",
     headers: { "content-type": "application/json", ...adminHeaders },
@@ -449,6 +538,23 @@ try {
       },
     }),
   });
+  const duplicateMarketName = await fetch(base + "/app-storage/admin/markets", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...adminHeaders },
+    body: JSON.stringify({
+      market: {
+        id: "MKT-E2E-DUP",
+        name: "Mercado E2E Editable",
+        region: "LIMA",
+        department: "LIMA",
+        province: "LIMA",
+        district: "LIMA",
+      },
+    }),
+  });
+  if (duplicateMarketName.status !== 409)
+    throw new Error("Duplicate market name was not rejected.");
+
   await request("/app-storage/admin/records/markets/MKT-E2E-EDIT", {
     method: "PUT",
     headers: adminHeaders,
