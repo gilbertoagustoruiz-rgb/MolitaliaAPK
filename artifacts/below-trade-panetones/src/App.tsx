@@ -14819,16 +14819,20 @@ export default function App() {
             writeStore("bt-sales", nextSales);
             return nextSales;
           });
-          setAttendance((current) => {
-            const nextAttendance = mergeAttendance(
-              current,
-              payload.snapshot?.attendance || [],
-            );
-            if (JSON.stringify(nextAttendance) === JSON.stringify(current))
-              return current;
-            writeStore("bt-attendance", nextAttendance);
-            return nextAttendance;
-          });
+          // Respuestas compactas de ventas pueden omitir attendance.
+          // La ausencia de la colección no significa que no existan marcaciones.
+          if (Array.isArray(payload.snapshot.attendance)) {
+            setAttendance((current) => {
+              const nextAttendance = mergeAttendance(
+                current,
+                payload.snapshot!.attendance!,
+              );
+              if (JSON.stringify(nextAttendance) === JSON.stringify(current))
+                return current;
+              writeStore("bt-attendance", nextAttendance);
+              return nextAttendance;
+            });
+          }
           setMovements((current) => {
             const nextMovements = mergeMovements(
               current,
