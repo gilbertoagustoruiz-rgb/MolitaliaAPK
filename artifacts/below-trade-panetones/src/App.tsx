@@ -14704,8 +14704,15 @@ export default function App() {
     let cancelled = false;
     let running = false;
 
-    const syncPendingOperationalRecords = async () => {
-      if (running || cancelled || !navigator.onLine) return;
+    const syncPendingOperationalRecords = async (manual = false) => {
+      let confirmedCount = 0;
+      let failedCount = 0;
+      if (running || cancelled || !navigator.onLine) {
+        if (manual) window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
+          detail: { message: running ? "Hay una sincronización en curso. Espera unos segundos." : "Sin conexión o sesión no disponible." },
+        }));
+        return;
+      }
       running = true;
       const catalogRevision =
         safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined;
@@ -14759,6 +14766,7 @@ export default function App() {
             );
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la marcación.");
+            confirmedCount += 1;
             setAttendance((current) => {
               // Respuesta compacta: actualizar solo los IDs confirmados.
               // No eliminar otras marcaciones sincronizadas del historial.
@@ -14770,6 +14778,7 @@ export default function App() {
               return next;
             });
           } catch (error) {
+            failedCount += 1;
             console.error(
               `No se pudo sincronizar marcación ${item.id}`,
               error,
@@ -14790,12 +14799,14 @@ export default function App() {
             );
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la venta.");
+            confirmedCount += 1;
             setSales((current) => {
               const next = mergeSales(current, snapshot.sales || []);
               writeStore("bt-sales", next);
               return next;
             });
           } catch (error) {
+            failedCount += 1;
             console.error(
               `No se pudo sincronizar venta ${sale.id}`,
               error,
@@ -14804,9 +14815,16 @@ export default function App() {
         }
       } finally {
         running = false;
+        if (manual) window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
+          detail: { message: failedCount
+            ? `${confirmedCount} registro(s) confirmado(s); ${failedCount} pendiente(s) sin confirmar. No vuelvas a registrarlos: intenta sincronizar nuevamente.`
+            : `${confirmedCount} registro(s) confirmado(s) en PostgreSQL. Sin pendientes nuevos confirmados.` },
+        }));
       }
     };
 
+    const onManualSync = () => void syncPendingOperationalRecords(true);
+    window.addEventListener("bt-manual-sync-request", onManualSync);
     void syncPendingOperationalRecords();
     const interval = window.setInterval(syncPendingOperationalRecords, 10_000);
     const retry = () => void syncPendingOperationalRecords();
@@ -14815,6 +14833,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("online", retry);
+      window.removeEventListener("bt-manual-sync-request", onManualSync);
     };
   }, [cloudReady, sales, attendance, cloudSyncTick]);
 
