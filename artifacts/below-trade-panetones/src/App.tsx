@@ -10132,6 +10132,18 @@ function AnalystApp({
         ? decodeURIComponent(path.slice(saleDeletePrefix.length))
         : undefined;
     applyAdminSnapshot(payload.snapshot, removedSaleId);
+    // Las altas de catálogos devuelven confirmación inmediata después del COMMIT.
+    // La actualización del catálogo se consulta aparte, sin bloquear el cierre del modal.
+    if (!payload.snapshot && init?.method === "POST" &&
+        ["/markets", "/clients", "/users"].includes(path)) {
+      void fetch(APP_STORAGE_READ, { cache: "no-store" })
+        .then(async (refresh) => {
+          if (!refresh.ok) return;
+          const result = await refresh.json() as { snapshot?: Partial<CloudSnapshot> };
+          if (result.snapshot) applyAdminSnapshot(result.snapshot);
+        })
+        .catch((error) => console.warn("Catálogo pendiente de actualizar:", error));
+    }
     return payload;
   };
   const editRecord = (
