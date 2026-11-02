@@ -12034,6 +12034,28 @@ function PromoterApp({
     administrative?.clientId || "",
   );
   const [module, setModule] = useState<"MARCACIONES" | "VENTAS">("MARCACIONES");
+  const [manualSyncBusy, setManualSyncBusy] = useState(false);
+  const [manualSyncMessage, setManualSyncMessage] = useState("");
+  useEffect(() => {
+    const completed = (event: Event) => {
+      const detail = (event as CustomEvent<{ message: string }>).detail;
+      setManualSyncBusy(false);
+      setManualSyncMessage(detail?.message || "Sincronización finalizada.");
+    };
+    window.addEventListener("bt-manual-sync-complete", completed);
+    return () => window.removeEventListener("bt-manual-sync-complete", completed);
+  }, []);
+  const requestManualSync = () => {
+    if (manualSyncBusy) return;
+    if (!navigator.onLine) {
+      setManualSyncMessage("Sin conexión. Los registros pendientes se conservarán.");
+      return;
+    }
+    setManualSyncBusy(true);
+    setManualSyncMessage("Sincronizando con PostgreSQL...");
+    window.dispatchEvent(new Event("bt-manual-sync-request"));
+  };
+
   const [view, setView] = useState<"LISTA" | "NUEVA">("LISTA");
   const available = clients.filter(
     (client) =>
@@ -13805,14 +13827,27 @@ function PromoterApp({
               </p>
             </div>
             {view === "LISTA" && (
-              <Btn
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <Btn variant="outline" onClick={requestManualSync} testId="button-manual-sync">
+                  <RefreshCw /> {manualSyncBusy ? "Sincronizando..." : "Sincronizar ahora"}
+                </Btn>
+                <Btn
                 onClick={() => setView("NUEVA")}
                 testId={`button-new-${module.toLowerCase()}`}
               >
                 <Plus /> Nueva {module === "VENTAS" ? "venta" : "marcación"}
-              </Btn>
+                </Btn>
+              </div>
             )}
           </div>
+          {view === "LISTA" && (
+            <div role="status" aria-live="polite" style={{ padding: "8px 0", fontSize: 13 }}>
+              {module === "VENTAS"
+                ? `${mineSales.filter((item) => item.status === "PENDIENTE").length} venta(s) pendiente(s)`
+                : `${mineAttendance.filter((item) => item.status === "PENDIENTE").length} marcación(es) pendiente(s)`}
+              {manualSyncMessage ? ` · ${manualSyncMessage}` : ""}
+            </div>
+          )}
           <div className="market-banner">
             <span className="market-pin">
               <MapPin />
