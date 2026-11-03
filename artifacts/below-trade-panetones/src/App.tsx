@@ -13711,6 +13711,7 @@ export default function App() {
         const payload = (await response.json()) as {
           cursor?: string;
           snapshot?: Partial<CloudSnapshot>;
+          deleted?: { sales?: string[]; attendance?: string[]; movements?: string[] };
         };
         if (cancelled || !payload.snapshot || !payload.cursor) return;
         const cloudSales = Array.isArray(payload.snapshot.sales)
@@ -13724,21 +13725,24 @@ export default function App() {
           : [];
 
         setSales((current) => {
-          const next = mergeSales(current, cloudSales);
+          const removed = new Set(payload.deleted?.sales || []);
+          const next = mergeSales(current, cloudSales).filter((item) => !removed.has(item.id));
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-sales", next);
           return next;
         });
         if (Array.isArray(payload.snapshot.attendance)) {
           setAttendance((current) => {
-            const next = mergeAttendance(current, cloudAttendance);
+            const removed = new Set(payload.deleted?.attendance || []);
+          const next = mergeAttendance(current, cloudAttendance).filter((item) => !removed.has(item.id));
             if (JSON.stringify(next) === JSON.stringify(current)) return current;
             writeStore("bt-attendance", next);
             return next;
           });
         }
         setMovements((current) => {
-          const next = mergeMovements(current, cloudMovements);
+          const removed = new Set(payload.deleted?.movements || []);
+          const next = mergeMovements(current, cloudMovements).filter((item) => !removed.has(item.id));
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-inventory-movements", next);
           return next;
