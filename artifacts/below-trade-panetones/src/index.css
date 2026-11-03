@@ -5569,3 +5569,16 @@ select:focus-visible,
     padding: 3px 7px;
   }
 }
+.role-scope {
+  margin: 0;
+  color: hsl(var(--muted));
+  font-size: 13px;
+}
+.top-user-info strong {
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .top-user-info {
+    display: none;
+  }
+}

@@ -10,7 +10,6 @@ import {
   FileSpreadsheet,
   Gift,
   House,
-  Lock,
   LogOut,
   MapPin,
   Minus,
@@ -3445,8 +3444,14 @@ function Shell({
             <span>{theme === "dark" ? "Día" : "Noche"}</span>
           </Btn>
           <div className="top-user-info">
-            <strong>{user.name}</strong>
-            <small>{user.roleLabel || user.role}</small>
+            {/* El promotor ya tiene su saludo grande en Inicio. */}
+            <strong data-testid="topbar-greeting">
+              {isPromoterRole(user.role) ? user.name : `Hola, ${displayPersonName(user.name)}`}
+            </strong>
+            <small>
+              {user.roleLabel || user.role}
+              {user.role === "COORDINADOR" ? " · SOLO LECTURA" : ""}
+            </small>
           </div>
           {!isPromoterRole(user.role) && (
             <Btn variant="ghost" onClick={logout} testId="button-logout">
@@ -3468,6 +3473,14 @@ function Shell({
       {children}
     </div>
   );
+}
+
+// "MARCO CORDERO GARRIDO" → "Marco Cordero Garrido" (los nombres llegan en mayúsculas).
+function displayPersonName(name?: string) {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/(^|[\s'-])([a-záéíóúñü])/g, (_match, start: string, letter: string) => start + letter.toUpperCase());
 }
 
 function Stat({
@@ -7902,6 +7915,11 @@ function CoordinatorToday({
   const hour = now.toLocaleTimeString("es-PE", { hour: "numeric", minute: "2-digit", timeZone: "America/Lima" });
   return (
     <section className="role-today" data-testid="coordinator-today" aria-label="Resumen de hoy">
+      <p className="role-scope">
+        {markets.length
+          ? `Solo lectura · Tus mercados: ${markets.map((market) => market.name).join(", ")}`
+          : "Aún no tienes mercados asignados. Pide al analista que te asigne."}
+      </p>
       <div className="role-kpis">
         <div>
           <span>Ventas de hoy</span>
@@ -8290,20 +8308,7 @@ function CoordinatorApp({
 
   return (
     <main className="workspace">
-      <div className={`page-head ${tab === "inicio" ? "" : "page-head-slim"}`}>
-        <div className="page-head-greeting">
-          <span className="eyebrow">PANEL DE COORDINACIÓN</span>
-          <h1>Hola, {user.name}</h1>
-          <p>
-            {allowedMarkets.length
-              ? `Tus mercados: ${allowedMarkets.map((market) => market.name).join(", ")}`
-              : "Aún no tienes mercados asignados."}
-          </p>
-        </div>
-        <span className="readonly-badge" title="Puedes consultar y descargar; no editar.">
-          <Lock /> Solo lectura
-        </span>
-      </div>
+      {/* Saludo y "Solo lectura" están en la barra superior. */}
       <nav className="tabs" aria-label="Módulos">
         {allowedTabs.map(([value, label]) => (
           <button
@@ -10457,16 +10462,7 @@ function AnalystApp({
   ];
   return (
     <main className="workspace">
-      {/* El saludo solo en Resumen: en las demás pestañas la tabla sube al inicio. */}
-      {tab === "inicio" && (
-        <div className="page-head">
-          <div>
-            <span className="eyebrow">PANEL DE CONTROL</span>
-            <h1>Hola, {user.name}</h1>
-            <p>Supervisa el pulso de la campaña desde un solo lugar.</p>
-          </div>
-        </div>
-      )}
+      {/* El saludo está en la barra superior, junto a Noche/Día. */}
       <nav className="tabs tabs-grouped" aria-label="Módulos">
         {analystTabGroups.map((group) => {
           const groupTabs = tabs.filter(([value]) => (analystTabGroupOf[value] || "operacion") === group.id);
