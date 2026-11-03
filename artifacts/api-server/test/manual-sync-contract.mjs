@@ -29,11 +29,13 @@ check("Reintento conserva el identificador de ventas y marcaciones",
   app.includes('serverItem.id === item.id'));
 check("No confirma ventas o marcaciones sin SINCRONIZADA",
   app.includes('confirmed.status !== "SINCRONIZADA"'));
+// El contraste envía los IDs sincronizados y el servidor responde los faltantes
+// (POST /app-storage/verify-ids), en vez de descargar la base completa.
 check("Contraste de historial y límite de espera",
-  app.includes('fetch(APP_STORAGE_READ, {') &&
+  app.includes('fetch(APP_STORAGE_VERIFY_IDS, {') &&
   app.includes('12_000') &&
-  app.includes('serverSales.has(item.id)') &&
-  app.includes('serverAttendance.has(item.id)'));
+  app.includes('payload.missing.sales.length') &&
+  app.includes('payload.missing.attendance.length'));
 check("Sin red conserva pendientes",
   app.includes('Sin conexión. Los registros pendientes se conservarán.'));
 console.log("Contrato de sincronización manual aprobado (no sustituye prueba real de clic móvil).");
