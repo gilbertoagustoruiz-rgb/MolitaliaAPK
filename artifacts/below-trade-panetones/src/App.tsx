@@ -113,11 +113,24 @@ function peruDateKey(date = new Date()) {
 }
 
 
-function isPunoSouthMarket(market?: Pick<Market, "region" | "department"> | null) {
+// Zona sin canje: solo Juliaca (provincia San Román, Puno). Todas las demás
+// ciudades —incluida Puno ciudad— muestran y registran canje según la Tabla Canjes.
+// Debe coincidir con isNoCanjeLocation del servidor (api-server/src/routes/app-storage.ts).
+const NO_CANJE_DISTRICTS = new Set(["JULIACA"]);
+const NO_CANJE_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
+const NO_CANJE_NAME_KEYWORD = "JULIACA";
+function isNoCanjeLocation(location: { name?: string; province?: string; district?: string }) {
+  const district = normalizeLocationValue(location.district);
+  const province = normalizeLocationValue(location.province);
+  const name = normalizeLocationValue(location.name);
   return (
-    normalizeLocationValue(market?.region) === "SUR" &&
-    normalizeLocationValue(market?.department) === "PUNO"
+    NO_CANJE_DISTRICTS.has(district) ||
+    NO_CANJE_PROVINCES.has(province) ||
+    name.includes(NO_CANJE_NAME_KEYWORD)
   );
+}
+function isNoCanjeMarket(market?: Pick<Market, "name" | "province" | "district"> | null) {
+  return Boolean(market) && isNoCanjeLocation(market!);
 }
 type AppUser = {
   id: string;
@@ -204,6 +217,8 @@ type Sale = {
   marketId: string;
   marketRegion?: string;
   marketDepartment?: string;
+  // Venta registrada sin canje por zona (nombre histórico de la marca).
+  punoWithoutCanje?: boolean;
   marketProvince?: string;
   marketDistrict?: string;
   mode: "UNIDADES" | "PLANCHAS";
@@ -306,9 +321,10 @@ const MINI_HALF_PLANCHA_SKUS = new Set([
 
 function isHistoricalMiniHalfPlanchaCanje(sale: Sale) {
   if (sale.bonus || sale.mode !== "PLANCHAS") return false;
+  // Ventas registradas sin canje (marca guardada) o de la zona sin canje.
   if (
-    normalizeLocationValue(sale.marketRegion) === "SUR" &&
-    normalizeLocationValue(sale.marketDepartment) === "PUNO"
+    sale.punoWithoutCanje ||
+    isNoCanjeLocation({ province: sale.marketProvince, district: sale.marketDistrict })
   )
     return false;
   const lines = (sale.planchaLines || []).filter(
@@ -4140,11 +4156,11 @@ function WarehouseCatalog({
       const r=await fetch("/api/app-storage/warehouses/regularize-puno-without-canje",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
-      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Puno.`);
+      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Juliaca.`);
       await load();
-      notify(`${p.salesRegularized||0} venta(s) de Puno quedaron sin canje. ${p.restoredItems||0} movimiento(s) de stock fueron devueltos al Almacén.`);
+      notify(`${p.salesRegularized||0} venta(s) de Juliaca quedaron sin canje. ${p.restoredItems||0} movimiento(s) de stock fueron devueltos al Almacén.`);
     }catch(e){
-      notify(e instanceof Error?e.message:"No se pudieron regularizar las ventas de Puno.",true);
+      notify(e instanceof Error?e.message:"No se pudieron regularizar las ventas de Juliaca.",true);
     }finally{setPunoRegularizing(false);}
   };
   const regularizeSeptemberClosures=async()=>{
@@ -5094,7 +5110,7 @@ function SaleEditModal({
         originalCount,
       );
   const saleMarket = markets.find((market) => market.id === sale.marketId);
-  const punoWithoutCanje = isPunoSouthMarket(saleMarket);
+  const punoWithoutCanje = isNoCanjeMarket(saleMarket);
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -5336,12 +5352,12 @@ function SaleEditModal({
   return (
     <Modal
       title="Editar venta"
-      detail={punoWithoutCanje ? `${sale.id} · Región SUR · PUNO: esta venta debe permanecer sin canje.` : `${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
+      detail={punoWithoutCanje ? `${sale.id} · Zona Juliaca: esta venta debe permanecer sin canje.` : `${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
       close={close}
     >
       {punoWithoutCanje && (
         <div className="notice">
-          <strong>Región SUR · PUNO: venta sin canje</strong>
+          <strong>Zona Juliaca: venta sin canje</strong>
           <p>No se pueden agregar bonificaciones a esta venta.</p>
         </div>
       )}
@@ -11610,7 +11626,7 @@ function PromoterApp({
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
-  const punoWithoutCanje = isPunoSouthMarket(selectedMarket);
+  const punoWithoutCanje = isNoCanjeMarket(selectedMarket);
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
@@ -12876,8 +12892,8 @@ function PromoterApp({
         )}
         {punoWithoutCanje && (
           <div className="notice">
-            <strong>Región SUR · PUNO: venta sin canje</strong>
-            <p>Las ventas de este departamento no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
+            <strong>Zona Juliaca: venta sin canje</strong>
+            <p>Las ventas en Juliaca no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
           </div>
         )}
         {!punoWithoutCanje && bonus && mode === "PLANCHAS" && (

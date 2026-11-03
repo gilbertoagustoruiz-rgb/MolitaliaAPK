@@ -126,11 +126,31 @@ function normalizeLocationValue(input: unknown) {
     .toUpperCase();
 }
 
-function isPunoSouthMarketData(record: StoredRecord) {
+// Zona sin canje: solo Juliaca (provincia San Román, Puno). Todas las demás
+// ciudades —incluida Puno ciudad— registran canje según la Tabla Canjes.
+// Debe coincidir con isNoCanjeLocation de la app (below-trade-panetones/src/App.tsx).
+const NO_CANJE_DISTRICTS = new Set(["JULIACA"]);
+const NO_CANJE_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
+const NO_CANJE_NAME_KEYWORD = "JULIACA";
+
+function isNoCanjeLocation(location: {
+  name?: unknown;
+  province?: unknown;
+  district?: unknown;
+}) {
+  const district = normalizeLocationValue(location.district);
+  const province = normalizeLocationValue(location.province);
+  const name = normalizeLocationValue(location.name);
   return (
-    normalizeLocationValue(record.region) === "SUR" &&
-    normalizeLocationValue(record.department) === "PUNO"
+    NO_CANJE_DISTRICTS.has(district) ||
+    NO_CANJE_PROVINCES.has(province) ||
+    name.includes(NO_CANJE_NAME_KEYWORD)
   );
+}
+
+/** Datos de un mercado (tabla markets). */
+function isNoCanjeMarketData(record: StoredRecord) {
+  return isNoCanjeLocation(record);
 }
 
 function stripCanjeFromSale(record: StoredRecord): StoredRecord {
@@ -151,7 +171,9 @@ function stripCanjeFromSale(record: StoredRecord): StoredRecord {
     redemptionCount: 0,
     planchaAccessory: value(record, "mode") === "PLANCHAS" ? "NINGUNO" : undefined,
     planchaMultiplier: value(record, "mode") === "PLANCHAS" ? 1 : undefined,
+    // Nombre histórico de la marca: se conserva para reportes y ventas anteriores.
     punoWithoutCanje: true,
+    noCanjeZone: "JULIACA",
   };
 }
 
@@ -169,11 +191,13 @@ function enforceSaleWithoutCanje(record: StoredRecord) {
   Object.assign(record, clean);
 }
 
-function isPunoSouthSaleRecord(record: StoredRecord) {
-  return (
-    normalizeLocationValue(record.marketRegion) === "SUR" &&
-    normalizeLocationValue(record.marketDepartment) === "PUNO"
-  );
+/** Respaldo cuando el mercado no está en la base: ubicación copiada en la venta. */
+function isNoCanjeSaleRecord(record: StoredRecord) {
+  return isNoCanjeLocation({
+    name: record.marketName,
+    province: record.marketProvince,
+    district: record.marketDistrict,
+  });
 }
 
 function hasRedemptionConsumption(record: StoredRecord) {
@@ -1315,7 +1339,15 @@ async function syncSnapshot(
             }
           }
           if (isNewRecord && name === "sales") {
-            if (isPunoSouthSaleRecord(record)) enforceSaleWithoutCanje(record);
+            // La zona se decide con el mercado guardado en la base (no con lo que
+            // envía el celular, que puede venir de una versión anterior de la app).
+            const saleMarket = await client.query(
+              "SELECT data FROM markets WHERE id=$1 LIMIT 1",
+              [value(record, "marketId")],
+            );
+            const saleMarketData = isRecord(saleMarket.rows[0]?.data) ? saleMarket.rows[0].data : null;
+            if (saleMarketData ? isNoCanjeMarketData(saleMarketData) : isNoCanjeSaleRecord(record))
+              enforceSaleWithoutCanje(record);
             const validatedRule = await validateSubmittedRedemptionRule(
               client as unknown as QueryClient,
               record,
@@ -2119,7 +2151,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
 
 router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req, res): Promise<void> => {
   const actor = await authorizedWarehouseActor(req);
-  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar ventas de Puno." });
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar ventas de Juliaca." });
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
@@ -2127,7 +2159,7 @@ router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req,
 
     const marketsResult = await db.query("SELECT id,data FROM markets");
     const punoMarketIds = marketsResult.rows
-      .filter((row) => isRecord(row.data) && isPunoSouthMarketData(row.data))
+      .filter((row) => isRecord(row.data) && isNoCanjeMarketData(row.data))
       .map((row) => String(row.id));
     if (!punoMarketIds.length) {
       await db.query("COMMIT");
@@ -2251,7 +2283,7 @@ router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req,
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to regularize Puno sales without canje");
-    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudieron regularizar las ventas de Puno." });
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudieron regularizar las ventas de Juliaca." });
   } finally {
     db.release();
   }
@@ -5097,7 +5129,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (!customer.rows.length || !market.rows.length)
       throw new Error("Selecciona un cliente activo del mercado elegido.");
     const marketData = isRecord(market.rows[0].data) ? market.rows[0].data : {};
-    const punoWithoutCanje = isPunoSouthMarketData(marketData);
+    const punoWithoutCanje = isNoCanjeMarketData(marketData);
     if (punoWithoutCanje) {
       input.marketRegion = value(marketData, "region");
       input.marketDepartment = value(marketData, "department");
@@ -5392,7 +5424,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     const currentMarketData = isRecord(currentMarketResult.rows[0]?.data)
       ? currentMarketResult.rows[0].data
       : {};
-    const punoWithoutCanje = isPunoSouthMarketData(currentMarketData);
+    const punoWithoutCanje = isNoCanjeMarketData(currentMarketData);
     const hasCanjeEditedFlag = Object.prototype.hasOwnProperty.call(
       input,
       "canjeEdited",
