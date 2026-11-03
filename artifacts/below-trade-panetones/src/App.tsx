@@ -8290,8 +8290,8 @@ function CoordinatorApp({
 
   return (
     <main className="workspace">
-      <div className="page-head">
-        <div>
+      <div className={`page-head ${tab === "inicio" ? "" : "page-head-slim"}`}>
+        <div className="page-head-greeting">
           <span className="eyebrow">PANEL DE COORDINACIÓN</span>
           <h1>Hola, {user.name}</h1>
           <p>
@@ -10457,13 +10457,16 @@ function AnalystApp({
   ];
   return (
     <main className="workspace">
-      <div className="page-head">
-        <div>
-          <span className="eyebrow">PANEL DE CONTROL</span>
-          <h1>Hola, {user.name}</h1>
-          <p>Supervisa el pulso de la campaña desde un solo lugar.</p>
+      {/* El saludo solo en Resumen: en las demás pestañas la tabla sube al inicio. */}
+      {tab === "inicio" && (
+        <div className="page-head">
+          <div>
+            <span className="eyebrow">PANEL DE CONTROL</span>
+            <h1>Hola, {user.name}</h1>
+            <p>Supervisa el pulso de la campaña desde un solo lugar.</p>
+          </div>
         </div>
-      </div>
+      )}
       <nav className="tabs tabs-grouped" aria-label="Módulos">
         {analystTabGroups.map((group) => {
           const groupTabs = tabs.filter(([value]) => (analystTabGroupOf[value] || "operacion") === group.id);
