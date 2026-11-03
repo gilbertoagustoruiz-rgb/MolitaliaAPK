@@ -1,4 +1,5 @@
 import {
+  createHash,
   randomBytes,
   randomUUID,
   scrypt as scryptCallback,
@@ -338,6 +339,24 @@ async function verifyPassword(password: string, stored: string) {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
+// Contraseñas ya verificadas contra un hash concreto (huella SHA-256, nunca el
+// texto plano). Evita repetir scrypt en cada sincronización del mismo usuario.
+const verifiedPasswords = new Map<string, string>();
+const passwordFingerprint = (password: string, stored: string) =>
+  createHash("sha256").update(`${stored}\u0000${password}`).digest("hex");
+
+async function passwordMatchesStored(password: string, stored: string) {
+  if (!stored) return false;
+  const fingerprint = passwordFingerprint(password, stored);
+  if (verifiedPasswords.get(stored) === fingerprint) return true;
+  const matches = await verifyPassword(password, stored);
+  if (matches) {
+    if (verifiedPasswords.size > 5000) verifiedPasswords.clear();
+    verifiedPasswords.set(stored, fingerprint);
+  }
+  return matches;
+}
+
 function publicUser(record: StoredRecord) {
   const { password: _password, ...safe } = record;
   return safe;
@@ -554,7 +573,9 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,region=EXCLUDED.region,department=EXCLUDED.department,
        province=EXCLUDED.province,district=EXCLUDED.district,status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (markets.name,markets.region,markets.department,markets.province,markets.district,markets.status,markets.data,markets.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.name,EXCLUDED.region,EXCLUDED.department,EXCLUDED.province,EXCLUDED.district,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "name"),
@@ -569,11 +590,19 @@ async function upsertRecord(
     );
   } else if (name === "users") {
     const password = value(source, "password");
-    const passwordHash = password ? await hashPassword(password) : null;
     const existingByDni = await client.query(
-      "SELECT id,data FROM users WHERE dni=$1 LIMIT 1",
+      "SELECT id,data,password_hash FROM users WHERE dni=$1 LIMIT 1",
       [key],
     );
+    // Solo se genera un hash nuevo si la contraseña cambió. Reenviar el mismo
+    // usuario ya no recalcula scrypt ni reescribe la fila.
+    const storedHash = existingByDni.rows[0]?.password_hash
+      ? String(existingByDni.rows[0].password_hash)
+      : "";
+    const passwordHash =
+      password && !(await passwordMatchesStored(password, storedHash))
+        ? await hashPassword(password)
+        : null;
     let userId = value(source, "id") || key;
     if (existingByDni.rows[0]?.id) {
       userId = String(existingByDni.rows[0].id);
@@ -608,7 +637,10 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (dni) DO UPDATE SET name=EXCLUDED.name,role=EXCLUDED.role,status=EXCLUDED.status,
        password_hash=COALESCE(EXCLUDED.password_hash,users.password_hash),data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE EXCLUDED.password_hash IS NOT NULL
+          OR (users.name,users.role,users.status,users.data,users.record_updated_at)
+             IS DISTINCT FROM (EXCLUDED.name,EXCLUDED.role,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         userId,
         key,
@@ -624,7 +656,9 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO clients (id,code,name,market_id,status,data,record_updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code,name=EXCLUDED.name,market_id=EXCLUDED.market_id,
-       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (clients.code,clients.name,clients.market_id,clients.status,clients.data,clients.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.code,EXCLUDED.name,EXCLUDED.market_id,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "code") || key,
@@ -636,13 +670,16 @@ async function upsertRecord(
       ],
     );
   } else if (name === "sales") {
-    await client.query(
+    const written = await client.query(
       `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,redemption_rule_id,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (id) DO UPDATE SET receipt_photo=EXCLUDED.receipt_photo,exchange_photo=EXCLUDED.exchange_photo,
        redemption_rule_id=EXCLUDED.redemption_rule_id,status=EXCLUDED.status,data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
-       WHERE sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at`,
+       WHERE (sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at)
+         AND (sales.receipt_photo,sales.exchange_photo,sales.redemption_rule_id,sales.status,sales.data,sales.record_updated_at)
+             IS DISTINCT FROM (EXCLUDED.receipt_photo,EXCLUDED.exchange_photo,EXCLUDED.redemption_rule_id,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)
+       RETURNING id`,
       [
         key,
         value(source, "promoterId"),
@@ -661,13 +698,23 @@ async function upsertRecord(
         updated,
       ],
     );
-    await replaceSaleItems(client, key, normalized);
+    // Las líneas se reconstruyen solo si la venta se insertó o realmente cambió.
+    // Antes se borraban y reinsertaban en cada reenvío, incluso cuando la venta
+    // entrante era más antigua que la guardada. Si una venta existente no tiene
+    // líneas (histórico), se completan igual que antes.
+    const saleChanged = written.rows.length > 0;
+    const hasItems = saleChanged
+      ? true
+      : (await client.query("SELECT 1 FROM sale_items WHERE sale_id=$1 LIMIT 1", [key])).rows.length > 0;
+    if (saleChanged || !hasItems) await replaceSaleItems(client, key, normalized);
   } else if (name === "attendance") {
     await client.query(
       `INSERT INTO attendance (id,promoter_id,client_id,market_id,event_type,event_date,status,photo,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET photo=EXCLUDED.photo,status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (attendance.photo,attendance.status,attendance.data,attendance.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.photo,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "promoterId"),
@@ -685,7 +732,9 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at) VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (market_id) DO UPDATE SET tasting_stock=EXCLUDED.tasting_stock,redemption_stock=EXCLUDED.redemption_stock,
-       data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (inventory.tasting_stock,inventory.redemption_stock,inventory.data,inventory.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.tasting_stock,EXCLUDED.redemption_stock,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         numeric(source, "tastingStock"),
@@ -700,8 +749,10 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
-       WHERE inventory_movements.kind <> 'DEGUSTACION'
-          OR inventory_movements.record_updated_at <= EXCLUDED.record_updated_at`,
+       WHERE (inventory_movements.kind <> 'DEGUSTACION'
+          OR inventory_movements.record_updated_at <= EXCLUDED.record_updated_at)
+         AND (inventory_movements.status,inventory_movements.data,inventory_movements.record_updated_at)
+             IS DISTINCT FROM (EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "marketId"),
@@ -721,7 +772,9 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (promoter_id) DO UPDATE SET promoter_dni=EXCLUDED.promoter_dni,market_ids=EXCLUDED.market_ids,
        client_ids=EXCLUDED.client_ids,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
-       WHERE assignments.record_updated_at <= EXCLUDED.record_updated_at`,
+       WHERE assignments.record_updated_at <= EXCLUDED.record_updated_at
+         AND (assignments.promoter_dni,assignments.market_ids,assignments.client_ids,assignments.data)
+             IS DISTINCT FROM (EXCLUDED.promoter_dni,EXCLUDED.market_ids,EXCLUDED.client_ids,EXCLUDED.data)`,
       [
         key,
         value(source, "promoterDni") || null,
@@ -755,7 +808,9 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (sku) DO UPDATE SET product=EXCLUDED.product,units_per_package=EXCLUDED.units_per_package,
        unit_price=EXCLUDED.unit_price,total_price=EXCLUDED.total_price,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (product_prices.product,product_prices.units_per_package,product_prices.unit_price,product_prices.total_price,product_prices.data)
+         IS DISTINCT FROM (EXCLUDED.product,EXCLUDED.units_per_package,EXCLUDED.unit_price,EXCLUDED.total_price,EXCLUDED.data)`,
       [
         key,
         value(source, "product") || key,
@@ -771,7 +826,9 @@ async function upsertRecord(
       `INSERT INTO client_categories (id,name,status,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (client_categories.name,client_categories.status,client_categories.data)
+         IS DISTINCT FROM (EXCLUDED.name,EXCLUDED.status,EXCLUDED.data)`,
       [
         key,
         value(source, "name") || key,
@@ -969,17 +1026,42 @@ async function syncSnapshot(
     if (!attendanceOnly) {
       await lockInventoryLedger(client as unknown as QueryClient);
     }
-    const deletedSalesResult = await client.query(
-      "SELECT record_id FROM app_storage_tombstones WHERE collection='sales'",
-    );
-    const deletedSaleIds = new Set(
-      deletedSalesResult.rows.map((row) => String(row.record_id)),
-    );
-    const tombstones = await client.query(
-      "SELECT collection,record_id FROM app_storage_tombstones",
-    );
+    // Solo se consultan los tombstones de los IDs que vienen en este lote
+    // (antes se leía la tabla completa dos veces en cada sincronización).
+    // El resultado es el mismo: un registro eliminado nunca se vuelve a crear.
+    const tombstoneKeys = new Map<string, [string, string]>();
+    const addTombstoneKey = (collection: string, recordId: string) => {
+      if (recordId) tombstoneKeys.set(`${collection}:${recordId}`, [collection, recordId]);
+    };
+    for (const name of Object.keys(collectionConfig) as CollectionName[]) {
+      const list = guardedIncoming[name];
+      if (!Array.isArray(list)) continue;
+      for (const record of list) {
+        if (!isRecord(record)) continue;
+        addTombstoneKey(name, value(record, "id"));
+        if (name === "movements") {
+          const saleId = saleIdFromCanjeMovement(record);
+          if (saleId) addTombstoneKey("sales", saleId);
+        }
+      }
+    }
+    const tombstonePairs = [...tombstoneKeys.values()];
+    const tombstones = tombstonePairs.length
+      ? await client.query(
+          `SELECT t.collection,t.record_id
+             FROM app_storage_tombstones t
+             JOIN unnest($1::text[],$2::text[]) AS k(collection,record_id)
+               ON t.collection=k.collection AND t.record_id=k.record_id`,
+          [tombstonePairs.map(([c]) => c), tombstonePairs.map(([, id]) => id)],
+        )
+      : { rows: [] as Array<Record<string, unknown>> };
     const deletedRecords = new Set(
       tombstones.rows.map((row) => `${row.collection}:${row.record_id}`),
+    );
+    const deletedSaleIds = new Set(
+      tombstones.rows
+        .filter((row) => row.collection === "sales")
+        .map((row) => String(row.record_id)),
     );
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
       // inventory es histórico: nunca se acepta como fuente de saldo operativo.
@@ -998,11 +1080,12 @@ async function syncSnapshot(
         if (!isRecord(record)) continue;
         if (deletedRecords.has(`${name}:${value(record, "id")}`)) continue;
         const config = collectionConfig[name];
+        // Solo se necesita saber si existe y su updatedAt; no traer el JSON completo.
         const existing = await client.query(
-          `SELECT data FROM ${config.table} WHERE ${config.column}=$1`,
+          `SELECT data->>'updatedAt' AS edited_at FROM ${config.table} WHERE ${config.column}=$1`,
           [value(record, config.key)],
         );
-        const editedAt = existing.rows[0]?.data?.updatedAt;
+        const editedAt = existing.rows[0]?.edited_at;
         if (
           editedAt &&
           (!recordDate(record) || String(editedAt) > String(recordDate(record)))
