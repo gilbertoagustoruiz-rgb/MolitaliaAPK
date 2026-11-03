@@ -5261,3 +5261,80 @@ select:focus-visible,
 .role-grid > .role-card:first-child {
   flex-basis: 100%;
 }
+
+/* ---------- Analista: menú agrupado y acciones rápidas ---------- */
+.tabs-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tabs-group + .tabs-group {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid hsl(var(--line));
+}
+.tabs-group-label {
+  padding: 2px 13px 4px;
+  font: 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  color: hsl(var(--muted));
+}
+.tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tab-count {
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #a6461b;
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+}
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.quick-actions button {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid hsl(var(--line));
+  border-radius: 14px;
+  background: hsl(var(--paper));
+  color: hsl(var(--ink));
+  font-weight: 700;
+  text-align: left;
+}
+.quick-actions button:hover {
+  border-color: hsl(var(--orange));
+}
+.quick-actions svg {
+  width: 18px;
+  flex: none;
+  color: hsl(var(--orange));
+}
+.role-grid > .role-card .role-alert .btn {
+  min-height: 40px;
+  padding: 0 12px;
+}
+@media (max-width: 700px) {
+  .tabs-grouped,
+  .tabs-grouped .tabs-group {
+    flex-direction: row;
+  }
+  .tabs-grouped .tabs-group + .tabs-group {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .tabs-grouped .tabs-group-label {
+    display: none;
+  }
+}

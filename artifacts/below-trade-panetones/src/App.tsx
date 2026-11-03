@@ -8123,9 +8123,6 @@ function CoordinatorApp({
     ["almacen", "Almacén"],
     ["clientes", "Clientes"],
     ["canjes", "Canjes"],
-    ...(["ADMIN", "ANALISTA"].includes(user.role)
-      ? [["tabla-canjes", "Tabla Canjes"]]
-      : []),
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
@@ -8592,6 +8589,187 @@ function loadMapboxGl() {
     document.head.appendChild(script);
   });
   return mapboxLoader;
+}
+
+const analystTabGroups = [
+  { id: "operacion", label: "OPERACIÓN" },
+  { id: "catalogos", label: "CATÁLOGOS" },
+  { id: "logistica", label: "LOGÍSTICA Y EQUIPO" },
+] as const;
+const analystTabGroupOf: Record<string, string> = {
+  inicio: "operacion",
+  ventas: "operacion",
+  marcaciones: "operacion",
+  canjes: "operacion",
+  degustacion: "operacion",
+  "aprobaciones-trade": "operacion",
+  mercados: "catalogos",
+  clientes: "catalogos",
+  usuarios: "catalogos",
+  marcas: "catalogos",
+  categorias: "catalogos",
+  "tabla-canjes": "catalogos",
+  almacen: "logistica",
+  traslados: "logistica",
+  asignaciones: "logistica",
+};
+
+/**
+ * Resumen del día para Admin / Analista (y Supervisor, Trade): totales, avisos con
+ * acción directa y accesos rápidos a las ventanas de alta que ya existen.
+ * Solo lee datos que el panel ya cargó; no guarda nada por su cuenta.
+ */
+function AnalystToday({
+  canEdit,
+  markets,
+  users,
+  assignments,
+  sales,
+  attendance,
+  warehouses,
+  pendingTradeApprovals,
+  onTab,
+  onCreate,
+}: {
+  canEdit: boolean;
+  markets: Market[];
+  users: AppUser[];
+  assignments: PromoterAssignment[];
+  sales: Sale[];
+  attendance: Attendance[];
+  warehouses: Warehouse[];
+  pendingTradeApprovals: number;
+  onTab: (tab: string) => void;
+  onCreate: (what: "market" | "client" | "user" | "sale") => void;
+}) {
+  const today = attendanceDay(new Date());
+  const todaySales = sales.filter((sale) => attendanceDay(sale.date) === today);
+  const amount = todaySales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0);
+  const planchas = todaySales
+    .filter((sale) => sale.mode === "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.planchas) || 0), 0);
+  const looseUnits = todaySales
+    .filter((sale) => sale.mode !== "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.units) || 0), 0);
+  const withCanje = todaySales.filter((sale) => effectiveSaleBonus(sale)).length;
+  const noCanjeToday = todaySales.filter((sale) => sale.punoWithoutCanje).length;
+  const activePromoters = users.filter(
+    (person) => person.status === "ACTIVO" && !isArchivedUser(person) && isPromoterRole(person.role),
+  );
+  const todayAttendance = attendance.filter((item) => attendanceDay(item.date) === today);
+  const latestOf = (person: AppUser) =>
+    todayAttendance
+      .filter((item) => item.promoterId === person.id || (item.promoterDni && item.promoterDni === person.dni))
+      .sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime())[0];
+  const working = activePromoters.filter((person) => latestOf(person)?.type === "ENTRADA").length;
+  const withoutEntry = activePromoters.filter((person) => !latestOf(person)).length;
+  const activeMarkets = markets.filter((market) => market.status === "ACTIVO");
+  const marketsWithoutWarehouse = activeMarkets.filter(
+    (market) =>
+      !market.warehouseId &&
+      !warehouses.some((warehouse) => (warehouse.marketIds || []).includes(market.id)),
+  );
+  const coordinatorsWithoutMarkets = users.filter((person) => {
+    if (person.role !== "COORDINADOR" || person.status !== "ACTIVO" || isArchivedUser(person)) return false;
+    const assignment = assignments.find((item) => assignmentMatchesUser(item, person));
+    return !(assignment?.marketIds?.length || person.marketId);
+  });
+  const alerts: Array<{ key: string; tone: "warn" | "info"; text: ReactNode; action: string; tab: string }> = [];
+  if (canEdit && pendingTradeApprovals > 0)
+    alerts.push({
+      key: "trade",
+      tone: "warn",
+      text: <><strong>{pendingTradeApprovals} aprobación{pendingTradeApprovals === 1 ? "" : "es"} Trade</strong> esperan revisión.</>,
+      action: "Revisar",
+      tab: "aprobaciones-trade",
+    });
+  if (withoutEntry > 0)
+    alerts.push({
+      key: "entrada",
+      tone: "warn",
+      text: <><strong>{withoutEntry} promotor{withoutEntry === 1 ? "" : "es"}</strong> aún no marca{withoutEntry === 1 ? "" : "n"} entrada hoy.</>,
+      action: "Ver marcaciones",
+      tab: "marcaciones",
+    });
+  if (marketsWithoutWarehouse.length > 0)
+    alerts.push({
+      key: "almacen",
+      tone: "info",
+      text: <><strong>{marketsWithoutWarehouse.length} mercado{marketsWithoutWarehouse.length === 1 ? "" : "s"}</strong> sin almacén asignado: sus ventas no pueden descontar canjes.</>,
+      action: "Ver mercados",
+      tab: "mercados",
+    });
+  if (coordinatorsWithoutMarkets.length > 0)
+    alerts.push({
+      key: "coordinador",
+      tone: "info",
+      text: <><strong>{coordinatorsWithoutMarkets.map((person) => person.name).join(", ")}</strong> (coordinador) no tiene mercados asignados: hoy no ve datos.</>,
+      action: "Asignar",
+      tab: "asignaciones",
+    });
+  return (
+    <section className="role-today" data-testid="analyst-today" aria-label="Resumen de hoy">
+      <div className="role-kpis">
+        <div>
+          <span>Ventas de hoy</span>
+          <strong>{formatSoles(amount)}</strong>
+          <small>{todaySales.length} venta{todaySales.length === 1 ? "" : "s"}</small>
+        </div>
+        <div>
+          <span>Planchas</span>
+          <strong>{planchas}</strong>
+          <small>+ {looseUnits} unidades sueltas</small>
+        </div>
+        <div>
+          <span>Ventas con canje</span>
+          <strong>{withCanje}</strong>
+          <small>{noCanjeToday ? `${noCanjeToday} en zona sin canje (Juliaca)` : `de ${todaySales.length} hoy`}</small>
+        </div>
+        <div>
+          <span>En jornada ahora</span>
+          <strong>
+            {working} de {activePromoters.length}
+          </strong>
+          <small className={withoutEntry ? "warn" : ""}>
+            {withoutEntry ? `${withoutEntry} sin marcar entrada` : "Todos marcaron"}
+          </small>
+        </div>
+      </div>
+      <div className="role-grid">
+        <div className="role-card">
+          <h2>Requiere atención</h2>
+          {alerts.length ? (
+            alerts.map((alert) => (
+              <div className={`role-alert ${alert.tone}`} key={alert.key}>
+                {alert.tone === "warn" ? <AlertTriangle /> : <MapPin />}
+                <span>{alert.text}</span>
+                <Btn variant="outline" onClick={() => onTab(alert.tab)} testId={`button-attention-${alert.key}`}>
+                  {alert.action}
+                </Btn>
+              </div>
+            ))
+          ) : (
+            <p className="role-alert info">
+              <CheckCircle2 /> <span>Todo en orden por ahora.</span>
+            </p>
+          )}
+        </div>
+        {canEdit && (
+          <div className="role-card">
+            <h2>Acciones rápidas</h2>
+            <div className="quick-actions">
+              <button type="button" onClick={() => onCreate("market")} data-testid="quick-new-market"><MapPin /> Nuevo mercado</button>
+              <button type="button" onClick={() => onCreate("client")} data-testid="quick-new-client"><Store /> Nuevo cliente</button>
+              <button type="button" onClick={() => onCreate("user")} data-testid="quick-new-user"><UserRound /> Nuevo usuario</button>
+              <button type="button" onClick={() => onCreate("sale")} data-testid="quick-new-sale"><ShoppingBag /> Venta de promotor</button>
+              <button type="button" onClick={() => onTab("traslados")}><Truck /> Traslado de stock</button>
+              <button type="button" onClick={() => onTab("tabla-canjes")}><Gift /> Tabla Canjes</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function AnalystApp({
@@ -10246,6 +10424,7 @@ function AnalystApp({
   const tastingConsumptions = movements
     .filter((movement) => movement.kind === "DEGUSTACION")
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const pendingTradeCount = tradeApprovals.filter((item) => item.status === "PENDIENTE").length;
   const tabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
@@ -10261,6 +10440,8 @@ function AnalystApp({
       ? [
           ["marcas", "Marcas"],
           ["categorias", "Categorías"],
+          // Antes estaba solo en el menú del coordinador (donde nunca aparecía).
+          ["tabla-canjes", "Tabla Canjes"],
         ]
       : []),
     ["canjes", "Canjes"],
@@ -10283,18 +10464,49 @@ function AnalystApp({
           <p>Supervisa el pulso de la campaña desde un solo lugar.</p>
         </div>
       </div>
-      <nav className="tabs" aria-label="Módulos">
-        {tabs.map(([value, label]) => (
-          <button
-            key={value}
-            className={`tab ${tab === value ? "active" : ""}`}
-            onClick={() => setTab(value)}
-            data-testid={`tab-${value}`}
-          >
-            {label}
-          </button>
-        ))}
+      <nav className="tabs tabs-grouped" aria-label="Módulos">
+        {analystTabGroups.map((group) => {
+          const groupTabs = tabs.filter(([value]) => (analystTabGroupOf[value] || "operacion") === group.id);
+          if (!groupTabs.length) return null;
+          return (
+            <div className="tabs-group" key={group.id} role="group" aria-label={group.label}>
+              <span className="tabs-group-label">{group.label}</span>
+              {groupTabs.map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`tab ${tab === value ? "active" : ""}`}
+                  onClick={() => setTab(value)}
+                  data-testid={`tab-${value}`}
+                >
+                  {label}
+                  {value === "aprobaciones-trade" && pendingTradeCount > 0 && (
+                    <span className="tab-count" aria-label={`${pendingTradeCount} pendientes`}>{pendingTradeCount}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </nav>
+      {tab === "inicio" && (
+        <AnalystToday
+          canEdit={["ADMIN", "ANALISTA"].includes(user.role)}
+          markets={markets}
+          users={users}
+          assignments={assignments}
+          sales={sales}
+          attendance={attendance}
+          warehouses={marketWarehouses}
+          pendingTradeApprovals={pendingTradeCount}
+          onTab={setTab}
+          onCreate={(what) => {
+            if (what === "sale") {
+              setTab("ventas");
+              setNewAdminSale(true);
+            } else setModal(what);
+          }}
+        />
+      )}
       {tab === "inicio" && (
         <SalesDashboard
           sales={sales}
