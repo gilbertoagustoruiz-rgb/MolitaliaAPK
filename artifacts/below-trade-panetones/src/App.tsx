@@ -9751,7 +9751,6 @@ function AnalystApp({
     ...(["ADMIN", "ANALISTA"].includes(user.role)
       ? [
           ["aprobaciones-trade", "Aprobaciones Trade"],
-          ["tracking", "Tracking"],
         ]
       : []),
     ["marcaciones", "Marcaciones"],
