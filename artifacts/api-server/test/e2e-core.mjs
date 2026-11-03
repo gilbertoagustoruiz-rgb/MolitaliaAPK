@@ -1332,15 +1332,15 @@ try {
   try {
     await delayed.query("BEGIN");
     await delayed.query(
-      "UPDATE sales SET updated_at = now() - interval '90 seconds' WHERE id=$1",
+      "UPDATE sales SET data=jsonb_set(data, '{syncProbe}', '\"delayed-commit\"'), updated_at = now() - interval '90 seconds' WHERE id=$1",
       ["VTA-E2E-LEGACY"],
     );
     const during = await request(deltaPath(initialFeed.syncCursor));
-    if (during.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+    if (during.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY" && sale.syncProbe === "delayed-commit"))
       throw new Error("Uncommitted sale change became visible.");
     await delayed.query("COMMIT");
     const after = await request(deltaPath(initialFeed.syncCursor));
-    if (!after.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+    if (!after.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY" && sale.syncProbe === "delayed-commit"))
       throw new Error("Delayed committed sale was lost by incremental cursor.");
     const retry = await request(deltaPath(initialFeed.syncCursor));
     if (retry.snapshot.sales.filter((sale) => sale.id === "VTA-E2E-LEGACY").length !== 1)
@@ -1348,6 +1348,7 @@ try {
     const reconnect = await request(deltaPath(new Date(Date.now() - 60 * 60 * 1000).toISOString()));
     if (!reconnect.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
       throw new Error("Reconnection did not recover a previously committed sale.");
+    await pool.query("UPDATE sales SET data=data - 'syncProbe', updated_at=now() WHERE id=$1", ["VTA-E2E-LEGACY"]);
   } catch (error) {
     await delayed.query("ROLLBACK").catch(() => undefined);
     throw error;
