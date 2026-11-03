@@ -1362,6 +1362,12 @@ try {
   const afterDelete = await pool.query("SELECT stock FROM warehouses WHERE id='ALM-E2E'");
   const afterAvena = Number(afterDelete.rows[0].stock.AVENA);
   if (afterAvena !== beforeAvena + 1) throw new Error("Deleting the sale did not restore canje stock exactly once.");
+  const deleteFeed = await request(deltaPath(initialFeed.syncCursor));
+  if (!deleteFeed.deleted?.sales?.includes("VTA-E2E-UNIT"))
+    throw new Error("Deleted sale was not propagated in incremental tombstones.");
+  const repeatedDeleteFeed = await request(deltaPath(initialFeed.syncCursor));
+  if (repeatedDeleteFeed.deleted.sales.filter((id) => id === "VTA-E2E-UNIT").length !== 1)
+    throw new Error("Deletion retry returned duplicate tombstones.");
   const remainingItems = await pool.query("SELECT 1 FROM sale_items WHERE sale_id='VTA-E2E-UNIT'");
   if (remainingItems.rows.length) throw new Error("sale_items was not removed with the deleted sale.");
 
