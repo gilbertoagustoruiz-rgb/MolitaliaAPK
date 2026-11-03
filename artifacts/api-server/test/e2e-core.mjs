@@ -1345,6 +1345,14 @@ try {
     const retry = await request(deltaPath(initialFeed.syncCursor));
     if (retry.snapshot.sales.filter((sale) => sale.id === "VTA-E2E-LEGACY").length !== 1)
       throw new Error("Incremental retry returned duplicate sale IDs.");
+    // A transaction older than the ten-minute replay window is recovered by reconciliation.
+    await pool.query("UPDATE sales SET updated_at=now() - interval '30 minutes' WHERE id=$1", ["VTA-E2E-LEGACY"]);
+    const ordinary = await request(deltaPath(new Date().toISOString()));
+    if (ordinary.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Normal incremental feed unexpectedly returned an out-of-window sale.");
+    const reconciled = await request(deltaPath(new Date().toISOString()) + "&reconcile=1");
+    if (!reconciled.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Full operational reconciliation failed to recover a delayed sale.");
     const reconnect = await request(deltaPath(new Date(Date.now() - 60 * 60 * 1000).toISOString()));
     if (!reconnect.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
       throw new Error("Reconnection did not recover a previously committed sale.");
