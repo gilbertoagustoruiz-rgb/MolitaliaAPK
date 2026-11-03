@@ -9,6 +9,7 @@ import {
   Download,
   FileSpreadsheet,
   Gift,
+  House,
   LogOut,
   MapPin,
   Minus,
@@ -11215,16 +11216,24 @@ function AnalystApp({
   );
 }
 
+type PromoterModule = "INICIO" | "MARCACIONES" | "VENTAS";
 function PromoterNav({
   active,
   onChange,
 }: {
-  active: "MARCACIONES" | "VENTAS";
-  onChange: (value: "MARCACIONES" | "VENTAS") => void;
+  active: PromoterModule;
+  onChange: (value: PromoterModule) => void;
 }) {
   return (
-    <aside className="promoter-nav">
+    <aside className="promoter-nav" aria-label="Menú del promotor">
       <p className="nav-label">TAREAS DIARIAS</p>
+      <button
+        className={active === "INICIO" ? "active" : ""}
+        onClick={() => onChange("INICIO")}
+        data-testid="nav-inicio"
+      >
+        <House /> Inicio
+      </button>
       <button
         className={active === "MARCACIONES" ? "active" : ""}
         onClick={() => onChange("MARCACIONES")}
@@ -11240,6 +11249,190 @@ function PromoterNav({
         <ShoppingBag /> Ventas
       </button>
     </aside>
+  );
+}
+
+// Hora y fecha de Lima para la pantalla de inicio del promotor.
+const limaTime = (value: string | Date) =>
+  new Date(value).toLocaleTimeString("es-PE", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Lima",
+  });
+const limaLongDate = (value: Date) =>
+  new Intl.DateTimeFormat("es-PE", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Lima",
+  }).format(value);
+function elapsedLabel(from: string, now: Date) {
+  const minutes = Math.max(0, Math.floor((now.getTime() - new Date(from).getTime()) / 60000));
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+}
+function saleSummaryLabel(sale: Sale) {
+  return sale.mode === "PLANCHAS"
+    ? `${sale.planchas} plancha${Number(sale.planchas) === 1 ? "" : "s"}`
+    : `${sale.units} unidad${Number(sale.units) === 1 ? "" : "es"}`;
+}
+
+/**
+ * Inicio de jornada del promotor. Solo presenta datos que la app ya tiene
+ * (marcaciones, ventas y pendientes del dispositivo) y abre los formularios
+ * existentes; no guarda nada por su cuenta.
+ */
+function PromoterHome({
+  user,
+  now,
+  marketName,
+  clientName,
+  jornada,
+  todaySales,
+  recentSales,
+  pendingCount,
+  syncBusy,
+  syncMessage,
+  noCanjeZone,
+  onSync,
+  onNewSale,
+  onAttendance,
+  onHistory,
+}: {
+  user: AppUser;
+  now: Date;
+  marketName: string;
+  clientName: string;
+  jornada?: Attendance;
+  todaySales: Sale[];
+  recentSales: Sale[];
+  pendingCount: number;
+  syncBusy: boolean;
+  syncMessage: string;
+  noCanjeZone: boolean;
+  onSync: () => void;
+  onNewSale: () => void;
+  onAttendance: () => void;
+  onHistory: () => void;
+}) {
+  const inJornada = jornada?.type === "ENTRADA";
+  const todayAmount = todaySales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0);
+  const todayCanjes = todaySales.filter((sale) => effectiveSaleBonus(sale)).length;
+  const rawFirstName = (user.name || "").trim().split(/\s+/)[0] || "";
+  const firstName = rawFirstName
+    ? rawFirstName.charAt(0).toUpperCase() + rawFirstName.slice(1).toLowerCase()
+    : user.name;
+  return (
+    <div className="ph" data-testid="promoter-home">
+      <header className="ph-greeting">
+        <div>
+          <span className="ph-eyebrow">CAMPAÑA 2026</span>
+          <h1>Hola, {firstName}</h1>
+          <p>{limaLongDate(now)}</p>
+        </div>
+        <span className={`ph-net ${navigator.onLine ? "on" : "off"}`} role="status">
+          {navigator.onLine ? <Check /> : <WifiOff />}
+          {navigator.onLine ? "En línea" : "Sin señal"}
+        </span>
+      </header>
+
+      <section className={`ph-shift ${inJornada ? "active" : ""}`} aria-label="Estado de la jornada">
+        <div className="ph-shift-top">
+          <span className="ph-shift-state">
+            <span className="ph-dot" aria-hidden="true" />
+            {inJornada ? "EN JORNADA" : jornada?.type === "SALIDA" ? "JORNADA CERRADA" : "SIN ENTRADA"}
+          </span>
+          {inJornada && jornada && <span className="ph-shift-time">{elapsedLabel(jornada.date, now)}</span>}
+        </div>
+        <strong className="ph-shift-place">{marketName}</strong>
+        <span className="ph-shift-detail">
+          {clientName}
+          {jornada
+            ? ` · ${jornada.type === "ENTRADA" ? "Entrada" : "Salida"} ${limaTime(jornada.date)}`
+            : " · Aún no marcas tu entrada"}
+        </span>
+        <button type="button" className="ph-shift-btn" onClick={onAttendance} data-testid="button-home-attendance">
+          {inJornada ? <LogOut /> : <Clock3 />}
+          {inJornada ? "Marcar salida" : "Marcar entrada"}
+        </button>
+      </section>
+
+      <button type="button" className="ph-sell" onClick={onNewSale} data-testid="button-home-new-sale">
+        <Plus /> Registrar venta
+      </button>
+      {noCanjeZone && (
+        <p className="ph-zone">
+          <MapPin /> Zona Juliaca: tus ventas aquí no llevan canje.
+        </p>
+      )}
+
+      <div className="ph-stats">
+        <div>
+          <span>Ventas hoy</span>
+          <strong data-testid="home-sales-today">{todaySales.length}</strong>
+        </div>
+        <div>
+          <span>Monto</span>
+          <strong>{formatSoles(todayAmount)}</strong>
+        </div>
+        <div>
+          <span>Con canje</span>
+          <strong>{todayCanjes}</strong>
+        </div>
+      </div>
+
+      {pendingCount > 0 || syncMessage ? (
+        <section className={`ph-pending ${pendingCount ? "" : "done"}`} aria-live="polite">
+          <RefreshCw />
+          <div>
+            <strong>
+              {pendingCount
+                ? `${pendingCount} registro${pendingCount === 1 ? "" : "s"} por enviar`
+                : "Todo enviado"}
+            </strong>
+            <span>{syncMessage || "Se envían solos al volver la señal."}</span>
+          </div>
+          {pendingCount > 0 && (
+            <button type="button" onClick={onSync} disabled={syncBusy} data-testid="button-home-sync">
+              {syncBusy ? "Enviando..." : "Enviar ahora"}
+            </button>
+          )}
+        </section>
+      ) : null}
+
+      <section className="ph-recent" aria-label="Últimas ventas">
+        <div className="ph-recent-head">
+          <h2>Últimas ventas</h2>
+          <button type="button" className="ph-link" onClick={onHistory}>
+            Ver todas
+          </button>
+        </div>
+        {recentSales.length ? (
+          <ul>
+            {recentSales.map((sale) => {
+              const bonus = effectiveSaleBonus(sale);
+              const sent = sale.status === "SINCRONIZADA";
+              return (
+                <li key={sale.id}>
+                  <div>
+                    <strong>{saleSummaryLabel(sale)}</strong>
+                    <span>
+                      {limaTime(sale.date)} · {bonus || (sale.punoWithoutCanje ? "Zona sin canje" : "Sin canje")}
+                    </span>
+                  </div>
+                  <div className="ph-recent-right">
+                    <strong>{formatSoles(Number(sale.amountSoles) || 0)}</strong>
+                    <span className={`ph-chip ${sent ? "ok" : "warn"}`}>{sent ? "Enviada" : "Por enviar"}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="ph-empty">Todavía no registras ventas hoy.</p>
+        )}
+      </section>
+    </div>
   );
 }
 function attendanceDay(date: string | Date = new Date()) {
@@ -11392,7 +11585,8 @@ function PromoterApp({
   const [selectedClientId, setSelectedClientId] = useState(
     administrative?.clientId || "",
   );
-  const [module, setModule] = useState<"MARCACIONES" | "VENTAS">("MARCACIONES");
+  // La jornada abre en Inicio; Marcaciones y Ventas mantienen sus pantallas.
+  const [module, setModule] = useState<PromoterModule>("INICIO");
   const [manualSyncBusy, setManualSyncBusy] = useState(false);
   const [manualSyncMessage, setManualSyncMessage] = useState("");
   const manualSyncTimer = useRef<number | null>(null);
@@ -12535,6 +12729,23 @@ function PromoterApp({
     // La salida registra automáticamente 0 panetones y 0 contactos.
     void finalizeAttendance();
   };
+  // Misma normalización para el campo y para los botones − / + (media plancha en minis).
+  const planchaHalfEligible = isMiniHalfPlanchaProduct(
+    planchaLines[0]?.sku,
+    saleCatalogProducts.find((item) => item.sku === planchaLines[0]?.sku)?.label,
+  );
+  const planchaStep = planchaHalfEligible ? 0.5 : 1;
+  const changePlanchasInput = (value: string) => {
+    if (value === "") {
+      setPlanchasInput("");
+      return;
+    }
+    const numericValue = Number(value);
+    const normalized = planchaHalfEligible
+      ? Math.max(0.5, Math.round(numericValue * 2) / 2)
+      : Math.max(1, Math.trunc(numericValue));
+    setPlanchasInput(String(normalized));
+  };
   const saleForm = (
     <section className="sale-layout">
       <section className="sale-form">
@@ -12676,26 +12887,20 @@ function PromoterApp({
             </Field>
             {planchaType === "FLAT" && (
               <Field label="Cantidad de planchas">
+                <div className="qty-stepper">
+                <button
+                  type="button"
+                  className="qty-btn"
+                  aria-label="Quitar plancha"
+                  data-testid="button-planchas-minus"
+                  onClick={() => changePlanchasInput(String((Number(planchasInput) || 0) - planchaStep))}
+                >
+                  <Minus />
+                </button>
                 <Input
                   type="number"
                   value={planchasInput}
-                  onChange={(value) => {
-                    if (value === "") {
-                      setPlanchasInput("");
-                      return;
-                    }
-                    const currentSku = planchaLines[0]?.sku;
-                    const currentProduct = saleCatalogProducts.find((item) => item.sku === currentSku);
-                    const halfPlanchaEligible = isMiniHalfPlanchaProduct(
-                      currentSku,
-                      currentProduct?.label,
-                    );
-                    const numericValue = Number(value);
-                    const normalized = halfPlanchaEligible
-                      ? Math.max(0.5, Math.round(numericValue * 2) / 2)
-                      : Math.max(1, Math.trunc(numericValue));
-                    setPlanchasInput(String(normalized));
-                  }}
+                  onChange={changePlanchasInput}
                   min={
                     isMiniHalfPlanchaProduct(
                       planchaLines[0]?.sku,
@@ -12714,6 +12919,16 @@ function PromoterApp({
                   }
                   testId="input-sale-planchas"
                 />
+                <button
+                  type="button"
+                  className="qty-btn primary"
+                  aria-label="Agregar plancha"
+                  data-testid="button-planchas-plus"
+                  onClick={() => changePlanchasInput(String((Number(planchasInput) || 0) + planchaStep))}
+                >
+                  <Plus />
+                </button>
+                </div>
               </Field>
             )}
             {planchaType === "MIX" && (
@@ -13025,6 +13240,10 @@ function PromoterApp({
           </Field>
         )}
         <div className="form-actions">
+          <div className="form-actions-total" aria-live="polite">
+            <span>Total</span>
+            <strong>{formatSoles(Number.isFinite(saleAmount) ? saleAmount : 0)}</strong>
+          </div>
           <Btn
             variant="outline"
             onClick={() =>
@@ -13136,8 +13355,19 @@ function PromoterApp({
         </div>
       </main>
     );
+  // Datos de la pantalla de Inicio (solo lectura de lo que ya está en el dispositivo).
+  const homeJornada = isRotativePromoter ? latestAttendanceToday : activeMarketEntry;
+  const homeTodaySales = mineSales.filter((sale) => attendanceDay(sale.date) === today);
+  const homeRecentSales = [...mineSales]
+    .sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime())
+    .slice(0, 3);
+  const homePending =
+    mineSales.filter((item) => item.status !== "SINCRONIZADA").length +
+    mineAttendance.filter((item) => item.status !== "SINCRONIZADA").length;
+  const homeClientName =
+    clients.find((client) => client.id === selectedClientId)?.name || "Cliente";
   return (
-    <main className="promoter-page">
+    <main className={`promoter-page module-${module.toLowerCase()}`}>
       <div className="promoter-layout">
         <PromoterNav
           active={module}
@@ -13148,6 +13378,36 @@ function PromoterApp({
           }}
         />
         <div className="promoter-content">
+          {module === "INICIO" ? (
+            <PromoterHome
+              user={user}
+              now={attendanceClock}
+              marketName={selectedMarket.name}
+              clientName={homeClientName}
+              jornada={homeJornada}
+              todaySales={homeTodaySales}
+              recentSales={homeRecentSales}
+              pendingCount={homePending}
+              syncBusy={manualSyncBusy}
+              syncMessage={manualSyncMessage}
+              noCanjeZone={punoWithoutCanje}
+              onSync={requestManualSync}
+              onNewSale={() => {
+                setModule("VENTAS");
+                setView("NUEVA");
+              }}
+              onAttendance={() => {
+                setModule("MARCACIONES");
+                setView("NUEVA");
+              }}
+              onHistory={() => {
+                setModule("VENTAS");
+                setView("LISTA");
+                setSearch("");
+              }}
+            />
+          ) : (
+          <>
           <div className="promoter-head">
             <div>
               <span className="crumb">
@@ -13492,6 +13752,8 @@ function PromoterApp({
             </section>
           )}
           {view === "NUEVA" && module === "VENTAS" && saleForm}
+          </>
+          )}
         </div>
       </div>
     </main>
