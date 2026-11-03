@@ -9,6 +9,8 @@ import {
   Download,
   FileSpreadsheet,
   Gift,
+  House,
+  Lock,
   LogOut,
   MapPin,
   Minus,
@@ -113,11 +115,24 @@ function peruDateKey(date = new Date()) {
 }
 
 
-function isPunoSouthMarket(market?: Pick<Market, "region" | "department"> | null) {
+// Zona sin canje: solo Juliaca (provincia San Román, Puno). Todas las demás
+// ciudades —incluida Puno ciudad— muestran y registran canje según la Tabla Canjes.
+// Debe coincidir con isNoCanjeLocation del servidor (api-server/src/routes/app-storage.ts).
+const NO_CANJE_DISTRICTS = new Set(["JULIACA"]);
+const NO_CANJE_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
+const NO_CANJE_NAME_KEYWORD = "JULIACA";
+function isNoCanjeLocation(location: { name?: string; province?: string; district?: string }) {
+  const district = normalizeLocationValue(location.district);
+  const province = normalizeLocationValue(location.province);
+  const name = normalizeLocationValue(location.name);
   return (
-    normalizeLocationValue(market?.region) === "SUR" &&
-    normalizeLocationValue(market?.department) === "PUNO"
+    NO_CANJE_DISTRICTS.has(district) ||
+    NO_CANJE_PROVINCES.has(province) ||
+    name.includes(NO_CANJE_NAME_KEYWORD)
   );
+}
+function isNoCanjeMarket(market?: Pick<Market, "name" | "province" | "district"> | null) {
+  return Boolean(market) && isNoCanjeLocation(market!);
 }
 type AppUser = {
   id: string;
@@ -204,6 +219,8 @@ type Sale = {
   marketId: string;
   marketRegion?: string;
   marketDepartment?: string;
+  // Venta registrada sin canje por zona (nombre histórico de la marca).
+  punoWithoutCanje?: boolean;
   marketProvince?: string;
   marketDistrict?: string;
   mode: "UNIDADES" | "PLANCHAS";
@@ -306,9 +323,10 @@ const MINI_HALF_PLANCHA_SKUS = new Set([
 
 function isHistoricalMiniHalfPlanchaCanje(sale: Sale) {
   if (sale.bonus || sale.mode !== "PLANCHAS") return false;
+  // Ventas registradas sin canje (marca guardada) o de la zona sin canje.
   if (
-    normalizeLocationValue(sale.marketRegion) === "SUR" &&
-    normalizeLocationValue(sale.marketDepartment) === "PUNO"
+    sale.punoWithoutCanje ||
+    isNoCanjeLocation({ province: sale.marketProvince, district: sale.marketDistrict })
   )
     return false;
   const lines = (sale.planchaLines || []).filter(
@@ -653,6 +671,15 @@ function removeStoredPassword(dni: string) {
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
+// Refresco del catálogo tras guardar en el panel: se agrupa para que varios
+// guardados seguidos generen una sola descarga (antes, una por cada guardado).
+let catalogRefreshTimer: number | undefined;
+function upsertById<T>(list: T[], record: T, key: (item: T) => string) {
+  const id = key(record);
+  return list.some((item) => key(item) === id)
+    ? list.map((item) => (key(item) === id ? { ...item, ...record } : item))
+    : [...list, record];
+}
 const EVIDENCE_PHOTO_UPLOAD = "/api/evidence-photos";
 const PRODUCT_PRICES_STORE_KEY = "bt-product-prices";
 const CATEGORIES_STORE_KEY = "bt-client-categories";
@@ -1070,6 +1097,48 @@ function mergeMovements(
       second.id.localeCompare(first.id),
   );
 }
+/**
+ * Aplica una respuesta del feed de cambios operativos (/operational-changes).
+ * - Incremental: el servidor envía SOLO lo que cambió desde el cursor. Se
+ *   actualiza por ID y solo se quita lo que el servidor reporta como eliminado.
+ *   Antes se trataba como la lista completa: se borraban de la vista las
+ *   marcaciones y movimientos que no venían, y las ventas sincronizadas de las
+ *   últimas 48 h se marcaban "PENDIENTE" y se reenviaban cada 30 s.
+ * - Reconciliación (lista completa): manda el servidor; se conservan solo los
+ *   registros locales que aún no se han enviado.
+ * Nunca convierte en "PENDIENTE" un registro ya sincronizado.
+ */
+function applyOperationalFeed<T extends { id: string; status?: string }>(
+  current: T[],
+  incoming: T[],
+  removed: Set<string>,
+  full: boolean,
+  freshness: (item: T) => string,
+  sort: (items: T[]) => T[],
+) {
+  const isLocalPending = (item: T) => Boolean(item.status) && item.status !== "SINCRONIZADA";
+  const currentById = new Map(current.map((item) => [item.id, item]));
+  const next = new Map<string, T>();
+  current.forEach((item) => {
+    if (!full || isLocalPending(item)) next.set(item.id, item);
+  });
+  incoming.forEach((cloudItem) => {
+    const localItem = currentById.get(cloudItem.id);
+    // Una edición local aún no enviada y más reciente no se pisa.
+    if (localItem && isLocalPending(localItem) && freshness(localItem) > freshness(cloudItem)) {
+      next.set(cloudItem.id, localItem);
+      return;
+    }
+    next.set(cloudItem.id, cloudItem);
+  });
+  removed.forEach((id) => next.delete(id));
+  return sort(Array.from(next.values()));
+}
+const sortSalesNewest = (items: Sale[]) =>
+  [...items].sort((a, b) => {
+    const byDate = new Date(b.date).getTime() - new Date(a.date).getTime();
+    return byDate || saleFreshness(b).localeCompare(saleFreshness(a)) || b.id.localeCompare(a.id);
+  });
 function cloudSnapshotFromStores(): CloudSnapshot {
   const users = readStore<AppUser[]>("bt-users", []).map(
     ({ password: _password, ...user }) => user,
@@ -3742,8 +3811,11 @@ function NewUserModal({
     password.length >= 3 &&
     (!isZoneManagerRole(role) || Boolean(marketId)) &&
     (role !== "CLIENTE" || Boolean(clientId));
+  // Evita el doble clic y muestra que se está guardando mientras responde el servidor.
+  const [saving, setSaving] = useState(false);
   const save = async () => {
-    if (!canSave) return;
+    if (!canSave || saving) return;
+    setSaving(true);
     const saved = await onSave({
       id: `USR-${Date.now()}`,
       dni,
@@ -3754,7 +3826,7 @@ function NewUserModal({
       clientId: role === "CLIENTE" ? clientId : undefined,
       password,
       status: "ACTIVO",
-    });
+    }).finally(() => setSaving(false));
     if (saved) close();
   };
   return (
@@ -3826,8 +3898,8 @@ function NewUserModal({
         <Btn variant="outline" onClick={close}>
           Cancelar
         </Btn>
-        <Btn disabled={!canSave} onClick={save} testId="button-create-user">
-          Crear usuario
+        <Btn disabled={!canSave || saving} onClick={save} testId="button-create-user">
+          {saving ? "Guardando..." : "Crear usuario"}
         </Btn>
       </div>
     </Modal>
@@ -3856,8 +3928,11 @@ function NewMarketModal({
   const [department, setDepartment] = useState("");
   const [province, setProvince] = useState("");
   const [district, setDistrict] = useState("");
+  // Evita el doble clic y muestra que se está guardando mientras responde el servidor.
+  const [saving, setSaving] = useState(false);
   const save = async () => {
     if (
+      saving ||
       !name.trim() ||
       !department.trim() ||
       !province.trim() ||
@@ -3865,6 +3940,7 @@ function NewMarketModal({
       !warehouseId
     )
       return;
+    setSaving(true);
     const saved = await onSave({
       id: `MKT-${Date.now()}`,
       name: name.trim().toUpperCase(),
@@ -3874,7 +3950,7 @@ function NewMarketModal({
       district: district.trim().toUpperCase(),
       status: "ACTIVO",
       warehouseId: warehouseId || undefined,
-    });
+    }).finally(() => setSaving(false));
     if (saved) close();
   };
   return (
@@ -3932,8 +4008,8 @@ function NewMarketModal({
         <Btn variant="outline" onClick={close}>
           Cancelar
         </Btn>
-        <Btn onClick={save} testId="button-create-market">
-          Guardar mercado
+        <Btn disabled={saving} onClick={save} testId="button-create-market">
+          {saving ? "Guardando..." : "Guardar mercado"}
         </Btn>
       </div>
     </Modal>
@@ -4140,11 +4216,11 @@ function WarehouseCatalog({
       const r=await fetch("/api/app-storage/warehouses/regularize-puno-without-canje",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
-      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Puno.`);
+      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Juliaca.`);
       await load();
-      notify(`${p.salesRegularized||0} venta(s) de Puno quedaron sin canje. ${p.restoredItems||0} movimiento(s) de stock fueron devueltos al Almacén.`);
+      notify(`${p.salesRegularized||0} venta(s) de Juliaca quedaron sin canje. ${p.restoredItems||0} movimiento(s) de stock fueron devueltos al Almacén.`);
     }catch(e){
-      notify(e instanceof Error?e.message:"No se pudieron regularizar las ventas de Puno.",true);
+      notify(e instanceof Error?e.message:"No se pudieron regularizar las ventas de Juliaca.",true);
     }finally{setPunoRegularizing(false);}
   };
   const regularizeSeptemberClosures=async()=>{
@@ -4880,8 +4956,11 @@ function NewClientModal({
     activeCategories[0]?.id || "",
   );
   const [marketId, setMarketId] = useState("");
+  // Evita el doble clic y muestra que se está guardando mientras responde el servidor.
+  const [saving, setSaving] = useState(false);
   const save = async () => {
-    if (!name.trim() || !marketId) return;
+    if (!name.trim() || !marketId || saving) return;
+    setSaving(true);
     const saved = await onSave({
       id: `${Date.now()}`,
       code: `CLI-${String(count + 1).padStart(6, "0")}`,
@@ -4890,7 +4969,7 @@ function NewClientModal({
       category,
       marketId,
       status: "ACTIVO",
-    });
+    }).finally(() => setSaving(false));
     if (saved) close();
   };
   return (
@@ -4934,8 +5013,8 @@ function NewClientModal({
         <Btn variant="outline" onClick={close}>
           Cancelar
         </Btn>
-        <Btn disabled={!category} onClick={save} testId="button-create-client">
-          Guardar cliente
+        <Btn disabled={!category || saving} onClick={save} testId="button-create-client">
+          {saving ? "Guardando..." : "Guardar cliente"}
         </Btn>
       </div>
     </Modal>
@@ -5094,7 +5173,7 @@ function SaleEditModal({
         originalCount,
       );
   const saleMarket = markets.find((market) => market.id === sale.marketId);
-  const punoWithoutCanje = isPunoSouthMarket(saleMarket);
+  const punoWithoutCanje = isNoCanjeMarket(saleMarket);
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -5336,12 +5415,12 @@ function SaleEditModal({
   return (
     <Modal
       title="Editar venta"
-      detail={punoWithoutCanje ? `${sale.id} · Región SUR · PUNO: esta venta debe permanecer sin canje.` : `${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
+      detail={punoWithoutCanje ? `${sale.id} · Zona Juliaca: esta venta debe permanecer sin canje.` : `${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
       close={close}
     >
       {punoWithoutCanje && (
         <div className="notice">
-          <strong>Región SUR · PUNO: venta sin canje</strong>
+          <strong>Zona Juliaca: venta sin canje</strong>
           <p>No se pueden agregar bonificaciones a esta venta.</p>
         </div>
       )}
@@ -7759,6 +7838,181 @@ function SalesDashboard({
   );
 }
 
+/**
+ * Resumen del día para el coordinador (solo lectura): totales de sus mercados,
+ * quién falta marcar entrada, su equipo y ventas por mercado. Usa solo los datos
+ * que el servidor ya envía para su alcance.
+ */
+function CoordinatorToday({
+  markets,
+  promoters,
+  sales,
+  attendance,
+  onOpen,
+}: {
+  markets: Market[];
+  promoters: AppUser[];
+  sales: Sale[];
+  attendance: Attendance[];
+  onOpen: (tab: string) => void;
+}) {
+  const now = new Date();
+  const today = attendanceDay(now);
+  const todaySales = sales.filter((sale) => attendanceDay(sale.date) === today);
+  const todayAttendance = attendance.filter((item) => attendanceDay(item.date) === today);
+  const amount = todaySales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0);
+  const planchas = todaySales
+    .filter((sale) => sale.mode === "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.planchas) || 0), 0);
+  const looseUnits = todaySales
+    .filter((sale) => sale.mode !== "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.units) || 0), 0);
+  const withCanje = todaySales.filter((sale) => effectiveSaleBonus(sale)).length;
+  const team = promoters
+    .filter((person) => person.status === "ACTIVO" && isPromoterRole(person.role))
+    .map((person) => {
+      const own = todayAttendance
+        .filter((item) => item.promoterId === person.id || (item.promoterDni && item.promoterDni === person.dni))
+        .sort((first, second) => new Date(first.date).getTime() - new Date(second.date).getTime());
+      const latest = own[own.length - 1];
+      const firstEntry = own.find((item) => item.type === "ENTRADA");
+      const ownSales = todaySales.filter((sale) => sale.promoterId === person.id);
+      const marketId = latest?.marketId || person.marketId || "";
+      return {
+        person,
+        market: markets.find((market) => market.id === marketId)?.name || "—",
+        entry: firstEntry ? limaTime(firstEntry.date) : "—",
+        state: latest?.type === "ENTRADA" ? "En jornada" : latest?.type === "SALIDA" ? "Salió" : "Sin marcar",
+        salesCount: ownSales.length,
+        salesAmount: ownSales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0),
+      };
+    })
+    .sort((first, second) => second.salesAmount - first.salesAmount);
+  const working = team.filter((row) => row.state === "En jornada").length;
+  const missing = team.filter((row) => row.state === "Sin marcar");
+  const byMarket = markets
+    .map((market) => ({
+      market,
+      amount: todaySales
+        .filter((sale) => sale.marketId === market.id)
+        .reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0),
+    }))
+    .sort((first, second) => second.amount - first.amount);
+  const maxMarket = Math.max(1, ...byMarket.map((row) => row.amount));
+  const hour = now.toLocaleTimeString("es-PE", { hour: "numeric", minute: "2-digit", timeZone: "America/Lima" });
+  return (
+    <section className="role-today" data-testid="coordinator-today" aria-label="Resumen de hoy">
+      <div className="role-kpis">
+        <div>
+          <span>Ventas de hoy</span>
+          <strong>{formatSoles(amount)}</strong>
+          <small>{todaySales.length} venta{todaySales.length === 1 ? "" : "s"}</small>
+        </div>
+        <div>
+          <span>Planchas</span>
+          <strong>{planchas}</strong>
+          <small>+ {looseUnits} unidades sueltas</small>
+        </div>
+        <div>
+          <span>Ventas con canje</span>
+          <strong>{withCanje}</strong>
+          <small>de {todaySales.length} hoy</small>
+        </div>
+        <div>
+          <span>En jornada ahora</span>
+          <strong>
+            {working} de {team.length}
+          </strong>
+          <small className={missing.length ? "warn" : ""}>
+            {missing.length ? `${missing.length} sin marcar entrada` : "Todos marcaron"}
+          </small>
+        </div>
+      </div>
+
+      {missing.length > 0 && (
+        <div className="role-attention">
+          <h2>Requiere atención</h2>
+          <p className="role-alert warn">
+            <Clock3 />
+            <span>
+              <strong>{missing.map((row) => row.person.name).join(", ")}</strong>{" "}
+              {missing.length === 1 ? "no ha" : "no han"} marcado entrada hoy (son las {hour}).
+            </span>
+          </p>
+        </div>
+      )}
+
+      <div className="role-grid">
+        <div className="role-card">
+          <div className="role-card-head">
+            <h2>Equipo de hoy</h2>
+            <button type="button" className="ph-link" onClick={() => onOpen("marcaciones")}>
+              Ver marcaciones
+            </button>
+          </div>
+          {team.length ? (
+            <div className="role-table-wrap">
+              <table className="role-table">
+                <thead>
+                  <tr>
+                    <th>Promotor</th>
+                    <th>Mercado</th>
+                    <th>Entrada</th>
+                    <th>Estado</th>
+                    <th className="num">Ventas</th>
+                    <th className="num">Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {team.map((row) => (
+                    <tr key={row.person.id}>
+                      <td><strong>{row.person.name}</strong></td>
+                      <td>{row.market}</td>
+                      <td>{row.entry}</td>
+                      <td>
+                        <span className={`ph-chip ${row.state === "En jornada" ? "ok" : row.state === "Sin marcar" ? "warn" : ""}`}>
+                          {row.state}
+                        </span>
+                      </td>
+                      <td className="num">{row.salesCount}</td>
+                      <td className="num"><strong>{formatSoles(row.salesAmount)}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="ph-empty">No hay promotores asignados a tus mercados.</p>
+          )}
+        </div>
+        <div className="role-card">
+          <div className="role-card-head">
+            <h2>Ventas por mercado hoy</h2>
+            <button type="button" className="ph-link" onClick={() => onOpen("ventas")}>
+              Ver ventas
+            </button>
+          </div>
+          {byMarket.length ? (
+            <div className="role-bars">
+              {byMarket.map((row) => (
+                <div className="role-bar" key={row.market.id}>
+                  <span>{row.market.name}</span>
+                  <div className="role-bar-track" aria-hidden="true">
+                    <div style={{ width: `${Math.round((row.amount / maxMarket) * 100)}%` }} />
+                  </div>
+                  <strong>{formatSoles(row.amount)}</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="ph-empty">No tienes mercados asignados. Pide al analista que te asigne.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function CoordinatorApp({
   user,
   markets,
@@ -7869,9 +8123,6 @@ function CoordinatorApp({
     ["almacen", "Almacén"],
     ["clientes", "Clientes"],
     ["canjes", "Canjes"],
-    ...(["ADMIN", "ANALISTA"].includes(user.role)
-      ? [["tabla-canjes", "Tabla Canjes"]]
-      : []),
     ["degustacion", "Degustación"],
     ["asignaciones", "Asignaciones"],
     ["ventas", "Ventas"],
@@ -8043,8 +8294,15 @@ function CoordinatorApp({
         <div>
           <span className="eyebrow">PANEL DE COORDINACIÓN</span>
           <h1>Hola, {user.name}</h1>
-          <p>Consulta y descarga la información de tus zonas. Este perfil es solo lectura.</p>
+          <p>
+            {allowedMarkets.length
+              ? `Tus mercados: ${allowedMarkets.map((market) => market.name).join(", ")}`
+              : "Aún no tienes mercados asignados."}
+          </p>
         </div>
+        <span className="readonly-badge" title="Puedes consultar y descargar; no editar.">
+          <Lock /> Solo lectura
+        </span>
       </div>
       <nav className="tabs" aria-label="Módulos">
         {allowedTabs.map(([value, label]) => (
@@ -8059,6 +8317,15 @@ function CoordinatorApp({
         ))}
       </nav>
 
+      {tab === "inicio" && (
+        <CoordinatorToday
+          markets={allowedMarkets}
+          promoters={allowedUsers}
+          sales={allowedSales}
+          attendance={allowedAttendance}
+          onOpen={setTab}
+        />
+      )}
       {tab === "inicio" && (
         <SalesDashboard
           sales={allowedSales}
@@ -8322,6 +8589,187 @@ function loadMapboxGl() {
     document.head.appendChild(script);
   });
   return mapboxLoader;
+}
+
+const analystTabGroups = [
+  { id: "operacion", label: "OPERACIÓN" },
+  { id: "catalogos", label: "CATÁLOGOS" },
+  { id: "logistica", label: "LOGÍSTICA Y EQUIPO" },
+] as const;
+const analystTabGroupOf: Record<string, string> = {
+  inicio: "operacion",
+  ventas: "operacion",
+  marcaciones: "operacion",
+  canjes: "operacion",
+  degustacion: "operacion",
+  "aprobaciones-trade": "operacion",
+  mercados: "catalogos",
+  clientes: "catalogos",
+  usuarios: "catalogos",
+  marcas: "catalogos",
+  categorias: "catalogos",
+  "tabla-canjes": "catalogos",
+  almacen: "logistica",
+  traslados: "logistica",
+  asignaciones: "logistica",
+};
+
+/**
+ * Resumen del día para Admin / Analista (y Supervisor, Trade): totales, avisos con
+ * acción directa y accesos rápidos a las ventanas de alta que ya existen.
+ * Solo lee datos que el panel ya cargó; no guarda nada por su cuenta.
+ */
+function AnalystToday({
+  canEdit,
+  markets,
+  users,
+  assignments,
+  sales,
+  attendance,
+  warehouses,
+  pendingTradeApprovals,
+  onTab,
+  onCreate,
+}: {
+  canEdit: boolean;
+  markets: Market[];
+  users: AppUser[];
+  assignments: PromoterAssignment[];
+  sales: Sale[];
+  attendance: Attendance[];
+  warehouses: Warehouse[];
+  pendingTradeApprovals: number;
+  onTab: (tab: string) => void;
+  onCreate: (what: "market" | "client" | "user" | "sale") => void;
+}) {
+  const today = attendanceDay(new Date());
+  const todaySales = sales.filter((sale) => attendanceDay(sale.date) === today);
+  const amount = todaySales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0);
+  const planchas = todaySales
+    .filter((sale) => sale.mode === "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.planchas) || 0), 0);
+  const looseUnits = todaySales
+    .filter((sale) => sale.mode !== "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.units) || 0), 0);
+  const withCanje = todaySales.filter((sale) => effectiveSaleBonus(sale)).length;
+  const noCanjeToday = todaySales.filter((sale) => sale.punoWithoutCanje).length;
+  const activePromoters = users.filter(
+    (person) => person.status === "ACTIVO" && !isArchivedUser(person) && isPromoterRole(person.role),
+  );
+  const todayAttendance = attendance.filter((item) => attendanceDay(item.date) === today);
+  const latestOf = (person: AppUser) =>
+    todayAttendance
+      .filter((item) => item.promoterId === person.id || (item.promoterDni && item.promoterDni === person.dni))
+      .sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime())[0];
+  const working = activePromoters.filter((person) => latestOf(person)?.type === "ENTRADA").length;
+  const withoutEntry = activePromoters.filter((person) => !latestOf(person)).length;
+  const activeMarkets = markets.filter((market) => market.status === "ACTIVO");
+  const marketsWithoutWarehouse = activeMarkets.filter(
+    (market) =>
+      !market.warehouseId &&
+      !warehouses.some((warehouse) => (warehouse.marketIds || []).includes(market.id)),
+  );
+  const coordinatorsWithoutMarkets = users.filter((person) => {
+    if (person.role !== "COORDINADOR" || person.status !== "ACTIVO" || isArchivedUser(person)) return false;
+    const assignment = assignments.find((item) => assignmentMatchesUser(item, person));
+    return !(assignment?.marketIds?.length || person.marketId);
+  });
+  const alerts: Array<{ key: string; tone: "warn" | "info"; text: ReactNode; action: string; tab: string }> = [];
+  if (canEdit && pendingTradeApprovals > 0)
+    alerts.push({
+      key: "trade",
+      tone: "warn",
+      text: <><strong>{pendingTradeApprovals} aprobación{pendingTradeApprovals === 1 ? "" : "es"} Trade</strong> esperan revisión.</>,
+      action: "Revisar",
+      tab: "aprobaciones-trade",
+    });
+  if (withoutEntry > 0)
+    alerts.push({
+      key: "entrada",
+      tone: "warn",
+      text: <><strong>{withoutEntry} promotor{withoutEntry === 1 ? "" : "es"}</strong> aún no marca{withoutEntry === 1 ? "" : "n"} entrada hoy.</>,
+      action: "Ver marcaciones",
+      tab: "marcaciones",
+    });
+  if (marketsWithoutWarehouse.length > 0)
+    alerts.push({
+      key: "almacen",
+      tone: "info",
+      text: <><strong>{marketsWithoutWarehouse.length} mercado{marketsWithoutWarehouse.length === 1 ? "" : "s"}</strong> sin almacén asignado: sus ventas no pueden descontar canjes.</>,
+      action: "Ver mercados",
+      tab: "mercados",
+    });
+  if (coordinatorsWithoutMarkets.length > 0)
+    alerts.push({
+      key: "coordinador",
+      tone: "info",
+      text: <><strong>{coordinatorsWithoutMarkets.map((person) => person.name).join(", ")}</strong> (coordinador) no tiene mercados asignados: hoy no ve datos.</>,
+      action: "Asignar",
+      tab: "asignaciones",
+    });
+  return (
+    <section className="role-today" data-testid="analyst-today" aria-label="Resumen de hoy">
+      <div className="role-kpis">
+        <div>
+          <span>Ventas de hoy</span>
+          <strong>{formatSoles(amount)}</strong>
+          <small>{todaySales.length} venta{todaySales.length === 1 ? "" : "s"}</small>
+        </div>
+        <div>
+          <span>Planchas</span>
+          <strong>{planchas}</strong>
+          <small>+ {looseUnits} unidades sueltas</small>
+        </div>
+        <div>
+          <span>Ventas con canje</span>
+          <strong>{withCanje}</strong>
+          <small>{noCanjeToday ? `${noCanjeToday} en zona sin canje (Juliaca)` : `de ${todaySales.length} hoy`}</small>
+        </div>
+        <div>
+          <span>En jornada ahora</span>
+          <strong>
+            {working} de {activePromoters.length}
+          </strong>
+          <small className={withoutEntry ? "warn" : ""}>
+            {withoutEntry ? `${withoutEntry} sin marcar entrada` : "Todos marcaron"}
+          </small>
+        </div>
+      </div>
+      <div className="role-grid">
+        <div className="role-card">
+          <h2>Requiere atención</h2>
+          {alerts.length ? (
+            alerts.map((alert) => (
+              <div className={`role-alert ${alert.tone}`} key={alert.key}>
+                {alert.tone === "warn" ? <AlertTriangle /> : <MapPin />}
+                <span>{alert.text}</span>
+                <Btn variant="outline" onClick={() => onTab(alert.tab)} testId={`button-attention-${alert.key}`}>
+                  {alert.action}
+                </Btn>
+              </div>
+            ))
+          ) : (
+            <p className="role-alert info">
+              <CheckCircle2 /> <span>Todo en orden por ahora.</span>
+            </p>
+          )}
+        </div>
+        {canEdit && (
+          <div className="role-card">
+            <h2>Acciones rápidas</h2>
+            <div className="quick-actions">
+              <button type="button" onClick={() => onCreate("market")} data-testid="quick-new-market"><MapPin /> Nuevo mercado</button>
+              <button type="button" onClick={() => onCreate("client")} data-testid="quick-new-client"><Store /> Nuevo cliente</button>
+              <button type="button" onClick={() => onCreate("user")} data-testid="quick-new-user"><UserRound /> Nuevo usuario</button>
+              <button type="button" onClick={() => onCreate("sale")} data-testid="quick-new-sale"><ShoppingBag /> Venta de promotor</button>
+              <button type="button" onClick={() => onTab("traslados")}><Truck /> Traslado de stock</button>
+              <button type="button" onClick={() => onTab("tabla-canjes")}><Gift /> Tabla Canjes</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function AnalystApp({
@@ -9070,7 +9518,7 @@ function AnalystApp({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ market }),
-        });
+        }, { refreshCatalog: false });
         count += 1;
       }
       if (!count) throw new Error("No se encontraron mercados válidos en el archivo.");
@@ -9395,7 +9843,11 @@ function AnalystApp({
       writeStore(CATEGORIES_STORE_KEY, snapshot.categories);
     }
   };
-  const adminRequest = async (path: string, init?: RequestInit) => {
+  const adminRequest = async (
+    path: string,
+    init?: RequestInit,
+    options: { refreshCatalog?: boolean } = {},
+  ) => {
     const headers = new Headers(init?.headers);
     headers.set("X-Admin-Dni", user.dni);
     headers.set("X-Admin-Key", sessionAdminKey(user));
@@ -9409,6 +9861,9 @@ function AnalystApp({
       message?: string;
       catalogRevision?: string | null;
       snapshot?: Partial<CloudSnapshot>;
+      market?: Market;
+      user?: AppUser;
+      client?: Client;
     };
     if (!response.ok)
       throw new Error(payload.message || "No se pudo guardar el cambio");
@@ -9422,15 +9877,20 @@ function AnalystApp({
     applyAdminSnapshot(payload.snapshot, removedSaleId);
     // Las altas de catálogos devuelven confirmación inmediata después del COMMIT.
     // La actualización del catálogo se consulta aparte, sin bloquear el cierre del modal.
-    if (!payload.snapshot && init?.method === "POST" &&
+    // El registro guardado ya se muestra al instante (ver save*); este refresco solo
+    // trae cambios de otros usuarios. Se agrupa y no se hace en importaciones masivas.
+    if (options.refreshCatalog !== false && !payload.snapshot && init?.method === "POST" &&
         ["/markets", "/clients", "/users", "/catalog/products", "/catalog/categories"].includes(path)) {
-      void fetch(APP_STORAGE_READ, { cache: "no-store" })
-        .then(async (refresh) => {
-          if (!refresh.ok) return;
-          const result = await refresh.json() as { snapshot?: Partial<CloudSnapshot> };
-          if (result.snapshot) applyAdminSnapshot(result.snapshot);
-        })
-        .catch((error) => console.warn("Catálogo pendiente de actualizar:", error));
+      window.clearTimeout(catalogRefreshTimer);
+      catalogRefreshTimer = window.setTimeout(() => {
+        void fetch(APP_STORAGE_READ, { cache: "no-store" })
+          .then(async (refresh) => {
+            if (!refresh.ok) return;
+            const result = await refresh.json() as { snapshot?: Partial<CloudSnapshot> };
+            if (result.snapshot) applyAdminSnapshot(result.snapshot);
+          })
+          .catch((error) => console.warn("Catálogo pendiente de actualizar:", error));
+      }, 2_000);
     }
     return payload;
   };
@@ -9501,11 +9961,16 @@ function AnalystApp({
   };
   const saveUser = async (newUser: AppUser) => {
     try {
-      await adminRequest("/users", {
+      const payload = await adminRequest("/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user: newUser }),
       });
+      // Se muestra al instante, sin la clave.
+      const { password: _password, ...publicNewUser } = newUser;
+      const nextUsers = upsertById(users, { ...publicNewUser, ...(payload.user || {}) } as AppUser, (item) => item.dni);
+      setUsers(nextUsers);
+      writeStore("bt-users", nextUsers);
       notify("Usuario creado y guardado en DigitalOcean");
       return true;
     } catch (error) {
@@ -9518,12 +9983,15 @@ function AnalystApp({
   };
   const saveMarket = async (market: Market) => {
     try {
-      await adminRequest("/markets", {
+      const payload = await adminRequest("/markets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ market }),
       });
-      writeStore("bt-markets", [...markets, market]);
+      // Se muestra al instante en la lista (antes aparecía recién con la descarga completa).
+      const nextMarkets = upsertById(markets, payload.market || market, (item) => item.id);
+      setMarkets(nextMarkets);
+      writeStore("bt-markets", nextMarkets);
       setModal(null);
       notify("Mercado creado como ACTIVO");
       return true;
@@ -9558,11 +10026,15 @@ function AnalystApp({
   };
   const saveClient = async (client: Client) => {
     try {
-      await adminRequest("/clients", {
+      const payload = await adminRequest("/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client }),
       });
+      // Se muestra al instante en la lista.
+      const nextClients = upsertById(clients, payload.client || client, (item) => item.id);
+      setClients(nextClients);
+      writeStore("bt-clients", nextClients);
       notify("Cliente creado como ACTIVO");
       return true;
     } catch (error) {
@@ -9575,11 +10047,15 @@ function AnalystApp({
   };
   const saveClientEdit = async (client: Client) => {
     try {
-      await adminRequest("/clients", {
+      const payload = await adminRequest("/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client }),
       });
+      // Se muestra al instante en la lista.
+      const nextClients = upsertById(clients, payload.client || client, (item) => item.id);
+      setClients(nextClients);
+      writeStore("bt-clients", nextClients);
       notify(`Cliente actualizado: ${client.name}`);
       return true;
     } catch (error) {
@@ -9620,6 +10096,9 @@ function AnalystApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ record }),
       });
+      const nextProducts = upsertById(productPrices, record, (item) => item.sku);
+      setProductPrices(nextProducts);
+      writeStore(PRODUCT_PRICES_STORE_KEY, nextProducts);
       notify(`Producto guardado: ${record.product}`);
       return true;
     } catch (error) {
@@ -9639,6 +10118,9 @@ function AnalystApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ record }),
       });
+      const nextCategories = upsertById(categories, record, (item) => item.id);
+      setCategories(nextCategories);
+      writeStore(CATEGORIES_STORE_KEY, nextCategories);
       notify(`Categoría guardada: ${record.name}`);
       return true;
     } catch (error) {
@@ -9942,6 +10424,7 @@ function AnalystApp({
   const tastingConsumptions = movements
     .filter((movement) => movement.kind === "DEGUSTACION")
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  const pendingTradeCount = tradeApprovals.filter((item) => item.status === "PENDIENTE").length;
   const tabs = [
     ["inicio", "Resumen"],
     ["mercados", "Mercados"],
@@ -9957,6 +10440,8 @@ function AnalystApp({
       ? [
           ["marcas", "Marcas"],
           ["categorias", "Categorías"],
+          // Antes estaba solo en el menú del coordinador (donde nunca aparecía).
+          ["tabla-canjes", "Tabla Canjes"],
         ]
       : []),
     ["canjes", "Canjes"],
@@ -9979,18 +10464,49 @@ function AnalystApp({
           <p>Supervisa el pulso de la campaña desde un solo lugar.</p>
         </div>
       </div>
-      <nav className="tabs" aria-label="Módulos">
-        {tabs.map(([value, label]) => (
-          <button
-            key={value}
-            className={`tab ${tab === value ? "active" : ""}`}
-            onClick={() => setTab(value)}
-            data-testid={`tab-${value}`}
-          >
-            {label}
-          </button>
-        ))}
+      <nav className="tabs tabs-grouped" aria-label="Módulos">
+        {analystTabGroups.map((group) => {
+          const groupTabs = tabs.filter(([value]) => (analystTabGroupOf[value] || "operacion") === group.id);
+          if (!groupTabs.length) return null;
+          return (
+            <div className="tabs-group" key={group.id} role="group" aria-label={group.label}>
+              <span className="tabs-group-label">{group.label}</span>
+              {groupTabs.map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`tab ${tab === value ? "active" : ""}`}
+                  onClick={() => setTab(value)}
+                  data-testid={`tab-${value}`}
+                >
+                  {label}
+                  {value === "aprobaciones-trade" && pendingTradeCount > 0 && (
+                    <span className="tab-count" aria-label={`${pendingTradeCount} pendientes`}>{pendingTradeCount}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </nav>
+      {tab === "inicio" && (
+        <AnalystToday
+          canEdit={["ADMIN", "ANALISTA"].includes(user.role)}
+          markets={markets}
+          users={users}
+          assignments={assignments}
+          sales={sales}
+          attendance={attendance}
+          warehouses={marketWarehouses}
+          pendingTradeApprovals={pendingTradeCount}
+          onTab={setTab}
+          onCreate={(what) => {
+            if (what === "sale") {
+              setTab("ventas");
+              setNewAdminSale(true);
+            } else setModal(what);
+          }}
+        />
+      )}
       {tab === "inicio" && (
         <SalesDashboard
           sales={sales}
@@ -11146,16 +11662,24 @@ function AnalystApp({
   );
 }
 
+type PromoterModule = "INICIO" | "MARCACIONES" | "VENTAS";
 function PromoterNav({
   active,
   onChange,
 }: {
-  active: "MARCACIONES" | "VENTAS";
-  onChange: (value: "MARCACIONES" | "VENTAS") => void;
+  active: PromoterModule;
+  onChange: (value: PromoterModule) => void;
 }) {
   return (
-    <aside className="promoter-nav">
+    <aside className="promoter-nav" aria-label="Menú del promotor">
       <p className="nav-label">TAREAS DIARIAS</p>
+      <button
+        className={active === "INICIO" ? "active" : ""}
+        onClick={() => onChange("INICIO")}
+        data-testid="nav-inicio"
+      >
+        <House /> Inicio
+      </button>
       <button
         className={active === "MARCACIONES" ? "active" : ""}
         onClick={() => onChange("MARCACIONES")}
@@ -11171,6 +11695,193 @@ function PromoterNav({
         <ShoppingBag /> Ventas
       </button>
     </aside>
+  );
+}
+
+// Hora y fecha de Lima para la pantalla de inicio del promotor.
+const limaTime = (value: string | Date) =>
+  new Date(value).toLocaleTimeString("es-PE", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Lima",
+  });
+const limaLongDate = (value: Date) =>
+  new Intl.DateTimeFormat("es-PE", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Lima",
+  }).format(value);
+function elapsedLabel(from: string, now: Date) {
+  const minutes = Math.max(0, Math.floor((now.getTime() - new Date(from).getTime()) / 60000));
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
+}
+function saleSummaryLabel(sale: Sale) {
+  const planchas = Number(sale.planchas);
+  if (sale.mode === "PLANCHAS" && Number.isFinite(planchas) && planchas > 0)
+    return `${planchas} plancha${planchas === 1 ? "" : "s"}`;
+  // Ventas antiguas sin número de planchas guardado: se muestran por unidades.
+  const units = Number(sale.units) || 0;
+  return `${units} unidad${units === 1 ? "" : "es"}`;
+}
+
+/**
+ * Inicio de jornada del promotor. Solo presenta datos que la app ya tiene
+ * (marcaciones, ventas y pendientes del dispositivo) y abre los formularios
+ * existentes; no guarda nada por su cuenta.
+ */
+function PromoterHome({
+  user,
+  now,
+  marketName,
+  clientName,
+  jornada,
+  todaySales,
+  recentSales,
+  pendingCount,
+  syncBusy,
+  syncMessage,
+  noCanjeZone,
+  onSync,
+  onNewSale,
+  onAttendance,
+  onHistory,
+}: {
+  user: AppUser;
+  now: Date;
+  marketName: string;
+  clientName: string;
+  jornada?: Attendance;
+  todaySales: Sale[];
+  recentSales: Sale[];
+  pendingCount: number;
+  syncBusy: boolean;
+  syncMessage: string;
+  noCanjeZone: boolean;
+  onSync: () => void;
+  onNewSale: () => void;
+  onAttendance: () => void;
+  onHistory: () => void;
+}) {
+  const inJornada = jornada?.type === "ENTRADA";
+  const todayAmount = todaySales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0);
+  const todayCanjes = todaySales.filter((sale) => effectiveSaleBonus(sale)).length;
+  const rawFirstName = (user.name || "").trim().split(/\s+/)[0] || "";
+  const firstName = rawFirstName
+    ? rawFirstName.charAt(0).toUpperCase() + rawFirstName.slice(1).toLowerCase()
+    : user.name;
+  return (
+    <div className="ph" data-testid="promoter-home">
+      <header className="ph-greeting">
+        <div>
+          <span className="ph-eyebrow">CAMPAÑA 2026</span>
+          <h1>Hola, {firstName}</h1>
+          <p>{limaLongDate(now)}</p>
+        </div>
+        <span className={`ph-net ${navigator.onLine ? "on" : "off"}`} role="status">
+          {navigator.onLine ? <Check /> : <WifiOff />}
+          {navigator.onLine ? "En línea" : "Sin señal"}
+        </span>
+      </header>
+
+      <section className={`ph-shift ${inJornada ? "active" : ""}`} aria-label="Estado de la jornada">
+        <div className="ph-shift-top">
+          <span className="ph-shift-state">
+            <span className="ph-dot" aria-hidden="true" />
+            {inJornada ? "EN JORNADA" : jornada?.type === "SALIDA" ? "JORNADA CERRADA" : "SIN ENTRADA"}
+          </span>
+          {inJornada && jornada && <span className="ph-shift-time">{elapsedLabel(jornada.date, now)}</span>}
+        </div>
+        <strong className="ph-shift-place">{marketName}</strong>
+        <span className="ph-shift-detail">
+          {clientName}
+          {jornada
+            ? ` · ${jornada.type === "ENTRADA" ? "Entrada" : "Salida"} ${limaTime(jornada.date)}`
+            : " · Aún no marcas tu entrada"}
+        </span>
+        <button type="button" className="ph-shift-btn" onClick={onAttendance} data-testid="button-home-attendance">
+          {inJornada ? <LogOut /> : <Clock3 />}
+          {inJornada ? "Marcar salida" : "Marcar entrada"}
+        </button>
+      </section>
+
+      <button type="button" className="ph-sell" onClick={onNewSale} data-testid="button-home-new-sale">
+        <Plus /> Registrar venta
+      </button>
+      {noCanjeZone && (
+        <p className="ph-zone">
+          <MapPin /> Zona Juliaca: tus ventas aquí no llevan canje.
+        </p>
+      )}
+
+      <div className="ph-stats">
+        <div>
+          <span>Ventas hoy</span>
+          <strong data-testid="home-sales-today">{todaySales.length}</strong>
+        </div>
+        <div>
+          <span>Monto</span>
+          <strong>{formatSoles(todayAmount)}</strong>
+        </div>
+        <div>
+          <span>Con canje</span>
+          <strong>{todayCanjes}</strong>
+        </div>
+      </div>
+
+      {pendingCount > 0 || syncMessage ? (
+        <section className={`ph-pending ${pendingCount ? "" : "done"}`} aria-live="polite">
+          <RefreshCw />
+          <div>
+            <strong>
+              {pendingCount
+                ? `${pendingCount} registro${pendingCount === 1 ? "" : "s"} por enviar`
+                : "Todo enviado"}
+            </strong>
+            <span>{syncMessage || "Se envían solos al volver la señal."}</span>
+          </div>
+          {pendingCount > 0 && (
+            <button type="button" onClick={onSync} disabled={syncBusy} data-testid="button-home-sync">
+              {syncBusy ? "Enviando..." : "Enviar ahora"}
+            </button>
+          )}
+        </section>
+      ) : null}
+
+      <section className="ph-recent" aria-label="Últimas ventas">
+        <div className="ph-recent-head">
+          <h2>Últimas ventas</h2>
+          <button type="button" className="ph-link" onClick={onHistory}>
+            Ver todas
+          </button>
+        </div>
+        {recentSales.length ? (
+          <ul>
+            {recentSales.map((sale) => {
+              const bonus = effectiveSaleBonus(sale);
+              const sent = sale.status === "SINCRONIZADA";
+              return (
+                <li key={sale.id}>
+                  <div>
+                    <strong>{saleSummaryLabel(sale)}</strong>
+                    <span>
+                      {limaTime(sale.date)} · {bonus || (sale.punoWithoutCanje ? "Zona sin canje" : "Sin canje")}
+                    </span>
+                  </div>
+                  <div className="ph-recent-right">
+                    <strong>{formatSoles(Number(sale.amountSoles) || 0)}</strong>
+                    <span className={`ph-chip ${sent ? "ok" : "warn"}`}>{sent ? "Enviada" : "Por enviar"}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="ph-empty">Todavía no registras ventas hoy.</p>
+        )}
+      </section>
+    </div>
   );
 }
 function attendanceDay(date: string | Date = new Date()) {
@@ -11323,7 +12034,8 @@ function PromoterApp({
   const [selectedClientId, setSelectedClientId] = useState(
     administrative?.clientId || "",
   );
-  const [module, setModule] = useState<"MARCACIONES" | "VENTAS">("MARCACIONES");
+  // La jornada abre en Inicio; Marcaciones y Ventas mantienen sus pantallas.
+  const [module, setModule] = useState<PromoterModule>("INICIO");
   const [manualSyncBusy, setManualSyncBusy] = useState(false);
   const [manualSyncMessage, setManualSyncMessage] = useState("");
   const manualSyncTimer = useRef<number | null>(null);
@@ -11610,7 +12322,7 @@ function PromoterApp({
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
-  const punoWithoutCanje = isPunoSouthMarket(selectedMarket);
+  const punoWithoutCanje = isNoCanjeMarket(selectedMarket);
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
@@ -12466,6 +13178,23 @@ function PromoterApp({
     // La salida registra automáticamente 0 panetones y 0 contactos.
     void finalizeAttendance();
   };
+  // Misma normalización para el campo y para los botones − / + (media plancha en minis).
+  const planchaHalfEligible = isMiniHalfPlanchaProduct(
+    planchaLines[0]?.sku,
+    saleCatalogProducts.find((item) => item.sku === planchaLines[0]?.sku)?.label,
+  );
+  const planchaStep = planchaHalfEligible ? 0.5 : 1;
+  const changePlanchasInput = (value: string) => {
+    if (value === "") {
+      setPlanchasInput("");
+      return;
+    }
+    const numericValue = Number(value);
+    const normalized = planchaHalfEligible
+      ? Math.max(0.5, Math.round(numericValue * 2) / 2)
+      : Math.max(1, Math.trunc(numericValue));
+    setPlanchasInput(String(normalized));
+  };
   const saleForm = (
     <section className="sale-layout">
       <section className="sale-form">
@@ -12607,26 +13336,20 @@ function PromoterApp({
             </Field>
             {planchaType === "FLAT" && (
               <Field label="Cantidad de planchas">
+                <div className="qty-stepper">
+                <button
+                  type="button"
+                  className="qty-btn"
+                  aria-label="Quitar plancha"
+                  data-testid="button-planchas-minus"
+                  onClick={() => changePlanchasInput(String((Number(planchasInput) || 0) - planchaStep))}
+                >
+                  <Minus />
+                </button>
                 <Input
                   type="number"
                   value={planchasInput}
-                  onChange={(value) => {
-                    if (value === "") {
-                      setPlanchasInput("");
-                      return;
-                    }
-                    const currentSku = planchaLines[0]?.sku;
-                    const currentProduct = saleCatalogProducts.find((item) => item.sku === currentSku);
-                    const halfPlanchaEligible = isMiniHalfPlanchaProduct(
-                      currentSku,
-                      currentProduct?.label,
-                    );
-                    const numericValue = Number(value);
-                    const normalized = halfPlanchaEligible
-                      ? Math.max(0.5, Math.round(numericValue * 2) / 2)
-                      : Math.max(1, Math.trunc(numericValue));
-                    setPlanchasInput(String(normalized));
-                  }}
+                  onChange={changePlanchasInput}
                   min={
                     isMiniHalfPlanchaProduct(
                       planchaLines[0]?.sku,
@@ -12645,6 +13368,16 @@ function PromoterApp({
                   }
                   testId="input-sale-planchas"
                 />
+                <button
+                  type="button"
+                  className="qty-btn primary"
+                  aria-label="Agregar plancha"
+                  data-testid="button-planchas-plus"
+                  onClick={() => changePlanchasInput(String((Number(planchasInput) || 0) + planchaStep))}
+                >
+                  <Plus />
+                </button>
+                </div>
               </Field>
             )}
             {planchaType === "MIX" && (
@@ -12876,8 +13609,8 @@ function PromoterApp({
         )}
         {punoWithoutCanje && (
           <div className="notice">
-            <strong>Región SUR · PUNO: venta sin canje</strong>
-            <p>Las ventas de este departamento no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
+            <strong>Zona Juliaca: venta sin canje</strong>
+            <p>Las ventas en Juliaca no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
           </div>
         )}
         {!punoWithoutCanje && bonus && mode === "PLANCHAS" && (
@@ -12956,6 +13689,10 @@ function PromoterApp({
           </Field>
         )}
         <div className="form-actions">
+          <div className="form-actions-total" aria-live="polite">
+            <span>Total</span>
+            <strong>{formatSoles(Number.isFinite(saleAmount) ? saleAmount : 0)}</strong>
+          </div>
           <Btn
             variant="outline"
             onClick={() =>
@@ -13067,8 +13804,19 @@ function PromoterApp({
         </div>
       </main>
     );
+  // Datos de la pantalla de Inicio (solo lectura de lo que ya está en el dispositivo).
+  const homeJornada = isRotativePromoter ? latestAttendanceToday : activeMarketEntry;
+  const homeTodaySales = mineSales.filter((sale) => attendanceDay(sale.date) === today);
+  const homeRecentSales = [...mineSales]
+    .sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime())
+    .slice(0, 3);
+  const homePending =
+    mineSales.filter((item) => item.status !== "SINCRONIZADA").length +
+    mineAttendance.filter((item) => item.status !== "SINCRONIZADA").length;
+  const homeClientName =
+    clients.find((client) => client.id === selectedClientId)?.name || "Cliente";
   return (
-    <main className="promoter-page">
+    <main className={`promoter-page module-${module.toLowerCase()}`}>
       <div className="promoter-layout">
         <PromoterNav
           active={module}
@@ -13079,6 +13827,36 @@ function PromoterApp({
           }}
         />
         <div className="promoter-content">
+          {module === "INICIO" ? (
+            <PromoterHome
+              user={user}
+              now={attendanceClock}
+              marketName={selectedMarket.name}
+              clientName={homeClientName}
+              jornada={homeJornada}
+              todaySales={homeTodaySales}
+              recentSales={homeRecentSales}
+              pendingCount={homePending}
+              syncBusy={manualSyncBusy}
+              syncMessage={manualSyncMessage}
+              noCanjeZone={punoWithoutCanje}
+              onSync={requestManualSync}
+              onNewSale={() => {
+                setModule("VENTAS");
+                setView("NUEVA");
+              }}
+              onAttendance={() => {
+                setModule("MARCACIONES");
+                setView("NUEVA");
+              }}
+              onHistory={() => {
+                setModule("VENTAS");
+                setView("LISTA");
+                setSearch("");
+              }}
+            />
+          ) : (
+          <>
           <div className="promoter-head">
             <div>
               <span className="crumb">
@@ -13423,6 +14201,8 @@ function PromoterApp({
             </section>
           )}
           {view === "NUEVA" && module === "VENTAS" && saleForm}
+          </>
+          )}
         </div>
       </div>
     </main>
@@ -13460,102 +14240,118 @@ function ClientApp({
     0,
   );
 
+  // Canjes recibidos: artículos guardados en la venta o, en ventas antiguas,
+  // el texto de bonificación.
+  const saleCanjeItems = (sale: Sale) => {
+    const items = sale.redemptionItems && Object.keys(sale.redemptionItems).length
+      ? sale.redemptionItems
+      : parseBonusItems(effectiveSaleBonus(sale));
+    return (Object.entries(items) as Array<[RedemptionItemId, number]>)
+      .filter(([, quantity]) => Number(quantity) > 0)
+      .map(([itemId, quantity]) => ({ itemId, quantity: Number(quantity) }));
+  };
+  const totalCanjeItems = clientSales.reduce(
+    (sum, sale) => sum + saleCanjeItems(sale).reduce((total, item) => total + item.quantity, 0),
+    0,
+  );
+  const salesByDay = clientSales.reduce<Array<{ day: string; sales: Sale[] }>>((groups, sale) => {
+    const day = attendanceDay(sale.date);
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.sales.push(sale);
+    else groups.push({ day, sales: [sale] });
+    return groups;
+  }, []);
+  const todayKey = attendanceDay(new Date());
+  const dayTitle = (day: string) =>
+    day === todayKey
+      ? "Hoy"
+      : new Intl.DateTimeFormat("es-PE", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })
+          .format(new Date(`${day}T12:00:00Z`));
+
   return (
     <main className="client-page">
-      <div className="client-content">
-        <div className="client-heading">
-          <div>
-            <span className="eyebrow">PORTAL CLIENTE</span>
-            <h1>Hola, {user.name}</h1>
-            <p>Consulta la información registrada de tu tienda.</p>
-          </div>
-          <span className="client-badge">
-            <UserRound /> CLIENTE
-          </span>
-        </div>
+      <div className="client-content cp">
         {client ? (
           <>
-            <section className="client-profile panel">
-              <div className="panel-header">
+            <header className="cp-hero" data-testid="client-home">
+              <span className="cp-eyebrow">MIS COMPRAS · CAMPAÑA 2026</span>
+              <h1>{client.name}</h1>
+              <p>
+                {market ? `${market.name}${market.district ? ` · ${market.district}` : ""}` : client.code}
+              </p>
+              <div className="cp-stats">
                 <div>
-                  <h2>{client.name}</h2>
-                  <p>
-                    {client.code}
-                    {market ? ` · ${market.name}` : ""}
-                  </p>
-                </div>
-                <StatusPill status={client.status} />
-              </div>
-              <div className="panel-body client-profile-grid">
-                <div>
-                  <small>CELULAR</small>
-                  <strong>{client.phone || "No registrado"}</strong>
-                </div>
-                <div>
-                  <small>MERCADO</small>
-                  <strong>{market?.name || "No identificado"}</strong>
-                </div>
-                <div>
-                  <small>DISTRITO</small>
-                  <strong>{market?.district || "No identificado"}</strong>
-                </div>
-              </div>
-            </section>
-            <div className="client-stats">
-              <article>
-                <ShoppingBag />
-                <div>
-                  <small>COMPRAS REGISTRADAS</small>
+                  <span>Compras</span>
                   <strong>{clientSales.length}</strong>
                 </div>
-              </article>
-              <article>
-                <PackageCheck />
                 <div>
-                  <small>UNIDADES</small>
-                  <strong>{totalUnits.toLocaleString("es-PE")}</strong>
-                </div>
-              </article>
-              <article>
-                <CheckCircle2 />
-                <div>
-                  <small>TOTAL ACUMULADO</small>
+                  <span>Total</span>
                   <strong>{formatSoles(totalSoles)}</strong>
                 </div>
-              </article>
-            </div>
-            <section className="panel">
-              <div className="panel-header">
                 <div>
-                  <h2>Historial de compras</h2>
-                  <p>Registro de ventas asociadas a tu tienda.</p>
+                  <span>Canjes recibidos</span>
+                  <strong>{totalCanjeItems.toLocaleString("es-PE")}</strong>
                 </div>
               </div>
-              <div className="panel-body">
-                {clientSales.length ? (
-                  <div className="client-sales-list">
-                    {clientSales.map((sale) => (
-                      <article className="client-sale-row" key={sale.id}>
-                        <div>
-                          <strong>{sale.id}</strong>
-                          <small>
-                            {formatDate(sale.date)} ·{" "}
-                            {sale.mode === "PLANCHAS"
-                              ? `${sale.planchas || 0} plancha(s)`
-                              : `${sale.units} unidad(es)`}
-                          </small>
+              <small className="cp-units">{totalUnits.toLocaleString("es-PE")} unidades de panetón en total</small>
+            </header>
+            {salesByDay.length ? (
+              salesByDay.map((group) => (
+                <section className="cp-day" key={group.day} aria-label={dayTitle(group.day)}>
+                  <h2>{dayTitle(group.day)}</h2>
+                  {group.sales.map((sale) => {
+                    const items = saleCanjeItems(sale);
+                    const receipt = sale.receiptPhoto ? photoImageSource(sale.receiptPhoto) : "";
+                    return (
+                      <article className="cp-sale" key={sale.id}>
+                        <div className="cp-sale-top">
+                          <strong>
+                            {saleSummaryLabel(sale)}
+                            {sale.mix && Object.keys(sale.mix).length === 1 ? ` · ${Object.keys(sale.mix)[0]}` : ""}
+                          </strong>
+                          <strong>{formatSoles(sale.amountSoles)}</strong>
                         </div>
-                        <strong>{formatSoles(sale.amountSoles)}</strong>
+                        <div className="cp-sale-canje">
+                          {items.length ? (
+                            <>
+                              <span>Recibiste:</span>
+                              {items.map((item) => (
+                                <span className="cp-chip" key={item.itemId}>
+                                  {item.quantity} {redemptionLabel(item.itemId)}
+                                </span>
+                              ))}
+                            </>
+                          ) : (
+                            <span>{sale.punoWithoutCanje ? "Zona sin canje" : "Sin canje"}</span>
+                          )}
+                        </div>
+                        <div className="cp-sale-foot">
+                          <span>{limaTime(sale.date)}</span>
+                          {receipt && /^(https?:\/\/|\/)/.test(receipt) ? (
+                            <a href={receipt} target="_blank" rel="noreferrer">
+                              Ver boleta
+                            </a>
+                          ) : null}
+                        </div>
                       </article>
-                    ))}
-                  </div>
-                ) : (
-                  <Empty
-                    title="Aún no hay compras registradas"
-                    detail="Cuando se registre una compra para tu tienda aparecerá aquí."
-                  />
-                )}
-              </div>
+                    );
+                  })}
+                </section>
+              ))
+            ) : (
+              <Empty
+                title="Aún no hay compras registradas"
+                detail="Cuando se registre una compra para tu tienda aparecerá aquí."
+              />
+            )}
+            <section className="cp-profile">
+              <h2>Datos de tu tienda</h2>
+              <dl>
+                <div><dt>Código</dt><dd>{client.code}</dd></div>
+                <div><dt>Celular</dt><dd>{client.phone || "No registrado"}</dd></div>
+                <div><dt>Mercado</dt><dd>{market?.name || "No identificado"}</dd></div>
+                <div><dt>Estado</dt><dd><StatusPill status={client.status} /></dd></div>
+              </dl>
             </section>
           </>
         ) : (
@@ -13988,7 +14784,7 @@ export default function App() {
 
         setSales((current) => {
           const removed = new Set(payload.deleted?.sales || []);
-          const next = mergeSales(current, cloudSales).filter((item) => !removed.has(item.id));
+          const next = applyOperationalFeed(current, cloudSales, removed, reconcile, saleFreshness, sortSalesNewest);
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-sales", next);
           return next;
@@ -13996,7 +14792,7 @@ export default function App() {
         if (Array.isArray(payload.snapshot.attendance)) {
           setAttendance((current) => {
             const removed = new Set(payload.deleted?.attendance || []);
-          const next = mergeAttendance(current, cloudAttendance).filter((item) => !removed.has(item.id));
+            const next = applyOperationalFeed(current, cloudAttendance, removed, reconcile, attendanceFreshness, sortNewestByDate);
             if (JSON.stringify(next) === JSON.stringify(current)) return current;
             writeStore("bt-attendance", next);
             return next;
@@ -14004,7 +14800,7 @@ export default function App() {
         }
         setMovements((current) => {
           const removed = new Set(payload.deleted?.movements || []);
-          const next = mergeMovements(current, cloudMovements).filter((item) => !removed.has(item.id));
+          const next = applyOperationalFeed(current, cloudMovements, removed, reconcile, movementFreshness, sortNewestByDate);
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-inventory-movements", next);
           return next;

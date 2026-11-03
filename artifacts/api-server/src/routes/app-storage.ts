@@ -126,11 +126,31 @@ function normalizeLocationValue(input: unknown) {
     .toUpperCase();
 }
 
-function isPunoSouthMarketData(record: StoredRecord) {
+// Zona sin canje: solo Juliaca (provincia San Román, Puno). Todas las demás
+// ciudades —incluida Puno ciudad— registran canje según la Tabla Canjes.
+// Debe coincidir con isNoCanjeLocation de la app (below-trade-panetones/src/App.tsx).
+const NO_CANJE_DISTRICTS = new Set(["JULIACA"]);
+const NO_CANJE_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
+const NO_CANJE_NAME_KEYWORD = "JULIACA";
+
+function isNoCanjeLocation(location: {
+  name?: unknown;
+  province?: unknown;
+  district?: unknown;
+}) {
+  const district = normalizeLocationValue(location.district);
+  const province = normalizeLocationValue(location.province);
+  const name = normalizeLocationValue(location.name);
   return (
-    normalizeLocationValue(record.region) === "SUR" &&
-    normalizeLocationValue(record.department) === "PUNO"
+    NO_CANJE_DISTRICTS.has(district) ||
+    NO_CANJE_PROVINCES.has(province) ||
+    name.includes(NO_CANJE_NAME_KEYWORD)
   );
+}
+
+/** Datos de un mercado (tabla markets). */
+function isNoCanjeMarketData(record: StoredRecord) {
+  return isNoCanjeLocation(record);
 }
 
 function stripCanjeFromSale(record: StoredRecord): StoredRecord {
@@ -151,7 +171,9 @@ function stripCanjeFromSale(record: StoredRecord): StoredRecord {
     redemptionCount: 0,
     planchaAccessory: value(record, "mode") === "PLANCHAS" ? "NINGUNO" : undefined,
     planchaMultiplier: value(record, "mode") === "PLANCHAS" ? 1 : undefined,
+    // Nombre histórico de la marca: se conserva para reportes y ventas anteriores.
     punoWithoutCanje: true,
+    noCanjeZone: "JULIACA",
   };
 }
 
@@ -169,11 +191,13 @@ function enforceSaleWithoutCanje(record: StoredRecord) {
   Object.assign(record, clean);
 }
 
-function isPunoSouthSaleRecord(record: StoredRecord) {
-  return (
-    normalizeLocationValue(record.marketRegion) === "SUR" &&
-    normalizeLocationValue(record.marketDepartment) === "PUNO"
-  );
+/** Respaldo cuando el mercado no está en la base: ubicación copiada en la venta. */
+function isNoCanjeSaleRecord(record: StoredRecord) {
+  return isNoCanjeLocation({
+    name: record.marketName,
+    province: record.marketProvince,
+    district: record.marketDistrict,
+  });
 }
 
 function hasRedemptionConsumption(record: StoredRecord) {
@@ -1128,6 +1152,25 @@ async function validateNewAttendance(
   return { role, campaignDay };
 }
 
+// Tope de sincronizaciones simultáneas. Las que exceden esperan aquí, en memoria,
+// SIN tomar una conexión de la base: así siempre quedan conexiones libres para el
+// panel (crear mercados, clientes, usuarios) y para las lecturas. Antes, una fila
+// de sincronizaciones podía ocupar todo el pool y dejar colgado cualquier guardado.
+const SYNC_CONCURRENCY = Math.max(1, Math.floor(Number(process.env.SYNC_CONCURRENCY) || 4));
+let activeSyncs = 0;
+const syncWaiters: Array<() => void> = [];
+async function withSyncSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeSyncs < SYNC_CONCURRENCY) activeSyncs += 1;
+  else await new Promise<void>((resolve) => syncWaiters.push(resolve)); // recibe el cupo liberado
+  try {
+    return await task();
+  } finally {
+    const next = syncWaiters.shift();
+    if (next) next(); // el cupo pasa directo al siguiente en espera
+    else activeSyncs -= 1;
+  }
+}
+
 async function syncSnapshot(
   incoming: Partial<StorageSnapshot>,
   incomingRevision?: string | null,
@@ -1315,7 +1358,15 @@ async function syncSnapshot(
             }
           }
           if (isNewRecord && name === "sales") {
-            if (isPunoSouthSaleRecord(record)) enforceSaleWithoutCanje(record);
+            // La zona se decide con el mercado guardado en la base (no con lo que
+            // envía el celular, que puede venir de una versión anterior de la app).
+            const saleMarket = await client.query(
+              "SELECT data FROM markets WHERE id=$1 LIMIT 1",
+              [value(record, "marketId")],
+            );
+            const saleMarketData = isRecord(saleMarket.rows[0]?.data) ? saleMarket.rows[0].data : null;
+            if (saleMarketData ? isNoCanjeMarketData(saleMarketData) : isNoCanjeSaleRecord(record))
+              enforceSaleWithoutCanje(record);
             const validatedRule = await validateSubmittedRedemptionRule(
               client as unknown as QueryClient,
               record,
@@ -2119,7 +2170,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
 
 router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req, res): Promise<void> => {
   const actor = await authorizedWarehouseActor(req);
-  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar ventas de Puno." });
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar ventas de Juliaca." });
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
@@ -2127,7 +2178,7 @@ router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req,
 
     const marketsResult = await db.query("SELECT id,data FROM markets");
     const punoMarketIds = marketsResult.rows
-      .filter((row) => isRecord(row.data) && isPunoSouthMarketData(row.data))
+      .filter((row) => isRecord(row.data) && isNoCanjeMarketData(row.data))
       .map((row) => String(row.id));
     if (!punoMarketIds.length) {
       await db.query("COMMIT");
@@ -2251,7 +2302,7 @@ router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req,
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to regularize Puno sales without canje");
-    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudieron regularizar las ventas de Puno." });
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudieron regularizar las ventas de Juliaca." });
   } finally {
     db.release();
   }
@@ -2784,13 +2835,40 @@ router.delete("/app-storage/redemption-rules/:id", async (req, res): Promise<voi
   }
 });
 
-router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
+router.get("/app-storage/warehouses", async (req, res): Promise<void> => {
   try {
     const warehouses = await pool.query("SELECT data,stock,market_ids FROM warehouses ORDER BY name");
     const movements = await pool.query("SELECT data FROM warehouse_movements ORDER BY movement_date DESC,created_at DESC");
+    // Admin, analista, supervisor y trade: todos los almacenes (sin cambios).
+    // Promotor y coordinador: solo los almacenes de sus mercados. Cliente: ninguno.
+    const scope = await dataScopeFor(req);
+    let allowedWarehouseIds: Set<string> | null = null;
+    if (scope.kind !== "full") {
+      allowedWarehouseIds = new Set<string>();
+      const scopeMarketIds = scope.kind === "client" ? [] : [...scope.marketIds];
+      if (scopeMarketIds.length) {
+        const scopeMarkets = await pool.query(
+          "SELECT data->>'warehouseId' AS warehouse_id FROM markets WHERE id = ANY($1::text[])",
+          [scopeMarketIds],
+        );
+        for (const row of scopeMarkets.rows) if (row.warehouse_id) allowedWarehouseIds.add(String(row.warehouse_id));
+        for (const row of warehouses.rows) {
+          const linked = Array.isArray(row.market_ids) ? row.market_ids.map(String) : [];
+          const id = isRecord(row.data) ? value(row.data, "id") : "";
+          if (id && linked.some((marketId: string) => scope.kind !== "client" && scope.marketIds.has(marketId)))
+            allowedWarehouseIds.add(id);
+        }
+      }
+    }
+    const visibleWarehouses = warehouses.rows.filter(
+      (row) => !allowedWarehouseIds || allowedWarehouseIds.has(isRecord(row.data) ? value(row.data, "id") : ""),
+    );
+    const visibleMovements = movements.rows.filter(
+      (row) => !allowedWarehouseIds || (isRecord(row.data) && allowedWarehouseIds.has(value(row.data, "warehouseId"))),
+    );
     res.json({
-      warehouses: warehouses.rows.map((row) => ({ ...(isRecord(row.data) ? row.data : {}), stock: isRecord(row.stock) ? row.stock : {}, marketIds: Array.isArray(row.market_ids) ? row.market_ids : [] })),
-      movements: movements.rows.map((row) => row.data),
+      warehouses: visibleWarehouses.map((row) => ({ ...(isRecord(row.data) ? row.data : {}), stock: isRecord(row.stock) ? row.stock : {}, marketIds: Array.isArray(row.market_ids) ? row.market_ids : [] })),
+      movements: visibleMovements.map((row) => row.data),
     });
   } catch (error) {
     console.error("Unable to read warehouses", error);
@@ -3684,12 +3762,12 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       res.status(403).json({ code: "WRITE_NOT_ALLOWED", message: denied });
       return;
     }
-    const snapshot = await syncSnapshot(
+    const snapshot = await withSyncSlot(() => syncSnapshot(
       incoming as Partial<StorageSnapshot>,
       incomingRevision,
       req.body?.compactAttendance === true && Array.isArray(incoming.attendance) && incoming.attendance.length === 1 && Object.keys(incoming).every((key) => key === "attendance"),
       req.body?.compactSale === true && Array.isArray(incoming.sales) && incoming.sales.length === 1 && Object.keys(incoming).every((key) => key === "sales"),
-    );
+    ));
     res.json({
       storage: "digitalocean-postgresql",
       syncedAt: new Date().toISOString(),
@@ -5097,7 +5175,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (!customer.rows.length || !market.rows.length)
       throw new Error("Selecciona un cliente activo del mercado elegido.");
     const marketData = isRecord(market.rows[0].data) ? market.rows[0].data : {};
-    const punoWithoutCanje = isPunoSouthMarketData(marketData);
+    const punoWithoutCanje = isNoCanjeMarketData(marketData);
     if (punoWithoutCanje) {
       input.marketRegion = value(marketData, "region");
       input.marketDepartment = value(marketData, "department");
@@ -5392,7 +5470,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     const currentMarketData = isRecord(currentMarketResult.rows[0]?.data)
       ? currentMarketResult.rows[0].data
       : {};
-    const punoWithoutCanje = isPunoSouthMarketData(currentMarketData);
+    const punoWithoutCanje = isNoCanjeMarketData(currentMarketData);
     const hasCanjeEditedFlag = Object.prototype.hasOwnProperty.call(
       input,
       "canjeEdited",

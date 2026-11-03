@@ -18,6 +18,10 @@ if (!process.env.DATABASE_URL && !hasDiscreteConnection) {
   );
 }
 
+// Conexiones simultáneas a PostgreSQL (por defecto 10, igual que antes).
+// Ajustable con PG_POOL_MAX según el plan de la base en DigitalOcean.
+const poolMax = Math.max(1, Math.floor(Number(process.env.PG_POOL_MAX) || 10));
+
 export const pool = hasDiscreteConnection
   ? new Pool({
       host: process.env.PGHOST,
@@ -26,8 +30,9 @@ export const pool = hasDiscreteConnection
       password: process.env.PGPASSWORD,
       database: process.env.PGDATABASE,
       ssl: { rejectUnauthorized: false },
+      max: poolMax,
     })
-  : new Pool({ connectionString: process.env.DATABASE_URL });
+  : new Pool({ connectionString: process.env.DATABASE_URL, max: poolMax });
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
