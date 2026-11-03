@@ -11718,9 +11718,12 @@ function elapsedLabel(from: string, now: Date) {
   return hours ? `${hours} h ${minutes % 60} min` : `${minutes} min`;
 }
 function saleSummaryLabel(sale: Sale) {
-  return sale.mode === "PLANCHAS"
-    ? `${sale.planchas} plancha${Number(sale.planchas) === 1 ? "" : "s"}`
-    : `${sale.units} unidad${Number(sale.units) === 1 ? "" : "es"}`;
+  const planchas = Number(sale.planchas);
+  if (sale.mode === "PLANCHAS" && Number.isFinite(planchas) && planchas > 0)
+    return `${planchas} plancha${planchas === 1 ? "" : "s"}`;
+  // Ventas antiguas sin número de planchas guardado: se muestran por unidades.
+  const units = Number(sale.units) || 0;
+  return `${units} unidad${units === 1 ? "" : "es"}`;
 }
 
 /**
@@ -14237,102 +14240,118 @@ function ClientApp({
     0,
   );
 
+  // Canjes recibidos: artículos guardados en la venta o, en ventas antiguas,
+  // el texto de bonificación.
+  const saleCanjeItems = (sale: Sale) => {
+    const items = sale.redemptionItems && Object.keys(sale.redemptionItems).length
+      ? sale.redemptionItems
+      : parseBonusItems(effectiveSaleBonus(sale));
+    return (Object.entries(items) as Array<[RedemptionItemId, number]>)
+      .filter(([, quantity]) => Number(quantity) > 0)
+      .map(([itemId, quantity]) => ({ itemId, quantity: Number(quantity) }));
+  };
+  const totalCanjeItems = clientSales.reduce(
+    (sum, sale) => sum + saleCanjeItems(sale).reduce((total, item) => total + item.quantity, 0),
+    0,
+  );
+  const salesByDay = clientSales.reduce<Array<{ day: string; sales: Sale[] }>>((groups, sale) => {
+    const day = attendanceDay(sale.date);
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.sales.push(sale);
+    else groups.push({ day, sales: [sale] });
+    return groups;
+  }, []);
+  const todayKey = attendanceDay(new Date());
+  const dayTitle = (day: string) =>
+    day === todayKey
+      ? "Hoy"
+      : new Intl.DateTimeFormat("es-PE", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })
+          .format(new Date(`${day}T12:00:00Z`));
+
   return (
     <main className="client-page">
-      <div className="client-content">
-        <div className="client-heading">
-          <div>
-            <span className="eyebrow">PORTAL CLIENTE</span>
-            <h1>Hola, {user.name}</h1>
-            <p>Consulta la información registrada de tu tienda.</p>
-          </div>
-          <span className="client-badge">
-            <UserRound /> CLIENTE
-          </span>
-        </div>
+      <div className="client-content cp">
         {client ? (
           <>
-            <section className="client-profile panel">
-              <div className="panel-header">
+            <header className="cp-hero" data-testid="client-home">
+              <span className="cp-eyebrow">MIS COMPRAS · CAMPAÑA 2026</span>
+              <h1>{client.name}</h1>
+              <p>
+                {market ? `${market.name}${market.district ? ` · ${market.district}` : ""}` : client.code}
+              </p>
+              <div className="cp-stats">
                 <div>
-                  <h2>{client.name}</h2>
-                  <p>
-                    {client.code}
-                    {market ? ` · ${market.name}` : ""}
-                  </p>
-                </div>
-                <StatusPill status={client.status} />
-              </div>
-              <div className="panel-body client-profile-grid">
-                <div>
-                  <small>CELULAR</small>
-                  <strong>{client.phone || "No registrado"}</strong>
-                </div>
-                <div>
-                  <small>MERCADO</small>
-                  <strong>{market?.name || "No identificado"}</strong>
-                </div>
-                <div>
-                  <small>DISTRITO</small>
-                  <strong>{market?.district || "No identificado"}</strong>
-                </div>
-              </div>
-            </section>
-            <div className="client-stats">
-              <article>
-                <ShoppingBag />
-                <div>
-                  <small>COMPRAS REGISTRADAS</small>
+                  <span>Compras</span>
                   <strong>{clientSales.length}</strong>
                 </div>
-              </article>
-              <article>
-                <PackageCheck />
                 <div>
-                  <small>UNIDADES</small>
-                  <strong>{totalUnits.toLocaleString("es-PE")}</strong>
-                </div>
-              </article>
-              <article>
-                <CheckCircle2 />
-                <div>
-                  <small>TOTAL ACUMULADO</small>
+                  <span>Total</span>
                   <strong>{formatSoles(totalSoles)}</strong>
                 </div>
-              </article>
-            </div>
-            <section className="panel">
-              <div className="panel-header">
                 <div>
-                  <h2>Historial de compras</h2>
-                  <p>Registro de ventas asociadas a tu tienda.</p>
+                  <span>Canjes recibidos</span>
+                  <strong>{totalCanjeItems.toLocaleString("es-PE")}</strong>
                 </div>
               </div>
-              <div className="panel-body">
-                {clientSales.length ? (
-                  <div className="client-sales-list">
-                    {clientSales.map((sale) => (
-                      <article className="client-sale-row" key={sale.id}>
-                        <div>
-                          <strong>{sale.id}</strong>
-                          <small>
-                            {formatDate(sale.date)} ·{" "}
-                            {sale.mode === "PLANCHAS"
-                              ? `${sale.planchas || 0} plancha(s)`
-                              : `${sale.units} unidad(es)`}
-                          </small>
+              <small className="cp-units">{totalUnits.toLocaleString("es-PE")} unidades de panetón en total</small>
+            </header>
+            {salesByDay.length ? (
+              salesByDay.map((group) => (
+                <section className="cp-day" key={group.day} aria-label={dayTitle(group.day)}>
+                  <h2>{dayTitle(group.day)}</h2>
+                  {group.sales.map((sale) => {
+                    const items = saleCanjeItems(sale);
+                    const receipt = sale.receiptPhoto ? photoImageSource(sale.receiptPhoto) : "";
+                    return (
+                      <article className="cp-sale" key={sale.id}>
+                        <div className="cp-sale-top">
+                          <strong>
+                            {saleSummaryLabel(sale)}
+                            {sale.mix && Object.keys(sale.mix).length === 1 ? ` · ${Object.keys(sale.mix)[0]}` : ""}
+                          </strong>
+                          <strong>{formatSoles(sale.amountSoles)}</strong>
                         </div>
-                        <strong>{formatSoles(sale.amountSoles)}</strong>
+                        <div className="cp-sale-canje">
+                          {items.length ? (
+                            <>
+                              <span>Recibiste:</span>
+                              {items.map((item) => (
+                                <span className="cp-chip" key={item.itemId}>
+                                  {item.quantity} {redemptionLabel(item.itemId)}
+                                </span>
+                              ))}
+                            </>
+                          ) : (
+                            <span>{sale.punoWithoutCanje ? "Zona sin canje" : "Sin canje"}</span>
+                          )}
+                        </div>
+                        <div className="cp-sale-foot">
+                          <span>{limaTime(sale.date)}</span>
+                          {receipt && /^(https?:\/\/|\/)/.test(receipt) ? (
+                            <a href={receipt} target="_blank" rel="noreferrer">
+                              Ver boleta
+                            </a>
+                          ) : null}
+                        </div>
                       </article>
-                    ))}
-                  </div>
-                ) : (
-                  <Empty
-                    title="Aún no hay compras registradas"
-                    detail="Cuando se registre una compra para tu tienda aparecerá aquí."
-                  />
-                )}
-              </div>
+                    );
+                  })}
+                </section>
+              ))
+            ) : (
+              <Empty
+                title="Aún no hay compras registradas"
+                detail="Cuando se registre una compra para tu tienda aparecerá aquí."
+              />
+            )}
+            <section className="cp-profile">
+              <h2>Datos de tu tienda</h2>
+              <dl>
+                <div><dt>Código</dt><dd>{client.code}</dd></div>
+                <div><dt>Celular</dt><dd>{client.phone || "No registrado"}</dd></div>
+                <div><dt>Mercado</dt><dd>{market?.name || "No identificado"}</dd></div>
+                <div><dt>Estado</dt><dd><StatusPill status={client.status} /></dd></div>
+              </dl>
             </section>
           </>
         ) : (
