@@ -502,6 +502,60 @@ const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
 const APP_STORAGE_VERIFY_IDS = "/api/app-storage/verify-ids";
 const APP_STORAGE_RECORD_PHOTO = "/api/app-storage/records/photo";
+
+// Pase de sesión: se recibe al iniciar sesión y viaja solo en cada petición a la
+// API (encabezado Authorization). El usuario no vuelve a escribir su clave; el
+// servidor lo renueva mientras la app se use.
+const SESSION_TOKEN_KEY = "bt-session-token";
+function readSessionToken() {
+  return safeStorageGet(SESSION_TOKEN_KEY) || "";
+}
+function writeSessionToken(token: string) {
+  if (token) safeStorageSet(SESSION_TOKEN_KEY, token);
+  else safeStorageRemove(SESSION_TOKEN_KEY);
+}
+function installSessionFetch() {
+  if (typeof window === "undefined") return;
+  const marker = window as unknown as { __btSessionFetch?: boolean };
+  if (marker.__btSessionFetch) return;
+  marker.__btSessionFetch = true;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    let isApi = false;
+    try {
+      const parsed = new URL(url, window.location.origin);
+      isApi = parsed.origin === window.location.origin && parsed.pathname.startsWith("/api/");
+    } catch {
+      isApi = false;
+    }
+    if (!isApi) return nativeFetch(input, init);
+    const token = readSessionToken();
+    let nextInit = init;
+    if (token) {
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      );
+      if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+      nextInit = { ...init, headers };
+    }
+    const response = await nativeFetch(input, nextInit);
+    const renewed = response.headers.get("X-Session-Token");
+    if (renewed) writeSessionToken(renewed);
+    if (response.status === 401 && !url.includes("/app-storage/login")) {
+      const code = await response
+        .clone()
+        .json()
+        .then((payload: { code?: string }) => payload?.code)
+        .catch(() => undefined);
+      if (code === "SESSION_REQUIRED" || code === "SESSION_INVALID")
+        window.dispatchEvent(new CustomEvent("bt-session-expired"));
+    }
+    return response;
+  };
+}
+installSessionFetch();
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
@@ -3062,12 +3116,14 @@ function Login({
         });
         const payload = (await response.json()) as {
           user?: AppUser;
+          token?: string;
           message?: string;
         };
         if (!response.ok || !payload.user) {
           notify(payload.message || "DNI o clave incorrectos", true);
           return;
         }
+        writeSessionToken(payload.token || "");
         const user = { ...payload.user, password };
         writeStore("bt-session", user);
         onLogin(user);
@@ -14229,9 +14285,59 @@ export default function App() {
 
   const logoutImmediately = () => {
     safeStorageRemove("bt-session");
+    writeSessionToken("");
     setPromoterSession({ marketId: "", clientId: "" });
     setUser(null);
   };
+
+  // Sesiones abiertas antes de esta versión: se obtiene el pase en segundo plano
+  // con las credenciales ya guardadas en el dispositivo, sin pedir la clave.
+  useEffect(() => {
+    if (!user?.dni) return;
+    let cancelled = false;
+    const acquire = async () => {
+      if (cancelled || readSessionToken() || !navigator.onLine) return;
+      const session = readStore<AppUser | null>("bt-session", null);
+      const password = session?.dni === user.dni ? session.password : user.password;
+      if (!password) return;
+      try {
+        const response = await fetch(APP_STORAGE_LOGIN, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dni: user.dni, password }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { token?: string };
+        if (cancelled) return;
+        if (response.ok && payload.token) writeSessionToken(payload.token);
+        // Clave cambiada o usuario desactivado por un admin: pedir nuevo ingreso.
+        else if (response.status === 401)
+          window.dispatchEvent(new CustomEvent("bt-session-expired"));
+      } catch {
+        // Sin señal: se reintenta al recuperar conexión.
+      }
+    };
+    void acquire();
+    window.addEventListener("online", acquire);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", acquire);
+    };
+  }, [user?.dni]);
+
+  // Pase vencido o revocado: volver a la pantalla de ingreso. Las ventas y
+  // marcaciones pendientes se quedan en el dispositivo y se envían al reingresar.
+  useEffect(() => {
+    const onExpired = () => {
+      if (!readStore<AppUser | null>("bt-session", null)) return;
+      safeStorageRemove("bt-session");
+      writeSessionToken("");
+      setPromoterSession({ marketId: "", clientId: "" });
+      setUser(null);
+      notify("Tu sesión venció. Ingresa de nuevo con tu DNI y clave; tus registros pendientes se conservan.", true);
+    };
+    window.addEventListener("bt-session-expired", onExpired);
+    return () => window.removeEventListener("bt-session-expired", onExpired);
+  }, []);
   return (
     <>
       {activeUser ? (

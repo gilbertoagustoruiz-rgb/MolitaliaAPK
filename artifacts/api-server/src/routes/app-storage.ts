@@ -8,6 +8,7 @@ import {
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
 import { bumpDataVersion, cachedJson } from "../lib/read-cache";
+import { issueSessionToken, sessionOf } from "../lib/session";
 import { Router, type IRouter, type Request } from "express";
 
 const router: IRouter = Router();
@@ -1261,7 +1262,17 @@ async function syncSnapshot(
   return readSnapshot();
 }
 
+// Admin o analista con pase válido. Se mantiene la verificación por DNI y clave
+// (encabezados x-admin-*) para versiones anteriores de la app.
+function sessionAdminActor(req: Request) {
+  const session = sessionOf(req);
+  if (!session || !["ADMIN", "ANALISTA"].includes(session.role)) return null;
+  return { id: session.id, role: session.role, data: session.data };
+}
+
 async function authorizedTradeActor(req: Request) {
+  const fromSession = sessionAdminActor(req);
+  if (fromSession) return fromSession;
   const dni = req.get("x-admin-dni") || "";
   const key = req.get("x-admin-key") || "";
   if (!dni || !key) return null;
@@ -3487,25 +3498,34 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
 
 // Historial privado del promotor: credenciales verificadas contra PostgreSQL.
 router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> => {
+  const promoterRoles = ["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"];
+  // Con pase válido de promotor no hace falta la clave; si no, DNI y clave
+  // (versiones anteriores de la app).
+  const session = sessionOf(req);
+  const sessionPromoterId =
+    session && promoterRoles.includes(session.role.toUpperCase()) ? session.id : "";
   const dni = String(req.get("x-promoter-dni") || "").trim();
   const password = String(req.get("x-promoter-key") || "");
-  if (!/^\d{8}$/.test(dni) || !password) {
+  if (!sessionPromoterId && (!/^\d{8}$/.test(dni) || !password)) {
     res.status(401).json({ message: "Sesión no válida." });
     return;
   }
   try {
-    const credentials = await pool.query(
-      "SELECT id,role,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
-      [dni],
-    );
-    const actor = credentials.rows[0];
-    if (!actor || actor.status !== "ACTIVO" ||
-        !["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"].includes(String(actor.role || "").toUpperCase()) ||
-        !actor.password_hash || !(await passwordMatchesStored(password, String(actor.password_hash)))) {
-      res.status(403).json({ message: "No autorizado." });
-      return;
+    let promoterId = sessionPromoterId;
+    if (!promoterId) {
+      const credentials = await pool.query(
+        "SELECT id,role,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
+        [dni],
+      );
+      const actor = credentials.rows[0];
+      if (!actor || actor.status !== "ACTIVO" ||
+          !promoterRoles.includes(String(actor.role || "").toUpperCase()) ||
+          !actor.password_hash || !(await passwordMatchesStored(password, String(actor.password_hash)))) {
+        res.status(403).json({ message: "No autorizado." });
+        return;
+      }
+      promoterId = String(actor.id);
     }
-    const promoterId = String(actor.id);
     const body = await cachedJson(`promoter-attendance:${promoterId}`, READ_CACHE_TTL_MS, async () => {
       const rows = await pool.query(
         "SELECT data,status FROM attendance WHERE promoter_id=$1 ORDER BY event_date DESC",
@@ -4474,6 +4494,8 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
 });
 
 async function authorizedCatalogActor(req: Request) {
+  const fromSession = sessionAdminActor(req);
+  if (fromSession) return fromSession;
   const credentials = await pool.query(
     "SELECT id,role,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
     [req.get("x-admin-dni") || ""],
@@ -5706,7 +5728,7 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
   }
   try {
     const result = await pool.query(
-      "SELECT data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
+      "SELECT id,role,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
       [dni],
     );
     const row = result.rows[0];
@@ -5719,7 +5741,8 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
       res.status(401).json({ message: "DNI o clave incorrectos." });
       return;
     }
-    res.json({ user: publicUser(row.data as StoredRecord) });
+    // El pase permite al celular identificarse en cada petición sin reenviar la clave.
+    res.json({ user: publicUser(row.data as StoredRecord), token: await issueSessionToken(row) });
   } catch (error) {
     req.log.error({ err: error }, "Unable to validate login");
     res.status(500).json({ message: "No se pudo validar el acceso." });
