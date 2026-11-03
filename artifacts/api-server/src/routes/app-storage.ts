@@ -3197,14 +3197,17 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
     // Keep a conservative replay window: late commits remain visible even when
     // their updated_at was assigned before the transaction committed.
     const replayMs = 10 * 60 * 1000;
+    const reconcile = req.query.reconcile === "1";
     const boundary = await pool.query("SELECT clock_timestamp() AS cursor");
     const cursor = new Date(String(boundary.rows[0].cursor)).toISOString();
     const snapshot: Partial<StorageSnapshot> = {};
     for (const name of ["sales", "attendance", "movements"] as const) {
       const { table } = collectionConfig[name];
       const result = await pool.query(
-        `SELECT data,status FROM ${table} WHERE updated_at >= $1::timestamptz AND updated_at <= $2::timestamptz ORDER BY updated_at ASC`,
-        [new Date(since.getTime() - replayMs).toISOString(), cursor],
+        reconcile
+          ? `SELECT data,status FROM ${table} ORDER BY updated_at ASC`
+          : `SELECT data,status FROM ${table} WHERE updated_at >= $1::timestamptz AND updated_at <= $2::timestamptz ORDER BY updated_at ASC`,
+        reconcile ? [] : [new Date(since.getTime() - replayMs).toISOString(), cursor],
       );
       snapshot[name] = result.rows.map((row) => ({
         ...(row.data as StoredRecord),
@@ -3212,8 +3215,12 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
       }));
     }
     const removed = await pool.query(
-      "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[]) AND deleted_at >= $2::timestamptz",
-      [["sales", "attendance", "movements"], new Date(since.getTime() - replayMs).toISOString()],
+      reconcile
+        ? "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[])"
+        : "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[]) AND deleted_at >= $2::timestamptz",
+      reconcile
+        ? [["sales", "attendance", "movements"]]
+        : [["sales", "attendance", "movements"], new Date(since.getTime() - replayMs).toISOString()],
     );
     const deleted = { sales: [] as string[], attendance: [] as string[], movements: [] as string[] };
     for (const row of removed.rows) {
