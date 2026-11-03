@@ -3224,7 +3224,7 @@ router.get("/app-storage", async (req, res): Promise<void> => {
     res.json({
       storage: "digitalocean-postgresql",
       stockSource: "warehouses",
-      syncCursor: (await pool.query("SELECT now() AS cursor")).rows[0].cursor,
+      syncCursor: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
     });
