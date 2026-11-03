@@ -3184,11 +3184,44 @@ router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
   }
 });
 
+// Incremental operational feed. The cursor is a database-server timestamp, never a device clock.
+// A small overlap protects against timestamp precision and network retries; clients merge by ID.
+router.get("/app-storage/operational-changes", async (req, res): Promise<void> => {
+  const rawSince = typeof req.query.since === "string" ? req.query.since : "";
+  const since = new Date(rawSince);
+  if (!rawSince || Number.isNaN(since.getTime())) {
+    res.status(400).json({ message: "Cursor de sincronización inválido." });
+    return;
+  }
+  try {
+    const boundary = await pool.query("SELECT now() AS cursor");
+    const cursor = new Date(String(boundary.rows[0].cursor)).toISOString();
+    const snapshot: Partial<StorageSnapshot> = {};
+    for (const name of ["sales", "attendance", "movements"] as const) {
+      const { table } = collectionConfig[name];
+      const result = await pool.query(
+        `SELECT data,status FROM ${table} WHERE updated_at >= $1::timestamptz AND updated_at <= $2::timestamptz ORDER BY updated_at ASC`,
+        [new Date(since.getTime() - 5000).toISOString(), cursor],
+      );
+      snapshot[name] = result.rows.map((row) => ({
+        ...(row.data as StoredRecord),
+        status: String(row.status || (row.data as StoredRecord).status || "SINCRONIZADA"),
+      }));
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ cursor, snapshot });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to read incremental operational changes");
+    res.status(500).json({ message: "No se pudieron consultar los cambios operativos." });
+  }
+});
+
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
     res.json({
       storage: "digitalocean-postgresql",
       stockSource: "warehouses",
+      syncCursor: (await pool.query("SELECT now() AS cursor")).rows[0].cursor,
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
     });
