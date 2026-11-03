@@ -1295,6 +1295,347 @@ async function authorizedWarehouseActor(req: Request) {
   return authorizedTradeActor(req);
 }
 
+const warehouseTransferItemIds = [
+  "PANETON_900G",
+  "PANETON_85G",
+  "AVENA",
+  "BATEA",
+  "MANDIL",
+  "SPAGHETTI",
+] as const;
+
+function normalizeTransferItems(input: unknown) {
+  const record = isRecord(input) ? input : {};
+  const items: Record<string, number> = {};
+  for (const itemId of warehouseTransferItemIds) {
+    const quantity = Math.max(0, Math.floor(Number(record[itemId]) || 0));
+    if (quantity > 0) items[itemId] = quantity;
+  }
+  return items;
+}
+
+async function lockTransferWarehouses(
+  db: QueryClient,
+  sourceWarehouseId: string,
+  destinationWarehouseId: string,
+) {
+  if (!sourceWarehouseId || !destinationWarehouseId)
+    throw new Error("Selecciona almacén origen y destino.");
+  if (sourceWarehouseId === destinationWarehouseId)
+    throw new Error("El almacén origen y destino deben ser diferentes.");
+  const ids = [sourceWarehouseId, destinationWarehouseId].sort();
+  const result = await db.query(
+    "SELECT id,name,status,stock,data FROM warehouses WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE",
+    [ids],
+  );
+  if (result.rows.length !== 2)
+    throw new Error("Uno de los almacenes no existe.");
+  const byId = new Map(result.rows.map((row) => [String(row.id), row]));
+  const source = byId.get(sourceWarehouseId);
+  const destination = byId.get(destinationWarehouseId);
+  if (!source || !destination)
+    throw new Error("No se pudieron identificar los almacenes del traslado.");
+  if (source.status !== "ACTIVO" || destination.status !== "ACTIVO")
+    throw new Error("Origen y destino deben estar activos.");
+  return { source, destination };
+}
+
+async function applyWarehouseTransfer(
+  db: QueryClient,
+  transferId: string,
+  sourceWarehouseId: string,
+  destinationWarehouseId: string,
+  items: Record<string, number>,
+  actorId: string,
+  movementDate: string,
+) {
+  const { source, destination } = await lockTransferWarehouses(
+    db,
+    sourceWarehouseId,
+    destinationWarehouseId,
+  );
+  const sourceStock = isRecord(source.stock) ? { ...source.stock } : {};
+  const destinationStock = isRecord(destination.stock) ? { ...destination.stock } : {};
+  const entries = Object.entries(items).filter(([, quantity]) => quantity > 0);
+  if (!entries.length) throw new Error("Ingresa al menos un producto para trasladar.");
+
+  for (const [itemId, quantity] of entries) {
+    const available = Math.max(0, Number(sourceStock[itemId]) || 0);
+    if (available < quantity)
+      throw new Error(
+        `Stock insuficiente de ${itemId} en ${source.name}. Disponible: ${available}.`,
+      );
+  }
+
+  for (const [itemId, quantity] of entries) {
+    sourceStock[itemId] = Math.max(0, Number(sourceStock[itemId]) || 0) - quantity;
+    destinationStock[itemId] =
+      Math.max(0, Number(destinationStock[itemId]) || 0) + quantity;
+
+    const outMovement = {
+      id: `TRS-OUT-${transferId}-${itemId}-${randomUUID()}`,
+      warehouseId: sourceWarehouseId,
+      kind: "TRASLADO_SALIDA",
+      itemId,
+      quantity: -quantity,
+      actorId,
+      transferId,
+      referenceId: `TRANSFER:${transferId}`,
+      date: movementDate,
+      destinationWarehouseId,
+    };
+    const inMovement = {
+      id: `TRS-IN-${transferId}-${itemId}-${randomUUID()}`,
+      warehouseId: destinationWarehouseId,
+      kind: "TRASLADO_ENTRADA",
+      itemId,
+      quantity,
+      actorId,
+      transferId,
+      referenceId: `TRANSFER:${transferId}`,
+      date: movementDate,
+      sourceWarehouseId,
+    };
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [outMovement.id, sourceWarehouseId, outMovement.kind, itemId, -quantity, actorId, movementDate, outMovement],
+    );
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [inMovement.id, destinationWarehouseId, inMovement.kind, itemId, quantity, actorId, movementDate, inMovement],
+    );
+  }
+
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [sourceWarehouseId, sourceStock],
+  );
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [destinationWarehouseId, destinationStock],
+  );
+}
+
+async function reverseWarehouseTransfer(
+  db: QueryClient,
+  transfer: {
+    id: string;
+    source_warehouse_id: string;
+    destination_warehouse_id: string;
+    items: unknown;
+  },
+  actorId: string,
+) {
+  const items = normalizeTransferItems(transfer.items);
+  const { source, destination } = await lockTransferWarehouses(
+    db,
+    String(transfer.source_warehouse_id),
+    String(transfer.destination_warehouse_id),
+  );
+  const sourceStock = isRecord(source.stock) ? { ...source.stock } : {};
+  const destinationStock = isRecord(destination.stock) ? { ...destination.stock } : {};
+  const entries = Object.entries(items).filter(([, quantity]) => quantity > 0);
+
+  for (const [itemId, quantity] of entries) {
+    const destinationAvailable = Math.max(0, Number(destinationStock[itemId]) || 0);
+    if (destinationAvailable < quantity) {
+      throw new Error(
+        `No se puede editar/eliminar el traslado porque ${destination.name} ya no tiene suficientes unidades de ${itemId} para revertirlo. Disponible: ${destinationAvailable}.`,
+      );
+    }
+  }
+
+  const movementDate = new Date().toISOString();
+  for (const [itemId, quantity] of entries) {
+    sourceStock[itemId] = Math.max(0, Number(sourceStock[itemId]) || 0) + quantity;
+    destinationStock[itemId] =
+      Math.max(0, Number(destinationStock[itemId]) || 0) - quantity;
+    const sourceMovement = {
+      id: `TRS-REV-SRC-${transfer.id}-${itemId}-${randomUUID()}`,
+      warehouseId: String(transfer.source_warehouse_id),
+      kind: "TRASLADO_REVERSION_ORIGEN",
+      itemId,
+      quantity,
+      actorId,
+      transferId: transfer.id,
+      referenceId: `TRANSFER:${transfer.id}`,
+      date: movementDate,
+    };
+    const destinationMovement = {
+      id: `TRS-REV-DST-${transfer.id}-${itemId}-${randomUUID()}`,
+      warehouseId: String(transfer.destination_warehouse_id),
+      kind: "TRASLADO_REVERSION_DESTINO",
+      itemId,
+      quantity: -quantity,
+      actorId,
+      transferId: transfer.id,
+      referenceId: `TRANSFER:${transfer.id}`,
+      date: movementDate,
+    };
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [sourceMovement.id, transfer.source_warehouse_id, sourceMovement.kind, itemId, quantity, actorId, movementDate, sourceMovement],
+    );
+    await db.query(
+      "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+      [destinationMovement.id, transfer.destination_warehouse_id, destinationMovement.kind, itemId, -quantity, actorId, movementDate, destinationMovement],
+    );
+  }
+
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [transfer.source_warehouse_id, sourceStock],
+  );
+  await db.query(
+    "UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",
+    [transfer.destination_warehouse_id, destinationStock],
+  );
+}
+
+async function warehouseForMarket(db: QueryClient, marketId: string) {
+  const marketResult = await db.query("SELECT data FROM markets WHERE id=$1 AND status='ACTIVO' LIMIT 1", [marketId]);
+  const marketData = isRecord(marketResult.rows[0]?.data) ? marketResult.rows[0].data : {};
+  const directWarehouseId = value(marketData, "warehouseId");
+  if (directWarehouseId) {
+    const direct = await db.query("SELECT id,name,stock,data FROM warehouses WHERE id=$1 AND status='ACTIVO' LIMIT 1", [directWarehouseId]);
+    if (!direct.rows.length) throw new Error("El almacén asignado al mercado no está activo o no existe.");
+    return direct.rows[0];
+  }
+  const legacy = await db.query("SELECT id,name,stock,data FROM warehouses WHERE status='ACTIVO' AND $1 = ANY(market_ids) LIMIT 2", [marketId]);
+  if (!legacy.rows.length) throw new Error("El mercado no tiene almacén asignado.");
+  if (legacy.rows.length > 1) throw new Error("El mercado está asignado a más de un almacén.");
+  return legacy.rows[0];
+}
+
+async function applyWarehouseStockMovement(
+  db: QueryClient,
+  marketId: string,
+  requirements: Record<string, number>,
+  kind: string,
+  actorId: string,
+  referenceId: string,
+) {
+  const warehouse = await warehouseForMarket(db, marketId);
+  const locked = await db.query("SELECT id,name,stock FROM warehouses WHERE id=$1 FOR UPDATE", [warehouse.id]);
+  const row = locked.rows[0];
+  const stock = isRecord(row.stock) ? { ...row.stock } : {};
+  for (const [itemId, raw] of Object.entries(requirements)) {
+    const quantity = Math.max(0, Math.floor(Number(raw) || 0));
+    if (!quantity) continue;
+    const available = Math.max(0, Number(stock[itemId]) || 0);
+    if (available < quantity) throw new Error(`Stock insuficiente de ${itemId} en ${row.name}. Disponible: ${available}.`);
+  }
+  const now = new Date().toISOString();
+  for (const [itemId, raw] of Object.entries(requirements)) {
+    const quantity = Math.max(0, Math.floor(Number(raw) || 0));
+    if (!quantity) continue;
+    stock[itemId] = Math.max(0, Number(stock[itemId]) || 0) - quantity;
+    const movement = { id:`ALM-CONS-${randomUUID()}`, warehouseId:String(row.id), marketId, kind, itemId, quantity:-quantity, actorId, referenceId, date:now };
+    await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", [movement.id,row.id,kind,itemId,-quantity,actorId,now,movement]);
+  }
+  await db.query("UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1", [row.id,stock]);
+  return { warehouseId:String(row.id), stock };
+}
+
+async function restoreWarehouseStockMovements(db: QueryClient, referenceId: string, actorId: string) {
+  const existing = await db.query(
+    "SELECT id,warehouse_id,item_id,quantity,data FROM warehouse_movements WHERE data->>'referenceId'=$1 AND quantity<0 FOR UPDATE",
+    [referenceId],
+  );
+  if (!existing.rows.length) return 0;
+  const grouped = new Map<string, Array<{itemId:string; quantity:number; sourceId:string}>>();
+  for (const row of existing.rows) {
+    const items = grouped.get(String(row.warehouse_id)) || [];
+    items.push({ itemId:String(row.item_id), quantity:Math.abs(Number(row.quantity)||0), sourceId:String(row.id) });
+    grouped.set(String(row.warehouse_id),items);
+  }
+  const now = new Date().toISOString();
+  let restored = 0;
+  for (const [warehouseId,items] of grouped) {
+    const locked = await db.query("SELECT stock FROM warehouses WHERE id=$1 FOR UPDATE",[warehouseId]);
+    if (!locked.rows.length) continue;
+    const stock = isRecord(locked.rows[0].stock) ? { ...locked.rows[0].stock } : {};
+    for (const item of items) {
+      const already = await db.query("SELECT 1 FROM warehouse_movements WHERE data->>'restoresMovementId'=$1 LIMIT 1",[item.sourceId]);
+      if (already.rows.length) continue;
+      stock[item.itemId]=Math.max(0,Number(stock[item.itemId])||0)+item.quantity;
+      const movement={id:`ALM-REST-${randomUUID()}`,warehouseId,itemId:item.itemId,quantity:item.quantity,kind:"RESTAURACION",actorId,referenceId,date:now,restoresMovementId:item.sourceId};
+      await db.query("INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[movement.id,warehouseId,movement.kind,item.itemId,item.quantity,actorId,now,movement]);
+      restored += 1;
+    }
+    await db.query("UPDATE warehouses SET stock=$2,data=jsonb_set(COALESCE(data,'{}'::jsonb),'{stock}',$2::jsonb,true),updated_at=now() WHERE id=$1",[warehouseId,stock]);
+  }
+  return restored;
+}
+
+async function recalculateDegustacionClosure(
+  db: QueryClient,
+  promoterId: string,
+  marketId: string,
+  movementDate: string,
+) {
+  if (!promoterId || !marketId || !movementDate) return;
+
+  const closures = await db.query(
+    `SELECT id,data,closure_date
+       FROM session_closures
+      WHERE promoter_id=$1
+        AND market_id=$2
+        AND ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz))) <= 43200
+      ORDER BY ABS(EXTRACT(EPOCH FROM (closure_date - $3::timestamptz)))
+      LIMIT 1
+      FOR UPDATE`,
+    [promoterId, marketId, movementDate],
+  );
+  const closure = closures.rows[0];
+  if (!closure) return;
+
+  const closureDate = new Date(String(closure.closure_date)).toISOString();
+  const movements = await db.query(
+    `SELECT quantity,data
+       FROM inventory_movements
+      WHERE kind='DEGUSTACION'
+        AND market_id=$1
+        AND COALESCE(data->>'promoterId',data->>'actorId','')=$2
+        AND movement_date BETWEEN $3::timestamptz - interval '1 minute'
+                              AND $3::timestamptz + interval '1 minute'`,
+    [marketId, promoterId, closureDate],
+  );
+
+  let tasting900g = 0;
+  let tasting85g = 0;
+  for (const row of movements.rows) {
+    const data = isRecord(row.data) ? row.data : {};
+    const productId = value(data, "degustacionProductId");
+    const quantity = Math.max(0, Math.floor(Number(row.quantity) || 0));
+    if (productId === "PANETON_85G") tasting85g += quantity;
+    else if (productId === "PANETON_900G" || productId === "PANETON")
+      tasting900g += quantity;
+  }
+  const tastingUsed = tasting900g + tasting85g;
+  const leads = tasting900g * 80 + tasting85g * 10;
+  const updatedAt = new Date().toISOString();
+  const data = isRecord(closure.data) ? closure.data : {};
+  const nextData = {
+    ...data,
+    tastingUsed,
+    tasting900g,
+    tasting85g,
+    leads,
+    updatedAt,
+  };
+  await db.query(
+    `UPDATE session_closures
+        SET tasting_used=$2,
+            leads=$3,
+            data=$4,
+            record_updated_at=$5,
+            updated_at=now()
+      WHERE id=$1`,
+    [closure.id, tastingUsed, leads, nextData, updatedAt],
+  );
+}
+
 
 router.get("/app-storage/warehouses/:id/audit", async (req, res): Promise<void> => {
   const actor = await authorizedWarehouseActor(req);
