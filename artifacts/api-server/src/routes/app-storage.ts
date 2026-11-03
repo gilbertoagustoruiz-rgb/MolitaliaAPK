@@ -7,7 +7,7 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
-import { bumpDataVersion, cachedJson } from "../lib/read-cache";
+import { bumpDataVersion, cachedJson, cachedValue } from "../lib/read-cache";
 import { issueSessionToken, sessionOf } from "../lib/session";
 import { Router, type IRouter, type Request } from "express";
 
@@ -369,6 +369,175 @@ function publicUser(record: StoredRecord) {
 
 function isRecord(value: unknown): value is StoredRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+/*
+ * Alcance de datos por rol (según el pase de la petición):
+ * - ADMIN, ANALISTA, SUPERVISOR, TRADE: todo (sin cambios).
+ * - PROMOTOR (los tres tipos): sus propios registros y los catálogos de su trabajo.
+ * - COORDINADOR: lo de los mercados que tiene asignados; solo lectura.
+ * - CLIENTE: las ventas de su cliente; solo lectura.
+ * Sin pase (modo aviso) se mantiene el comportamiento anterior.
+ */
+type DataScope =
+  | { kind: "full" }
+  | { kind: "promoter"; userId: string; dni: string; marketIds: Set<string>; clientIds: Set<string> }
+  | { kind: "coordinator"; userId: string; dni: string; marketIds: Set<string> }
+  | { kind: "client"; userId: string; dni: string; clientRef: string };
+
+const promoterRoleSet = new Set(["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"]);
+
+async function dataScopeFor(req: Request): Promise<DataScope> {
+  const session = sessionOf(req);
+  if (!session) return { kind: "full" };
+  const role = session.role.toUpperCase();
+  if (promoterRoleSet.has(role) || role === "COORDINADOR") {
+    const assignment = await pool.query(
+      "SELECT market_ids,client_ids FROM assignments WHERE promoter_id=$1 OR (promoter_dni<>'' AND promoter_dni=$2) LIMIT 1",
+      [session.id, session.dni],
+    );
+    const row = assignment.rows[0];
+    const assignedMarkets = row && Array.isArray(row.market_ids) ? row.market_ids.map(String) : [];
+    const fallbackMarket = value(session.data, "marketId");
+    const marketIds = new Set<string>(
+      assignedMarkets.length ? assignedMarkets : fallbackMarket ? [fallbackMarket] : [],
+    );
+    if (role === "COORDINADOR")
+      return { kind: "coordinator", userId: session.id, dni: session.dni, marketIds };
+    const clientIds = new Set<string>(
+      row && Array.isArray(row.client_ids) ? row.client_ids.map(String) : [],
+    );
+    return { kind: "promoter", userId: session.id, dni: session.dni, marketIds, clientIds };
+  }
+  if (role === "CLIENTE")
+    return {
+      kind: "client",
+      userId: session.id,
+      dni: session.dni,
+      clientRef: value(session.data, "clientId"),
+    };
+  return { kind: "full" };
+}
+
+function scopeName(scope: DataScope) {
+  return scope.kind === "full" ? null : scope.kind;
+}
+
+/** Filtra un snapshot (o parte de él) al alcance del rol. No modifica el original. */
+function scopeSnapshot(
+  scope: DataScope,
+  snapshot: Partial<StorageSnapshot>,
+): Partial<StorageSnapshot> {
+  if (scope.kind === "full") return snapshot;
+  const list = (name: CollectionName) =>
+    Array.isArray(snapshot[name]) ? (snapshot[name] as StoredRecord[]) : [];
+  const has = (name: CollectionName) => Array.isArray(snapshot[name]);
+  const out: Partial<StorageSnapshot> = {};
+  const put = (name: CollectionName, rows: StoredRecord[]) => {
+    if (has(name)) out[name] = rows;
+  };
+  const isSelfUser = (user: StoredRecord) =>
+    value(user, "id") === scope.userId || (scope.dni !== "" && value(user, "dni") === scope.dni);
+  // Catálogos de referencia que todos los roles necesitan para mostrar nombres y precios.
+  put("markets", list("markets"));
+  put("productPrices", list("productPrices"));
+  put("categories", list("categories"));
+
+  if (scope.kind === "promoter") {
+    const own = (record: StoredRecord) =>
+      value(record, "promoterId") === scope.userId ||
+      (scope.dni !== "" && value(record, "promoterDni") === scope.dni);
+    const sales = list("sales").filter(own);
+    const attendance = list("attendance").filter(own);
+    const movements = list("movements").filter(
+      (record) => own(record) || value(record, "actorId") === scope.userId,
+    );
+    const closures = list("closures").filter(own);
+    const referencedClients = new Set(
+      [...sales, ...attendance, ...closures].map((record) => value(record, "clientId")),
+    );
+    put("sales", sales);
+    put("attendance", attendance);
+    put("movements", movements);
+    put("closures", closures);
+    put("clients", list("clients").filter((client) =>
+      scope.marketIds.has(value(client, "marketId")) ||
+      scope.clientIds.has(value(client, "id")) ||
+      referencedClients.has(value(client, "id"))));
+    put("users", list("users").filter(isSelfUser));
+    put("assignments", list("assignments").filter(own));
+    put("inventory", list("inventory").filter((row) => scope.marketIds.has(value(row, "marketId"))));
+    return out;
+  }
+
+  if (scope.kind === "coordinator") {
+    const inMarkets = (record: StoredRecord) => scope.marketIds.has(value(record, "marketId"));
+    const assignments = list("assignments");
+    const marketsByPerson = new Map<string, string[]>();
+    for (const assignment of assignments) {
+      const ids = Array.isArray(assignment.marketIds) ? assignment.marketIds.map(String) : [];
+      if (value(assignment, "promoterId")) marketsByPerson.set(value(assignment, "promoterId"), ids);
+      if (value(assignment, "promoterDni")) marketsByPerson.set(`dni:${value(assignment, "promoterDni")}`, ids);
+    }
+    const userMarkets = (user: StoredRecord) => {
+      const assigned =
+        marketsByPerson.get(value(user, "id")) || marketsByPerson.get(`dni:${value(user, "dni")}`);
+      if (assigned?.length) return assigned;
+      return value(user, "marketId") ? [value(user, "marketId")] : [];
+    };
+    put("sales", list("sales").filter(inMarkets));
+    put("attendance", list("attendance").filter(inMarkets));
+    put("movements", list("movements").filter(inMarkets));
+    put("closures", list("closures").filter(inMarkets));
+    put("inventory", list("inventory").filter(inMarkets));
+    put("clients", list("clients").filter(inMarkets));
+    put("users", list("users").filter((user) =>
+      isSelfUser(user) || userMarkets(user).some((id) => scope.marketIds.has(id))));
+    put("assignments", assignments.filter((assignment) =>
+      value(assignment, "promoterId") === scope.userId ||
+      (Array.isArray(assignment.marketIds) &&
+        assignment.marketIds.some((id) => scope.marketIds.has(String(id))))));
+    return out;
+  }
+
+  // CLIENTE: su cliente (por id o código) y sus ventas.
+  const ref = scope.clientRef;
+  const clients = ref
+    ? list("clients").filter((client) => value(client, "id") === ref || value(client, "code") === ref)
+    : [];
+  const clientIds = new Set(clients.map((client) => value(client, "id")));
+  put("clients", clients);
+  put("sales", list("sales").filter((sale) => clientIds.has(value(sale, "clientId"))));
+  put("users", list("users").filter(isSelfUser));
+  for (const name of ["attendance", "movements", "closures", "inventory", "assignments"] as CollectionName[])
+    put(name, []);
+  return out;
+}
+
+/** Qué puede escribir cada rol por /sync. Devuelve un mensaje si no se permite. */
+function writeScopeError(scope: DataScope, incoming: Partial<StorageSnapshot>) {
+  if (scope.kind === "full") return null;
+  const nonEmpty = (Object.keys(incoming) as CollectionName[]).filter(
+    (name) => Array.isArray(incoming[name]) && incoming[name]!.length > 0,
+  );
+  if (!nonEmpty.length) return null;
+  if (scope.kind === "coordinator" || scope.kind === "client")
+    return "Tu rol solo permite consultar información.";
+  const allowed = new Set<CollectionName>(["sales", "attendance", "movements", "closures"]);
+  const notAllowed = nonEmpty.filter((name) => !allowed.has(name));
+  if (notAllowed.length)
+    return "Solo puedes enviar tus propias ventas y marcaciones.";
+  const own = (record: StoredRecord) =>
+    value(record, "promoterId") === scope.userId ||
+    (!value(record, "promoterId") && scope.dni !== "" && value(record, "promoterDni") === scope.dni) ||
+    (!value(record, "promoterId") && value(record, "actorId") === scope.userId);
+  for (const name of nonEmpty) {
+    for (const record of incoming[name]!) {
+      if (isRecord(record) && !own(record))
+        return "Este registro pertenece a otro promotor; se enviará cuando esa persona ingrese.";
+    }
+  }
+  return null;
 }
 
 async function lockInventoryLedger(client: QueryClient) {
@@ -3282,7 +3451,7 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
 // Catálogos ligeros para habilitar la selección de visita sin esperar ventas y fotos.
 router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
   try {
-    const body = await cachedJson("visit-catalog", READ_CACHE_TTL_MS, async () => {
+    const produceCatalog = async () => {
       const [markets, clients, assignments, revision] = await Promise.all([
         pool.query("SELECT data FROM markets"),
         pool.query("SELECT data FROM clients"),
@@ -3295,9 +3464,26 @@ router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
         clients: clients.rows.map((row) => row.data),
         assignments: assignments.rows.map((row) => row.data),
       };
-    });
+    };
     res.setHeader("Cache-Control", "no-store");
-    res.type("application/json").send(body);
+    const scope = await dataScopeFor(req);
+    if (scope.kind === "full") {
+      res.type("application/json").send(await cachedJson("visit-catalog", READ_CACHE_TTL_MS, produceCatalog));
+      return;
+    }
+    const catalog = await cachedValue("visit-catalog", READ_CACHE_TTL_MS, produceCatalog);
+    const scoped = scopeSnapshot(scope, {
+      markets: catalog.markets as StoredRecord[],
+      clients: catalog.clients as StoredRecord[],
+      assignments: catalog.assignments as StoredRecord[],
+    });
+    res.json({
+      catalogRevision: catalog.catalogRevision,
+      markets: scoped.markets,
+      clients: scoped.clients,
+      assignments: scoped.assignments,
+      dataScope: scopeName(scope),
+    });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read visit catalog");
     res.status(500).json({ message: "No se pudieron cargar mercados y clientes." });
@@ -3319,7 +3505,10 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
     const replayMs = 10 * 60 * 1000;
     const reconcile = req.query.reconcile === "1";
     const boundary = await pool.query("SELECT clock_timestamp() AS cursor");
-    const cursor = new Date(String(boundary.rows[0].cursor)).toISOString();
+    // pg entrega un Date: convertirlo a texto antes perdía los milisegundos y dejaba
+    // fuera de esta respuesta lo guardado en el mismo segundo (llegaba en la siguiente).
+    const rawCursor = boundary.rows[0].cursor;
+    const cursor = (rawCursor instanceof Date ? rawCursor : new Date(String(rawCursor))).toISOString();
     const snapshot: Partial<StorageSnapshot> = {};
     for (const name of ["sales", "attendance", "movements"] as const) {
       const { table } = collectionConfig[name];
@@ -3348,7 +3537,8 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
       if (collection in deleted) deleted[collection].push(String(row.record_id));
     }
     res.setHeader("Cache-Control", "no-store");
-    res.json({ cursor, snapshot, deleted });
+    const scope = await dataScopeFor(req);
+    res.json({ cursor, snapshot: scopeSnapshot(scope, snapshot), deleted, dataScope: scopeName(scope) });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read incremental operational changes");
     res.status(500).json({ message: "No se pudieron consultar los cambios operativos." });
@@ -3447,15 +3637,30 @@ router.get("/app-storage", async (req, res): Promise<void> => {
     // El cursor se calcula en cada pedido; el snapshot y la revisión se toman
     // de la caché (una sola lectura completa aunque muchos abran la app a la vez).
     const syncCursor = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    const cached = await cachedJson("full-snapshot", READ_CACHE_TTL_MS, async () => ({
+    const produceSnapshot = async () => ({
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
-    }));
-    res
-      .type("application/json")
-      .send(
-        `{"storage":"digitalocean-postgresql","stockSource":"warehouses","syncCursor":${JSON.stringify(syncCursor)},${cached.slice(1)}`,
-      );
+    });
+    const scope = await dataScopeFor(req);
+    if (scope.kind === "full") {
+      const cached = await cachedJson("full-snapshot", READ_CACHE_TTL_MS, produceSnapshot);
+      res
+        .type("application/json")
+        .send(
+          `{"storage":"digitalocean-postgresql","stockSource":"warehouses","syncCursor":${JSON.stringify(syncCursor)},${cached.slice(1)}`,
+        );
+      return;
+    }
+    // Rol con alcance limitado: misma lectura en caché, filtrada a lo que le corresponde.
+    const full = await cachedValue("full-snapshot", READ_CACHE_TTL_MS, produceSnapshot);
+    res.json({
+      storage: "digitalocean-postgresql",
+      stockSource: "warehouses",
+      syncCursor,
+      dataScope: scopeName(scope),
+      catalogRevision: full.catalogRevision,
+      snapshot: scopeSnapshot(scope, full.snapshot),
+    });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read app storage");
     res.status(500).json({ message: "No se pudo leer PostgreSQL." });
@@ -3473,6 +3678,12 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       typeof req.body?.catalogRevision === "string"
         ? req.body.catalogRevision
         : null;
+    const scope = await dataScopeFor(req);
+    const denied = writeScopeError(scope, incoming as Partial<StorageSnapshot>);
+    if (denied) {
+      res.status(403).json({ code: "WRITE_NOT_ALLOWED", message: denied });
+      return;
+    }
     const snapshot = await syncSnapshot(
       incoming as Partial<StorageSnapshot>,
       incomingRevision,
@@ -3483,7 +3694,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       storage: "digitalocean-postgresql",
       syncedAt: new Date().toISOString(),
       catalogRevision: await readCatalogRevision(),
-      snapshot,
+      snapshot: scopeSnapshot(scope, snapshot),
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to sync app storage");
@@ -3546,11 +3757,20 @@ router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> =
 
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
-    const body = await cachedJson("assignments", READ_CACHE_TTL_MS, async () => {
+    const produceAssignments = async () => {
       const result = await pool.query("SELECT data FROM assignments");
       return { storage: "digitalocean-postgresql", assignments: result.rows.map((row) => row.data) };
+    };
+    const scope = await dataScopeFor(req);
+    if (scope.kind === "full") {
+      res.type("application/json").send(await cachedJson("assignments", READ_CACHE_TTL_MS, produceAssignments));
+      return;
+    }
+    const all = await cachedValue("assignments", READ_CACHE_TTL_MS, produceAssignments);
+    res.json({
+      storage: all.storage,
+      assignments: scopeSnapshot(scope, { assignments: all.assignments as StoredRecord[] }).assignments,
     });
-    res.type("application/json").send(body);
   } catch (error) {
     req.log.error({ err: error }, "Unable to read assignments");
     res.status(500).json({ message: "No se pudieron leer las asignaciones." });

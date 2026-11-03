@@ -13782,7 +13782,7 @@ export default function App() {
       cancelled = true;
       window.removeEventListener("online", retry);
     };
-  }, [referencesReady]);
+  }, [referencesReady, user?.id]);
 
   useEffect(() => {
     if (!referencesReady) return;
@@ -13795,9 +13795,22 @@ export default function App() {
         const payload = (await response.json()) as {
           catalogRevision?: string | null;
           syncCursor?: string;
+          dataScope?: string | null;
           snapshot?: Partial<CloudSnapshot>;
         };
         if (cancelled || !payload.snapshot) return;
+        // Si el servidor envió solo lo que le corresponde a este rol, se quitan del
+        // dispositivo los registros ya sincronizados de otros que quedaron de cargas
+        // anteriores. Los pendientes de enviar nunca se borran.
+        const scopedSnapshot = Boolean(payload.dataScope);
+        const keepLocal = <T extends { id: string; status?: string }>(
+          local: T[],
+          cloud: T[] | undefined,
+        ) => {
+          if (!scopedSnapshot || !Array.isArray(cloud)) return local;
+          const cloudIds = new Set(cloud.map((item) => item.id));
+          return local.filter((item) => item.status !== "SINCRONIZADA" || cloudIds.has(item.id));
+        };
         if (payload.syncCursor) operationalCursorRef.current = payload.syncCursor;
         if (payload.catalogRevision)
           safeStorageSet(
@@ -13825,14 +13838,17 @@ export default function App() {
           ? snapshot.clients
           : [];
         const cloudSales = Array.isArray(snapshot.sales) ? snapshot.sales : [];
-        const localSales = readStore<Sale[]>("bt-sales", []);
+        const localSales = keepLocal(readStore<Sale[]>("bt-sales", []), snapshot.sales);
         const nextSales = mergeSales(localSales, cloudSales).map((sale) =>
           enrichSaleMarketLocation(sale, nextMarkets),
         );
         const cloudAttendance = Array.isArray(snapshot.attendance)
           ? snapshot.attendance
           : [];
-        const localAttendance = readStore<Attendance[]>("bt-attendance", []);
+        const localAttendance = keepLocal(
+          readStore<Attendance[]>("bt-attendance", []),
+          snapshot.attendance,
+        );
         const nextAttendance = mergeAttendance(
           localAttendance,
           cloudAttendance,
@@ -13840,9 +13856,9 @@ export default function App() {
         const cloudMovements = Array.isArray(snapshot.movements)
           ? snapshot.movements
           : [];
-        const localMovements = readStore<InventoryMovement[]>(
-          "bt-inventory-movements",
-          [],
+        const localMovements = keepLocal(
+          readStore<InventoryMovement[]>("bt-inventory-movements", []),
+          snapshot.movements,
         );
         const nextMovements = mergeMovements(localMovements, cloudMovements);
         const nextInventory = reconcileInventory(
@@ -13893,7 +13909,9 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [referencesReady]);
+    // Se repite al iniciar sesión: con el pase llegan los datos de ese rol (y en
+    // modo bloqueo, la carga sin sesión antes del login no trae datos).
+  }, [referencesReady, user?.id]);
   useEffect(() => {
     if (!referencesReady) return;
     let cancelled = false;
@@ -13932,7 +13950,7 @@ export default function App() {
       window.removeEventListener("online", refreshAssignments);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [referencesReady]);
+  }, [referencesReady, user?.id]);
 
   useEffect(() => {
     if (!referencesReady || !user || isPromoterRole(user.role) || user.role === "CLIENTE")

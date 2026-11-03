@@ -11,6 +11,7 @@
  * - Pedidos simultáneos de la misma clave comparten una sola consulta.
  *
  * No guarda nada en disco ni en la base: solo evita repetir la misma lectura.
+ * Los valores devueltos por cachedValue son compartidos: no se deben modificar.
  */
 
 let dataVersion = 0;
@@ -19,20 +20,20 @@ export function bumpDataVersion() {
   dataVersion += 1;
 }
 
-type Entry = { version: number; expiresAt: number; body: string };
+type Entry = { version: number; expiresAt: number; value: unknown; body?: string };
 
 const entries = new Map<string, Entry>();
-const inflight = new Map<string, Promise<string>>();
+const inflight = new Map<string, Promise<Entry>>();
 const MAX_ENTRIES = 300;
 
-export async function cachedJson(
+async function cachedEntry(
   key: string,
   ttlMs: number,
   produce: () => Promise<unknown>,
-): Promise<string> {
+): Promise<Entry> {
   const now = Date.now();
   const hit = entries.get(key);
-  if (hit && hit.version === dataVersion && hit.expiresAt > now) return hit.body;
+  if (hit && hit.version === dataVersion && hit.expiresAt > now) return hit;
 
   const startVersion = dataVersion;
   const inflightKey = `${startVersion}:${key}`;
@@ -41,16 +42,36 @@ export async function cachedJson(
 
   const promise = (async () => {
     try {
-      const body = JSON.stringify(await produce());
+      const entry: Entry = { version: startVersion, expiresAt: now + ttlMs, value: await produce() };
       if (startVersion === dataVersion) {
         if (entries.size >= MAX_ENTRIES) entries.clear();
-        entries.set(key, { version: startVersion, expiresAt: now + ttlMs, body });
+        entries.set(key, entry);
       }
-      return body;
+      return entry;
     } finally {
       inflight.delete(inflightKey);
     }
   })();
   inflight.set(inflightKey, promise);
   return promise;
+}
+
+/** Valor en caché (objeto compartido: solo lectura). */
+export async function cachedValue<T>(
+  key: string,
+  ttlMs: number,
+  produce: () => Promise<T>,
+): Promise<T> {
+  return (await cachedEntry(key, ttlMs, produce)).value as T;
+}
+
+/** Mismo valor ya convertido a JSON (se convierte una sola vez por versión). */
+export async function cachedJson(
+  key: string,
+  ttlMs: number,
+  produce: () => Promise<unknown>,
+): Promise<string> {
+  const entry = await cachedEntry(key, ttlMs, produce);
+  if (entry.body === undefined) entry.body = JSON.stringify(entry.value);
+  return entry.body;
 }
