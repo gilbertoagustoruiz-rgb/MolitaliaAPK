@@ -3211,8 +3211,17 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
         status: String(row.status || (row.data as StoredRecord).status || "SINCRONIZADA"),
       }));
     }
+    const removed = await pool.query(
+      "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[]) AND deleted_at >= $2::timestamptz AND deleted_at <= $3::timestamptz",
+      [["sales", "attendance", "movements"], new Date(since.getTime() - replayMs).toISOString(), cursor],
+    );
+    const deleted = { sales: [] as string[], attendance: [] as string[], movements: [] as string[] };
+    for (const row of removed.rows) {
+      const collection = String(row.collection) as keyof typeof deleted;
+      if (collection in deleted) deleted[collection].push(String(row.record_id));
+    }
     res.setHeader("Cache-Control", "no-store");
-    res.json({ cursor, snapshot });
+    res.json({ cursor, snapshot, deleted });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read incremental operational changes");
     res.status(500).json({ message: "No se pudieron consultar los cambios operativos." });
