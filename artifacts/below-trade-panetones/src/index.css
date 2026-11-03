@@ -5583,30 +5583,129 @@ select:focus-visible,
   }
 }
 
-/* Filtros en cascada (Región → Ciudad → Mercado → Cliente → Promotor + fechas) */
+/* Filtros en cascada: plegados por defecto (botón + filtros activos + conteo) */
 .cascade-bar {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  gap: 8px 10px;
-  align-items: end;
-  padding: 10px 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
   border: 1px solid hsl(var(--line));
   border-radius: 12px;
   background: hsl(var(--surface));
 }
-.cascade-bar .field { margin: 0; min-width: 0; }
-.cascade-bar .select, .cascade-bar .input { width: 100%; min-height: 38px; }
 .cascade-summary {
-  grid-column: 1 / -1;
-  min-height: 30px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
   flex-wrap: wrap;
+  min-height: 36px;
   font-size: 13px;
 }
+.cascade-summary > strong { margin-left: auto; white-space: nowrap; }
+.cascade-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid hsl(var(--line));
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cascade-toggle svg { width: 16px; height: 16px; }
+.cascade-chevron { transition: transform .15s ease; }
+.cascade-bar.is-open .cascade-chevron { transform: rotate(180deg); }
+.cascade-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: hsl(var(--blue, 214 80% 45%));
+  color: #fff;
+  font-size: 11px;
+  text-align: center;
+}
+.cascade-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.cascade-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: hsl(var(--blue-pale));
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cascade-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.cascade-chip button svg { width: 12px; height: 12px; }
+.cascade-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px 10px;
+  align-items: end;
+  padding: 8px 0 6px;
+  border-top: 1px solid hsl(var(--line));
+  margin-top: 6px;
+}
+.cascade-fields .field { margin: 0; min-width: 0; }
+.cascade-fields .select, .cascade-fields .input { width: 100%; min-height: 38px; }
 @media (max-width: 700px) {
-  .cascade-bar { grid-template-columns: 1fr 1fr; padding: 10px; }
+  .cascade-fields { grid-template-columns: 1fr 1fr; }
+  .cascade-summary > strong { margin-left: 0; }
+}
+
+/* Tablas con scroll propio (escritorio): encabezado fijo y columnas sin apretarse.
+   En pantallas de 980px o menos las tablas ya se muestran como tarjetas. */
+@media (min-width: 981px) {
+  .module-table-wrap,
+  .sales-table-scroll,
+  .summary-table-wrap,
+  .data-table,
+  .role-table-wrap {
+    overflow: auto;
+    max-height: min(68vh, 760px);
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+  .module-table-wrap,
+  .sales-table-scroll { position: relative; }
+  .module-table-header,
+  .sales-dark-header,
+  .summary-table-row.header,
+  .stock-reconciliation-row.header,
+  .table-row.header,
+  .role-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+  .summary-table-row.header,
+  .stock-reconciliation-row.header,
+  .table-row.header,
+  .role-table th { background: hsl(var(--surface)); }
+  .module-table-row.cols-9 { min-width: 1100px; }
+  .module-table-row.cols-8 { min-width: 980px; }
+  .module-table-row.cols-7 { min-width: 900px; }
+  .module-table-row.cols-6 { min-width: 780px; }
+  .module-table-row.cols-4 { min-width: 560px; }
+  .sales-dark-table { min-width: 1080px; }
+  .stock-reconciliation-table { min-width: 940px; }
+  .table-row { min-width: 760px; }
+  .module-table-row.attendance-columns { min-width: 1100px; }
+  .module-table-row.catalog-product-columns { min-width: 1000px; }
 }

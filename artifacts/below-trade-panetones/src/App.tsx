@@ -19,6 +19,8 @@ import {
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
+  ChevronDown,
   ShieldCheck,
   ShoppingBag,
   Smartphone,
@@ -5794,34 +5796,82 @@ function CascadeFilterBar({
   const set = (key: keyof CascadeFilter) => (next: string) => onChange(sanitize({ ...value, [key]: next }));
   const current = options(value);
   const userName = (id: string) => users.find((person) => person.id === id)?.name || id;
+  // Se muestra plegado: solo el botón "Filtros", los filtros activos y el conteo.
+  // Se oculta solo al tocar fuera, con Escape o al bajar por la tabla.
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const startY = window.scrollY;
+    const onPointer = (event: PointerEvent) => {
+      if (boxRef.current && !boxRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onScroll = () => { if (Math.abs(window.scrollY - startY) > 160) setOpen(false); };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, [open]);
+  const shortDate = (date: string) => date ? date.split("-").reverse().join("/") : "";
+  const chips: { key: keyof CascadeFilter; label: string }[] = [
+    { key: "region" as const, label: value.region },
+    { key: "city" as const, label: value.city },
+    { key: "marketId" as const, label: value.marketId ? marketMap[value.marketId]?.name || value.marketId : "" },
+    { key: "clientId" as const, label: value.clientId ? clients.find((client) => client.id === value.clientId)?.name || value.clientId : "" },
+    { key: "promoterId" as const, label: value.promoterId ? userName(value.promoterId) : "" },
+    { key: "from" as const, label: value.from ? `Desde ${shortDate(value.from)}` : "" },
+    { key: "to" as const, label: value.to ? `Hasta ${shortDate(value.to)}` : "" },
+  ].filter((chip) => chip.label);
   return (
-    <div className="cascade-bar" data-testid={testId} role="group" aria-label={`Filtros de ${noun}`}>
-      <SelectField label="Región" value={value.region} onChange={set("region")} placeholder="Todas"
-        items={current.regions.map((region) => ({ value: region, label: region }))} />
-      <SelectField label="Ciudad" value={value.city} onChange={set("city")} placeholder="Todas"
-        items={current.cities.map((city) => ({ value: city, label: city }))} />
-      <SelectField label="Mercado" value={value.marketId} onChange={set("marketId")} placeholder="Todos"
-        items={current.markets.map((market) => ({ value: market.id, label: market.name }))} />
-      <SelectField label="Cliente" value={value.clientId} onChange={set("clientId")} placeholder="Todos"
-        items={current.clients.map((client) => ({ value: client.id, label: client.name || client.code }))} />
-      <SelectField label="Promotor" value={value.promoterId} onChange={set("promoterId")} placeholder="Todos"
-        items={current.promoterIds.map((id) => ({ value: id, label: userName(id) }))} />
-      <Field label="Desde">
-        <input className="input" type="date" value={value.from} max={value.to || undefined}
-          onChange={(event) => set("from")(event.target.value)} data-testid={`${testId}-from`} />
-      </Field>
-      <Field label="Hasta">
-        <input className="input" type="date" value={value.to} min={value.from || undefined}
-          onChange={(event) => set("to")(event.target.value)} data-testid={`${testId}-to`} />
-      </Field>
+    <div ref={boxRef} className={`cascade-bar${open ? " is-open" : ""}`} data-testid={testId} role="group" aria-label={`Filtros de ${noun}`}>
       <div className="cascade-summary">
+        <button type="button" className="cascade-toggle" aria-expanded={open} onClick={() => setOpen((current) => !current)} data-testid={`${testId}-toggle`}>
+          <SlidersHorizontal /> Filtros
+          {chips.length > 0 && <span className="cascade-count">{chips.length}</span>}
+          <ChevronDown className="cascade-chevron" />
+        </button>
+        <div className="cascade-chips">
+          {chips.map((chip) => (
+            <span className="cascade-chip" key={chip.key}>
+              {chip.label}
+              <button type="button" aria-label={`Quitar ${chip.label}`} onClick={() => set(chip.key)("")}><X /></button>
+            </span>
+          ))}
+        </div>
         <strong role="status" aria-live="polite">{shown.toLocaleString("es-PE")} de {total.toLocaleString("es-PE")} {noun}</strong>
         {cascadeActive(value) && (
           <Btn variant="ghost" onClick={() => onChange(emptyCascade)} testId={`${testId}-clear`}>
-            <X /> Limpiar filtros
+            <X /> Limpiar
           </Btn>
         )}
       </div>
+      {open && (
+        <div className="cascade-fields">
+          <SelectField label="Región" value={value.region} onChange={set("region")} placeholder="Todas"
+            items={current.regions.map((region) => ({ value: region, label: region }))} />
+          <SelectField label="Ciudad" value={value.city} onChange={set("city")} placeholder="Todas"
+            items={current.cities.map((city) => ({ value: city, label: city }))} />
+          <SelectField label="Mercado" value={value.marketId} onChange={set("marketId")} placeholder="Todos"
+            items={current.markets.map((market) => ({ value: market.id, label: market.name }))} />
+          <SelectField label="Cliente" value={value.clientId} onChange={set("clientId")} placeholder="Todos"
+            items={current.clients.map((client) => ({ value: client.id, label: client.name || client.code }))} />
+          <SelectField label="Promotor" value={value.promoterId} onChange={set("promoterId")} placeholder="Todos"
+            items={current.promoterIds.map((id) => ({ value: id, label: userName(id) }))} />
+          <Field label="Desde">
+            <input className="input" type="date" value={value.from} max={value.to || undefined}
+              onChange={(event) => set("from")(event.target.value)} data-testid={`${testId}-from`} />
+          </Field>
+          <Field label="Hasta">
+            <input className="input" type="date" value={value.to} min={value.from || undefined}
+              onChange={(event) => set("to")(event.target.value)} data-testid={`${testId}-to`} />
+          </Field>
+        </div>
+      )}
     </div>
   );
 }
