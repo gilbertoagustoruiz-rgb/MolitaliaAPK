@@ -19,6 +19,8 @@ import {
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
+  ChevronDown,
   ShieldCheck,
   ShoppingBag,
   Smartphone,
@@ -5692,6 +5694,188 @@ function matchesTableSearch(
     .filter(Boolean)
     .every((term) => text.includes(term));
 }
+/* ---------- Filtros en cascada: Región → Ciudad → Mercado → Cliente (+ Promotor y fechas) ---------- */
+type CascadeFilter = {
+  region: string;
+  city: string;
+  marketId: string;
+  clientId: string;
+  promoterId: string;
+  from: string;
+  to: string;
+};
+const emptyCascade: CascadeFilter = { region: "", city: "", marketId: "", clientId: "", promoterId: "", from: "", to: "" };
+type CascadeRecord = { marketId: string; clientId?: string; promoterId?: string; date: string };
+const cascadeRegionOf = (market?: Market) => normalizeLocationValue(market?.region || market?.department) || "SIN REGIÓN";
+const cascadeCityOf = (market?: Market) => normalizeLocationValue(market?.province) || "SIN CIUDAD";
+function cascadeActive(filter: CascadeFilter) {
+  return Object.values(filter).some(Boolean);
+}
+/** ¿El registro cumple los filtros? `skip` ignora un filtro (para calcular sus opciones). */
+function matchesCascade(
+  filter: CascadeFilter,
+  record: CascadeRecord,
+  marketMap: Record<string, Market | undefined>,
+  skip: Partial<Record<keyof CascadeFilter, boolean>> = {},
+) {
+  const market = marketMap[record.marketId];
+  if (!skip.region && filter.region && cascadeRegionOf(market) !== filter.region) return false;
+  if (!skip.city && filter.city && cascadeCityOf(market) !== filter.city) return false;
+  if (!skip.marketId && filter.marketId && record.marketId !== filter.marketId) return false;
+  if (!skip.clientId && filter.clientId && record.clientId !== filter.clientId) return false;
+  if (!skip.promoterId && filter.promoterId && record.promoterId !== filter.promoterId) return false;
+  if (filter.from || filter.to) {
+    const day = attendanceDay(record.date);
+    if (filter.from && day < filter.from) return false;
+    if (filter.to && day > filter.to) return false;
+  }
+  return true;
+}
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
+}
+/**
+ * Barra de filtros encadenados. Cada filtro solo ofrece opciones compatibles con
+ * los anteriores; al cambiar uno, los inferiores que ya no aplican se limpian solos.
+ */
+function CascadeFilterBar({
+  value,
+  onChange,
+  markets,
+  clients,
+  users,
+  records,
+  shown,
+  total,
+  noun,
+  testId,
+}: {
+  value: CascadeFilter;
+  onChange: (value: CascadeFilter) => void;
+  markets: Market[];
+  clients: Client[];
+  users: AppUser[];
+  records: CascadeRecord[];
+  shown: number;
+  total: number;
+  noun: string;
+  testId: string;
+}) {
+  const marketMap = Object.fromEntries(markets.map((market) => [market.id, market])) as Record<string, Market | undefined>;
+  const options = (filter: CascadeFilter) => {
+    const inRegion = markets.filter((market) => !filter.region || cascadeRegionOf(market) === filter.region);
+    const inCity = inRegion.filter((market) => !filter.city || cascadeCityOf(market) === filter.city);
+    const marketIds = new Set((filter.marketId ? inCity.filter((m) => m.id === filter.marketId) : inCity).map((m) => m.id));
+    return {
+      regions: uniqueSorted(markets.map(cascadeRegionOf)),
+      cities: uniqueSorted(inRegion.map(cascadeCityOf)),
+      markets: inCity,
+      clients: clients.filter((client) => marketIds.has(client.marketId)),
+      promoterIds: uniqueSorted(
+        records
+          .filter((record) => matchesCascade(filter, record, marketMap, { promoterId: true }))
+          .map((record) => record.promoterId || ""),
+      ),
+    };
+  };
+  const sanitize = (next: CascadeFilter) => {
+    const result = { ...next };
+    let o = options(result);
+    if (result.region && !o.regions.includes(result.region)) result.region = "";
+    o = options(result);
+    if (result.city && !o.cities.includes(result.city)) result.city = "";
+    o = options(result);
+    if (result.marketId && !o.markets.some((market) => market.id === result.marketId)) result.marketId = "";
+    o = options(result);
+    if (result.clientId && !o.clients.some((client) => client.id === result.clientId)) result.clientId = "";
+    o = options(result);
+    if (result.promoterId && !o.promoterIds.includes(result.promoterId)) result.promoterId = "";
+    if (result.from && result.to && result.from > result.to) result.to = result.from;
+    return result;
+  };
+  const set = (key: keyof CascadeFilter) => (next: string) => onChange(sanitize({ ...value, [key]: next }));
+  const current = options(value);
+  const userName = (id: string) => users.find((person) => person.id === id)?.name || id;
+  // Se muestra plegado: solo el botón "Filtros", los filtros activos y el conteo.
+  // Se oculta solo al tocar fuera, con Escape o al bajar por la tabla.
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const startY = window.scrollY;
+    const onPointer = (event: PointerEvent) => {
+      if (boxRef.current && !boxRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onScroll = () => { if (Math.abs(window.scrollY - startY) > 160) setOpen(false); };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, [open]);
+  const shortDate = (date: string) => date ? date.split("-").reverse().join("/") : "";
+  const chips: { key: keyof CascadeFilter; label: string }[] = [
+    { key: "region" as const, label: value.region },
+    { key: "city" as const, label: value.city },
+    { key: "marketId" as const, label: value.marketId ? marketMap[value.marketId]?.name || value.marketId : "" },
+    { key: "clientId" as const, label: value.clientId ? clients.find((client) => client.id === value.clientId)?.name || value.clientId : "" },
+    { key: "promoterId" as const, label: value.promoterId ? userName(value.promoterId) : "" },
+    { key: "from" as const, label: value.from ? `Desde ${shortDate(value.from)}` : "" },
+    { key: "to" as const, label: value.to ? `Hasta ${shortDate(value.to)}` : "" },
+  ].filter((chip) => chip.label);
+  return (
+    <div ref={boxRef} className={`cascade-bar${open ? " is-open" : ""}`} data-testid={testId} role="group" aria-label={`Filtros de ${noun}`}>
+      <div className="cascade-summary">
+        <button type="button" className="cascade-toggle" aria-expanded={open} onClick={() => setOpen((current) => !current)} data-testid={`${testId}-toggle`}>
+          <SlidersHorizontal /> Filtros
+          {chips.length > 0 && <span className="cascade-count">{chips.length}</span>}
+          <ChevronDown className="cascade-chevron" />
+        </button>
+        <div className="cascade-chips">
+          {chips.map((chip) => (
+            <span className="cascade-chip" key={chip.key}>
+              {chip.label}
+              <button type="button" aria-label={`Quitar ${chip.label}`} onClick={() => set(chip.key)("")}><X /></button>
+            </span>
+          ))}
+        </div>
+        <strong role="status" aria-live="polite">{shown.toLocaleString("es-PE")} de {total.toLocaleString("es-PE")} {noun}</strong>
+        {cascadeActive(value) && (
+          <Btn variant="ghost" onClick={() => onChange(emptyCascade)} testId={`${testId}-clear`}>
+            <X /> Limpiar
+          </Btn>
+        )}
+      </div>
+      {open && (
+        <div className="cascade-fields">
+          <SelectField label="Región" value={value.region} onChange={set("region")} placeholder="Todas"
+            items={current.regions.map((region) => ({ value: region, label: region }))} />
+          <SelectField label="Ciudad" value={value.city} onChange={set("city")} placeholder="Todas"
+            items={current.cities.map((city) => ({ value: city, label: city }))} />
+          <SelectField label="Mercado" value={value.marketId} onChange={set("marketId")} placeholder="Todos"
+            items={current.markets.map((market) => ({ value: market.id, label: market.name }))} />
+          <SelectField label="Cliente" value={value.clientId} onChange={set("clientId")} placeholder="Todos"
+            items={current.clients.map((client) => ({ value: client.id, label: client.name || client.code }))} />
+          <SelectField label="Promotor" value={value.promoterId} onChange={set("promoterId")} placeholder="Todos"
+            items={current.promoterIds.map((id) => ({ value: id, label: userName(id) }))} />
+          <Field label="Desde">
+            <input className="input" type="date" value={value.from} max={value.to || undefined}
+              onChange={(event) => set("from")(event.target.value)} data-testid={`${testId}-from`} />
+          </Field>
+          <Field label="Hasta">
+            <input className="input" type="date" value={value.to} min={value.from || undefined}
+              onChange={(event) => set("to")(event.target.value)} data-testid={`${testId}-to`} />
+          </Field>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TableSearch({
   value,
   onChange,
@@ -8057,6 +8241,8 @@ function CoordinatorApp({
   notify: (message: string, error?: boolean) => void;
 }) {
   const [tab, setTab] = useState("inicio");
+  const [salesCascade, setSalesCascade] = useState<CascadeFilter>(emptyCascade);
+  const [attendanceCascade, setAttendanceCascade] = useState<CascadeFilter>(emptyCascade);
   const assignment = assignments.find((item) =>
     assignmentMatchesUser(item, user),
   );
@@ -8134,6 +8320,11 @@ function CoordinatorApp({
   const allowedWarehouseIds = allowedMarkets
     .map((market) => market.warehouseId)
     .filter((id): id is string => Boolean(id));
+  // Filtros en cascada: solo sobre lo que ya le corresponde al coordinador.
+  const filteredSales = allowedSales.filter((sale) => matchesCascade(salesCascade, sale, marketMap));
+  const filteredAttendance = allowedAttendance.filter((item) => matchesCascade(attendanceCascade, item, marketMap));
+  const automaticClosuresAllowed = allowedClosures.filter((closure) => closure.automatic || closure.closureType === "AUTOMATICO");
+  const filteredClosures = automaticClosuresAllowed.filter((closure) => matchesCascade(attendanceCascade, closure, marketMap));
 
   const allowedTabs = [
     ["inicio", "Resumen"],
@@ -8195,7 +8386,7 @@ function CoordinatorApp({
         "Link foto boleta",
         "Link foto canje",
       ],
-      allowedSales.map((sale) => {
+      filteredSales.map((sale) => {
         const promoter = userMap[sale.promoterId];
         return [
           sale.id,
@@ -8282,7 +8473,7 @@ function CoordinatorApp({
     downloadCsv(
       `marcaciones-coordinador-${peruDateKey()}.csv`,
       ["Código", "Fecha", "Promotor", "DNI", "Tipo", "Mercado", "Cliente", "Estado", "Foto"],
-      allowedAttendance.map((item) => {
+      filteredAttendance.map((item) => {
         const promoter = userMap[item.promoterId];
         return [
           item.id,
@@ -8494,8 +8685,10 @@ function CoordinatorApp({
             <DownloadAction onClick={exportSales} />
           </div>
           <div className="panel-body">
+            <CascadeFilterBar value={salesCascade} onChange={setSalesCascade} markets={allowedMarkets} clients={allowedClients}
+              users={users} records={allowedSales} shown={filteredSales.length} total={allowedSales.length} noun="ventas" testId="filters-sales" />
             <div className="record-list">
-              {allowedSales.map((sale) => (
+              {filteredSales.map((sale) => (
                 <article className="record" key={sale.id}>
                   <span className="record-icon"><ShoppingBag /></span>
                   <div className="record-main">
@@ -8522,8 +8715,12 @@ function CoordinatorApp({
             <DownloadAction onClick={exportAttendance} />
           </div>
           <div className="panel-body">
+            <CascadeFilterBar value={attendanceCascade} onChange={setAttendanceCascade} markets={allowedMarkets} clients={allowedClients}
+              users={users} records={[...allowedAttendance, ...automaticClosuresAllowed]}
+              shown={filteredAttendance.length + filteredClosures.length} total={allowedAttendance.length + automaticClosuresAllowed.length}
+              noun="marcaciones" testId="filters-attendance" />
             <div className="record-list">
-              {allowedAttendance.map((item) => (
+              {filteredAttendance.map((item) => (
                 <article className="record" key={item.id}>
                   <span className="record-icon"><MapPin /></span>
                   <div className="record-main">
@@ -8534,7 +8731,7 @@ function CoordinatorApp({
                   <StatusPill status={item.status} />
                 </article>
               ))}
-              {allowedClosures.filter((closure) => closure.automatic || closure.closureType === "AUTOMATICO").map((closure) => (
+              {filteredClosures.map((closure) => (
                 <article className="record" key={closure.id}>
                   <span className="record-icon"><CheckCircle2 /></span>
                   <div className="record-main">
@@ -8856,6 +9053,8 @@ function AnalystApp({
   const [marketSearch, setMarketSearch] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [attendanceSearch, setAttendanceSearch] = useState("");
+  const [salesCascade, setSalesCascade] = useState<CascadeFilter>(emptyCascade);
+  const [attendanceCascade, setAttendanceCascade] = useState<CascadeFilter>(emptyCascade);
   const [tradeApprovals, setTradeApprovals] = useState<TradeApproval[]>([]);
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
   const tradeApprovalsRequestInFlight = useRef(false);
@@ -9037,7 +9236,8 @@ function AnalystApp({
         "Link foto boleta",
         "Link foto canje",
       ],
-      sales.map((sale) => {
+      // Descarga lo que se ve: con filtros activos, solo las ventas filtradas.
+      filteredAdminSales.map((sale) => {
         const breakdown = saleExportBreakdown(sale, productPrices);
         const promoter = users.find((user) => user.id === sale.promoterId);
         const stock = userRedemptionStock(
@@ -9181,7 +9381,8 @@ function AnalystApp({
         "Estado",
         "Link foto marcación",
       ],
-      orderedAttendance.map((item) => {
+      // Descarga lo que se ve: con filtros o búsqueda activos, solo lo filtrado.
+      searchedAttendance.map((item) => {
         const promoter = users.find((user) => user.id === item.promoterId);
         const market = marketMap[item.marketId];
         return [
@@ -10360,6 +10561,7 @@ function AnalystApp({
     ]),
   );
   const searchedAttendance = orderedAttendance.filter((item) => {
+    if (!matchesCascade(attendanceCascade, item, marketMap)) return false;
     const promoter = users.find((x) => x.id === item.promoterId);
     const market = marketMap[item.marketId];
     return matchesTableSearch(attendanceSearch, [
@@ -10379,6 +10581,7 @@ function AnalystApp({
     ]);
   });
   const searchedClosures = automaticClosures.filter((item) =>
+    matchesCascade(attendanceCascade, item, marketMap) &&
     matchesTableSearch(attendanceSearch, [
       item.id,
       clients.find((x) => x.id === item.clientId)?.name ||
@@ -10393,6 +10596,7 @@ function AnalystApp({
     ]),
   );
   const filteredAdminSales = sales.filter((sale) => {
+    if (!matchesCascade(salesCascade, sale, marketMap)) return false;
     const promoter = users.find((item) => item.id === sale.promoterId);
     const client = clients.find((item) => item.id === sale.clientId);
     const market = marketMap[sale.marketId];
@@ -11129,6 +11333,18 @@ function AnalystApp({
             </Btn>
           </div>
           <div className="panel-body sales-panel-body">
+            <CascadeFilterBar
+              value={salesCascade}
+              onChange={setSalesCascade}
+              markets={markets}
+              clients={clients}
+              users={users}
+              records={sales}
+              shown={filteredAdminSales.length}
+              total={sales.length}
+              noun="ventas"
+              testId="filters-sales"
+            />
             <div className="sales-console-search">
               <Search />
               <Input
@@ -11286,6 +11502,18 @@ function AnalystApp({
               </Btn>
             </div>
             <div className="panel-body">
+              <CascadeFilterBar
+                value={attendanceCascade}
+                onChange={setAttendanceCascade}
+                markets={markets}
+                clients={clients}
+                users={users}
+                records={[...orderedAttendance, ...automaticClosures]}
+                shown={searchedAttendance.length + searchedClosures.length}
+                total={orderedAttendance.length + automaticClosures.length}
+                noun="marcaciones"
+                testId="filters-attendance"
+              />
               <TableSearch
                 value={attendanceSearch}
                 onChange={setAttendanceSearch}
