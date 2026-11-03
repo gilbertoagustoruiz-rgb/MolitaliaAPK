@@ -13420,6 +13420,13 @@ export default function App() {
   const photoUploadErrorShown = useRef(false);
   const photoContextRef = useRef({ sales, attendance, clients, markets });
   photoContextRef.current = { sales, attendance, clients, markets };
+  // Estado del ciclo de sincronización compartido entre renders: evita que dos
+  // ciclos envíen el mismo registro pendiente en paralelo.
+  const syncRunningRef = useRef(false);
+  const syncRetryRef = useRef(new Map<string, { attempts: number; nextAt: number }>());
+  const syncNowRef = useRef<(manual?: boolean) => Promise<void>>(async () => {});
+  const pendingSyncRef = useRef({ sales, attendance });
+  pendingSyncRef.current = { sales, attendance };
   const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
     const updatedAt = new Date().toISOString();
     if (upload.entityType === "sale") {
@@ -13777,21 +13784,41 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [referencesReady, user?.id, user?.role]);
+  // Un único ciclo de sincronización vivo mientras la sesión esté lista.
+  // Antes el efecto dependía de [sales, attendance]: cada confirmación o cambio
+  // del servidor destruía y recreaba el ciclo, y como la bandera "running" era
+  // local, el ciclo nuevo reenviaba el mismo registro mientras el anterior seguía
+  // esperando respuesta. Ahora el estado vive en refs y los cambios solo "piden"
+  // una sincronización; si ya hay una en curso, no se duplica.
   useEffect(() => {
-    if (!cloudReady || !navigator.onLine) return;
+    if (!cloudReady) return;
     let cancelled = false;
-    let running = false;
+    // Debe superar el statement_timeout del servidor (45 s) más el lock_timeout
+    // (8 s): si el celular se rinde antes, reenvía algo que PostgreSQL sigue
+    // procesando y genera trabajo duplicado.
+    const SYNC_REQUEST_TIMEOUT_MS = 60_000;
+    // Espera creciente por registro tras un fallo: 10 s, 30 s, 1 min, 2 min, 5 min.
+    const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 120_000, 300_000];
+    const retries = syncRetryRef.current;
+    const isDue = (id: string, manual: boolean) =>
+      manual || (retries.get(id)?.nextAt ?? 0) <= Date.now();
+    const markFailed = (id: string) => {
+      const attempts = (retries.get(id)?.attempts ?? 0) + 1;
+      const delay = RETRY_DELAYS_MS[Math.min(attempts - 1, RETRY_DELAYS_MS.length - 1)];
+      retries.set(id, { attempts, nextAt: Date.now() + delay });
+    };
+    const markConfirmed = (id: string) => retries.delete(id);
 
     const syncPendingOperationalRecords = async (manual = false) => {
       let confirmedCount = 0;
       let failedCount = 0;
-      if (running || cancelled || !navigator.onLine) {
+      if (syncRunningRef.current || cancelled || !navigator.onLine) {
         if (manual) window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
-          detail: { message: running ? "Hay una sincronización en curso. Espera unos segundos." : "Sin conexión o sesión no disponible." },
+          detail: { message: syncRunningRef.current ? "Hay una sincronización en curso. Espera unos segundos." : "Sin conexión o sesión no disponible." },
         }));
         return;
       }
-      running = true;
+      syncRunningRef.current = true;
       const catalogRevision =
         safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined;
 
@@ -13801,7 +13828,7 @@ export default function App() {
         // El mismo ID se conserva en los reintentos. Abortar la espera no
         // implica que PostgreSQL haya cancelado una transacción ya iniciada.
         const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 20_000);
+        const timeout = window.setTimeout(() => controller.abort(), SYNC_REQUEST_TIMEOUT_MS);
         let response: Response;
         try {
           response = await fetch(APP_STORAGE_SYNC, {
@@ -13828,14 +13855,14 @@ export default function App() {
       };
 
       try {
-        const pendingAttendance = attendance
-          .filter((item) => item.status !== "SINCRONIZADA")
+        const pendingAttendance = pendingSyncRef.current.attendance
+          .filter((item) => item.status !== "SINCRONIZADA" && isDue(item.id, manual))
           .sort(
             (first, second) =>
               new Date(first.date).getTime() - new Date(second.date).getTime(),
           );
         for (const item of pendingAttendance) {
-          if (cancelled) break;
+          if (cancelled || !navigator.onLine) break;
           try {
             const snapshot = await syncOne({ attendance: [item] });
             if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
@@ -13845,6 +13872,7 @@ export default function App() {
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la marcación.");
             confirmedCount += 1;
+            markConfirmed(item.id);
             setAttendance((current) => {
               // Respuesta compacta: actualizar solo los IDs confirmados.
               // No eliminar otras marcaciones sincronizadas del historial.
@@ -13857,6 +13885,7 @@ export default function App() {
             });
           } catch (error) {
             failedCount += 1;
+            markFailed(item.id);
             console.error(
               `No se pudo sincronizar marcación ${item.id}`,
               error,
@@ -13864,11 +13893,11 @@ export default function App() {
           }
         }
 
-        const pendingSales = sales.filter(
-          (sale) => sale.status !== "SINCRONIZADA",
+        const pendingSales = pendingSyncRef.current.sales.filter(
+          (sale) => sale.status !== "SINCRONIZADA" && isDue(sale.id, manual),
         );
         for (const sale of pendingSales) {
-          if (cancelled) break;
+          if (cancelled || !navigator.onLine) break;
           try {
             const snapshot = await syncOne({ sales: [sale] });
             if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
@@ -13878,6 +13907,7 @@ export default function App() {
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la venta.");
             confirmedCount += 1;
+            markConfirmed(sale.id);
             setSales((current) => {
               // Respuesta compacta: confirmar solo el ID enviado, sin
               // convertir otras ventas sincronizadas en pendientes.
@@ -13891,6 +13921,7 @@ export default function App() {
             });
           } catch (error) {
             failedCount += 1;
+            markFailed(sale.id);
             console.error(
               `No se pudo sincronizar venta ${sale.id}`,
               error,
@@ -13898,7 +13929,7 @@ export default function App() {
           }
         }
       } finally {
-        running = false;
+        syncRunningRef.current = false;
         if (manual) {
           const remaining = readStore<Sale[]>("bt-sales", []).filter((entry) => entry.status === "PENDIENTE").length
             + readStore<Attendance[]>("bt-attendance", []).filter((entry) => entry.status === "PENDIENTE").length;
@@ -13939,18 +13970,34 @@ export default function App() {
       }
     };
 
+    syncNowRef.current = syncPendingOperationalRecords;
     const onManualSync = () => void syncPendingOperationalRecords(true);
     window.addEventListener("bt-manual-sync-request", onManualSync);
     void syncPendingOperationalRecords();
-    const interval = window.setInterval(syncPendingOperationalRecords, 10_000);
-    const retry = () => void syncPendingOperationalRecords();
+    const interval = window.setInterval(() => void syncPendingOperationalRecords(), 10_000);
+    const retry = () => {
+      // Al recuperar señal se reintenta de inmediato, sin esperar el backoff.
+      retries.clear();
+      void syncPendingOperationalRecords();
+    };
     window.addEventListener("online", retry);
     return () => {
       cancelled = true;
+      syncNowRef.current = async () => {};
       window.clearInterval(interval);
       window.removeEventListener("online", retry);
       window.removeEventListener("bt-manual-sync-request", onManualSync);
     };
+  }, [cloudReady]);
+
+  // Un registro nuevo o una foto aplicada pide sincronizar de inmediato sin
+  // reiniciar el ciclo. Si ya hay un envío en curso, el siguiente pase lo toma.
+  useEffect(() => {
+    if (!cloudReady) return;
+    const hasPending =
+      sales.some((sale) => sale.status !== "SINCRONIZADA") ||
+      attendance.some((item) => item.status !== "SINCRONIZADA");
+    if (hasPending) void syncNowRef.current();
   }, [cloudReady, sales, attendance, cloudSyncTick]);
 
   useEffect(() => {

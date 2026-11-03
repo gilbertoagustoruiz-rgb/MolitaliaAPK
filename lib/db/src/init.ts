@@ -642,3 +642,50 @@ export async function ensureDatabaseSchema() {
     END $fk$;
   `);
 }
+
+/**
+ * Índices de rendimiento para el feed incremental, tombstones y consultas por promotor.
+ *
+ * - Solo agregan índices: no modifican, borran ni migran filas.
+ * - CONCURRENTLY no bloquea lecturas ni escrituras; por eso cada índice va en su
+ *   propia sentencia (no puede ejecutarse dentro de una transacción).
+ * - Se ejecuta después de que el servidor ya atiende peticiones, para no demorar el arranque.
+ * - Si un intento anterior quedó INVÁLIDO (p. ej. reinicio a mitad de la creación),
+ *   se elimina únicamente ese índice inválido y se vuelve a crear. Ningún dato se toca.
+ */
+const performanceIndexes: Array<{ name: string; definition: string }> = [
+  { name: "idx_sales_updated_at", definition: "ON sales(updated_at)" },
+  { name: "idx_attendance_updated_at", definition: "ON attendance(updated_at)" },
+  { name: "idx_movements_updated_at", definition: "ON inventory_movements(updated_at)" },
+  { name: "idx_tombstones_deleted_at", definition: "ON app_storage_tombstones(deleted_at)" },
+  { name: "idx_attendance_promoter_date", definition: "ON attendance(promoter_id,event_date DESC)" },
+  { name: "idx_attendance_date_promoter_market", definition: "ON attendance(event_date,promoter_id,market_id)" },
+  { name: "idx_sales_promoter_date", definition: "ON sales(promoter_id,sale_date DESC)" },
+];
+
+export async function ensurePerformanceIndexes(
+  log: (message: string, error?: unknown) => void = (message, error) =>
+    error ? console.error(message, error) : console.info(message),
+) {
+  for (const index of performanceIndexes) {
+    try {
+      const existing = await pool.query(
+        `SELECT i.indisvalid AS valid
+           FROM pg_class c JOIN pg_index i ON i.indexrelid=c.oid
+          WHERE c.relname=$1 AND c.relkind='i' LIMIT 1`,
+        [index.name],
+      );
+      if (existing.rows[0]?.valid === true) continue;
+      if (existing.rows.length) {
+        await pool.query(`DROP INDEX CONCURRENTLY IF EXISTS ${index.name}`);
+      }
+      await pool.query(
+        `CREATE INDEX CONCURRENTLY IF NOT EXISTS ${index.name} ${index.definition}`,
+      );
+      log(`Índice de rendimiento listo: ${index.name}`);
+    } catch (error) {
+      // Un índice faltante solo afecta velocidad; nunca debe detener la app.
+      log(`No se pudo crear el índice ${index.name}`, error);
+    }
+  }
+}

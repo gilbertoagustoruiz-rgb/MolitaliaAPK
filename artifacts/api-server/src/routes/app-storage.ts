@@ -11,7 +11,10 @@ import { Router, type IRouter, type Request } from "express";
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
 const campaignTimeZone = "America/Lima";
-const automaticClosureIntervalMs = 30_000;
+// El barrido cierra el día anterior de Lima y es idempotente. Correrlo cada 30 s
+// repetía la misma consulta y transacción todo el día; cada 10 min sigue cubriendo
+// marcaciones que sincronizan tarde sin cargar la base.
+const automaticClosureIntervalMs = 10 * 60 * 1000;
 const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
 const miniHalfPlanchaSkus = new Set([
   "TODINNITO-85",
@@ -952,7 +955,20 @@ async function syncSnapshot(
         [`sale:${saleId}`],
       );
     }
-    await lockInventoryLedger(client as unknown as QueryClient);
+    // El candado global del inventario solo se necesita cuando el lote puede tocar
+    // stock o registros que las rutas administrativas modifican bajo ese candado.
+    // Un lote de solo marcaciones ya queda serializado por su propio candado
+    // (promotor+mercado+día en validateNewAttendance) y no mueve stock de almacén;
+    // así deja de esperar detrás de ventas y canjes de otros promotores.
+    const attendanceOnly = (Object.keys(guardedIncoming) as CollectionName[]).every(
+      (name) =>
+        name === "attendance" ||
+        !Array.isArray(guardedIncoming[name]) ||
+        guardedIncoming[name]!.length === 0,
+    );
+    if (!attendanceOnly) {
+      await lockInventoryLedger(client as unknown as QueryClient);
+    }
     const deletedSalesResult = await client.query(
       "SELECT record_id FROM app_storage_tombstones WHERE collection='sales'",
     );
