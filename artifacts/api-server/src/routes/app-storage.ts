@@ -3212,8 +3212,8 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
       }));
     }
     const removed = await pool.query(
-      "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[]) AND deleted_at >= $2::timestamptz AND deleted_at <= $3::timestamptz",
-      [["sales", "attendance", "movements"], new Date(since.getTime() - replayMs).toISOString(), cursor],
+      "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[]) AND deleted_at >= $2::timestamptz",
+      [["sales", "attendance", "movements"], new Date(since.getTime() - replayMs).toISOString()],
     );
     const deleted = { sales: [] as string[], attendance: [] as string[], movements: [] as string[] };
     for (const row of removed.rows) {
