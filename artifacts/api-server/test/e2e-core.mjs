@@ -1315,6 +1315,46 @@ try {
   if (Number(legacyAfter.rows[0]?.data?.planchaMultiplier) !== 2)
     throw new Error("Legacy sale edit did not persist multiplier x2.");
 
+  // Incremental feed: no full catalog, cursor recovery, delayed commit and retry idempotence.
+  const initialFeed = await request("/app-storage");
+  if (!initialFeed.syncCursor) throw new Error("Initial hydration did not return a sync cursor.");
+  const deltaPath = (since) => `/app-storage/operational-changes?since=${encodeURIComponent(since)}`;
+  const firstDelta = await request(deltaPath(initialFeed.syncCursor));
+  if (!firstDelta.cursor || !Array.isArray(firstDelta.snapshot.sales) || !Array.isArray(firstDelta.snapshot.attendance))
+    throw new Error("Incremental feed is missing its cursor or operational collections.");
+  if ("users" in firstDelta.snapshot || "markets" in firstDelta.snapshot)
+    throw new Error("Incremental feed unexpectedly downloaded the catalog.");
+  const badCursor = await fetch(base + "/app-storage/operational-changes?since=invalid");
+  if (badCursor.status !== 400) throw new Error("Invalid incremental cursor was accepted.");
+
+  // A transaction whose update timestamp predates commit must remain recoverable.
+  const delayed = await pool.connect();
+  try {
+    await delayed.query("BEGIN");
+    await delayed.query(
+      "UPDATE sales SET updated_at = now() - interval '90 seconds' WHERE id=$1",
+      ["VTA-E2E-LEGACY"],
+    );
+    const during = await request(deltaPath(initialFeed.syncCursor));
+    if (during.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Uncommitted sale change became visible.");
+    await delayed.query("COMMIT");
+    const after = await request(deltaPath(initialFeed.syncCursor));
+    if (!after.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Delayed committed sale was lost by incremental cursor.");
+    const retry = await request(deltaPath(initialFeed.syncCursor));
+    if (retry.snapshot.sales.filter((sale) => sale.id === "VTA-E2E-LEGACY").length !== 1)
+      throw new Error("Incremental retry returned duplicate sale IDs.");
+    const reconnect = await request(deltaPath(new Date(Date.now() - 60 * 60 * 1000).toISOString()));
+    if (!reconnect.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Reconnection did not recover a previously committed sale.");
+  } catch (error) {
+    await delayed.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    delayed.release();
+  }
+
   const beforeDelete = await pool.query("SELECT stock FROM warehouses WHERE id='ALM-E2E'");
   const beforeAvena = Number(beforeDelete.rows[0].stock.AVENA);
   await request("/app-storage/admin/sales/VTA-E2E-UNIT", { method: "DELETE", headers: adminHeaders });
