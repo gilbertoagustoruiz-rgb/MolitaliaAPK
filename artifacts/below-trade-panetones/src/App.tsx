@@ -1095,6 +1095,48 @@ function mergeMovements(
       second.id.localeCompare(first.id),
   );
 }
+/**
+ * Aplica una respuesta del feed de cambios operativos (/operational-changes).
+ * - Incremental: el servidor envía SOLO lo que cambió desde el cursor. Se
+ *   actualiza por ID y solo se quita lo que el servidor reporta como eliminado.
+ *   Antes se trataba como la lista completa: se borraban de la vista las
+ *   marcaciones y movimientos que no venían, y las ventas sincronizadas de las
+ *   últimas 48 h se marcaban "PENDIENTE" y se reenviaban cada 30 s.
+ * - Reconciliación (lista completa): manda el servidor; se conservan solo los
+ *   registros locales que aún no se han enviado.
+ * Nunca convierte en "PENDIENTE" un registro ya sincronizado.
+ */
+function applyOperationalFeed<T extends { id: string; status?: string }>(
+  current: T[],
+  incoming: T[],
+  removed: Set<string>,
+  full: boolean,
+  freshness: (item: T) => string,
+  sort: (items: T[]) => T[],
+) {
+  const isLocalPending = (item: T) => Boolean(item.status) && item.status !== "SINCRONIZADA";
+  const currentById = new Map(current.map((item) => [item.id, item]));
+  const next = new Map<string, T>();
+  current.forEach((item) => {
+    if (!full || isLocalPending(item)) next.set(item.id, item);
+  });
+  incoming.forEach((cloudItem) => {
+    const localItem = currentById.get(cloudItem.id);
+    // Una edición local aún no enviada y más reciente no se pisa.
+    if (localItem && isLocalPending(localItem) && freshness(localItem) > freshness(cloudItem)) {
+      next.set(cloudItem.id, localItem);
+      return;
+    }
+    next.set(cloudItem.id, cloudItem);
+  });
+  removed.forEach((id) => next.delete(id));
+  return sort(Array.from(next.values()));
+}
+const sortSalesNewest = (items: Sale[]) =>
+  [...items].sort((a, b) => {
+    const byDate = new Date(b.date).getTime() - new Date(a.date).getTime();
+    return byDate || saleFreshness(b).localeCompare(saleFreshness(a)) || b.id.localeCompare(a.id);
+  });
 function cloudSnapshotFromStores(): CloudSnapshot {
   const users = readStore<AppUser[]>("bt-users", []).map(
     ({ password: _password, ...user }) => user,
@@ -14057,7 +14099,7 @@ export default function App() {
 
         setSales((current) => {
           const removed = new Set(payload.deleted?.sales || []);
-          const next = mergeSales(current, cloudSales).filter((item) => !removed.has(item.id));
+          const next = applyOperationalFeed(current, cloudSales, removed, reconcile, saleFreshness, sortSalesNewest);
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-sales", next);
           return next;
@@ -14065,7 +14107,7 @@ export default function App() {
         if (Array.isArray(payload.snapshot.attendance)) {
           setAttendance((current) => {
             const removed = new Set(payload.deleted?.attendance || []);
-          const next = mergeAttendance(current, cloudAttendance).filter((item) => !removed.has(item.id));
+            const next = applyOperationalFeed(current, cloudAttendance, removed, reconcile, attendanceFreshness, sortNewestByDate);
             if (JSON.stringify(next) === JSON.stringify(current)) return current;
             writeStore("bt-attendance", next);
             return next;
@@ -14073,7 +14115,7 @@ export default function App() {
         }
         setMovements((current) => {
           const removed = new Set(payload.deleted?.movements || []);
-          const next = mergeMovements(current, cloudMovements).filter((item) => !removed.has(item.id));
+          const next = applyOperationalFeed(current, cloudMovements, removed, reconcile, movementFreshness, sortNewestByDate);
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-inventory-movements", next);
           return next;
