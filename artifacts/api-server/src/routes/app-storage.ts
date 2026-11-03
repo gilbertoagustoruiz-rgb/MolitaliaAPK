@@ -3194,6 +3194,9 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
     return;
   }
   try {
+    // Keep a conservative replay window: late commits remain visible even when
+    // their updated_at was assigned before the transaction committed.
+    const replayMs = 10 * 60 * 1000;
     const boundary = await pool.query("SELECT now() AS cursor");
     const cursor = new Date(String(boundary.rows[0].cursor)).toISOString();
     const snapshot: Partial<StorageSnapshot> = {};
@@ -3201,7 +3204,7 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
       const { table } = collectionConfig[name];
       const result = await pool.query(
         `SELECT data,status FROM ${table} WHERE updated_at >= $1::timestamptz AND updated_at <= $2::timestamptz ORDER BY updated_at ASC`,
-        [new Date(since.getTime() - 5000).toISOString(), cursor],
+        [new Date(since.getTime() - replayMs).toISOString(), cursor],
       );
       snapshot[name] = result.rows.map((row) => ({
         ...(row.data as StoredRecord),
