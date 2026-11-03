@@ -2835,13 +2835,40 @@ router.delete("/app-storage/redemption-rules/:id", async (req, res): Promise<voi
   }
 });
 
-router.get("/app-storage/warehouses", async (_req, res): Promise<void> => {
+router.get("/app-storage/warehouses", async (req, res): Promise<void> => {
   try {
     const warehouses = await pool.query("SELECT data,stock,market_ids FROM warehouses ORDER BY name");
     const movements = await pool.query("SELECT data FROM warehouse_movements ORDER BY movement_date DESC,created_at DESC");
+    // Admin, analista, supervisor y trade: todos los almacenes (sin cambios).
+    // Promotor y coordinador: solo los almacenes de sus mercados. Cliente: ninguno.
+    const scope = await dataScopeFor(req);
+    let allowedWarehouseIds: Set<string> | null = null;
+    if (scope.kind !== "full") {
+      allowedWarehouseIds = new Set<string>();
+      const scopeMarketIds = scope.kind === "client" ? [] : [...scope.marketIds];
+      if (scopeMarketIds.length) {
+        const scopeMarkets = await pool.query(
+          "SELECT data->>'warehouseId' AS warehouse_id FROM markets WHERE id = ANY($1::text[])",
+          [scopeMarketIds],
+        );
+        for (const row of scopeMarkets.rows) if (row.warehouse_id) allowedWarehouseIds.add(String(row.warehouse_id));
+        for (const row of warehouses.rows) {
+          const linked = Array.isArray(row.market_ids) ? row.market_ids.map(String) : [];
+          const id = isRecord(row.data) ? value(row.data, "id") : "";
+          if (id && linked.some((marketId: string) => scope.kind !== "client" && scope.marketIds.has(marketId)))
+            allowedWarehouseIds.add(id);
+        }
+      }
+    }
+    const visibleWarehouses = warehouses.rows.filter(
+      (row) => !allowedWarehouseIds || allowedWarehouseIds.has(isRecord(row.data) ? value(row.data, "id") : ""),
+    );
+    const visibleMovements = movements.rows.filter(
+      (row) => !allowedWarehouseIds || (isRecord(row.data) && allowedWarehouseIds.has(value(row.data, "warehouseId"))),
+    );
     res.json({
-      warehouses: warehouses.rows.map((row) => ({ ...(isRecord(row.data) ? row.data : {}), stock: isRecord(row.stock) ? row.stock : {}, marketIds: Array.isArray(row.market_ids) ? row.market_ids : [] })),
-      movements: movements.rows.map((row) => row.data),
+      warehouses: visibleWarehouses.map((row) => ({ ...(isRecord(row.data) ? row.data : {}), stock: isRecord(row.stock) ? row.stock : {}, marketIds: Array.isArray(row.market_ids) ? row.market_ids : [] })),
+      movements: visibleMovements.map((row) => row.data),
     });
   } catch (error) {
     console.error("Unable to read warehouses", error);

@@ -5077,3 +5077,187 @@ select:focus-visible,
     font-size: 19px;
   }
 }
+
+/* ---------- Coordinador / Analista: resumen del día ---------- */
+.readonly-badge {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: hsl(var(--info-bg));
+  color: hsl(var(--info-ink));
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.readonly-badge svg {
+  width: 15px;
+  height: 15px;
+}
+.role-today {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.role-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.role-kpis > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 16px;
+  border: 1px solid hsl(var(--line));
+  border-radius: 16px;
+  background: hsl(var(--surface));
+}
+.role-kpis span {
+  font-size: 13px;
+  color: hsl(var(--muted));
+}
+.role-kpis strong {
+  font-size: 26px;
+  white-space: nowrap;
+}
+.role-kpis small {
+  font-size: 12px;
+  color: hsl(var(--muted));
+}
+.role-kpis small.warn {
+  color: hsl(var(--warn-ink));
+  font-weight: 700;
+}
+.role-attention,
+.role-card {
+  padding: 16px;
+  border: 1px solid hsl(var(--line));
+  border-radius: 16px;
+  background: hsl(var(--surface));
+}
+.role-attention h2,
+.role-card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+}
+.role-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+.role-alert + .role-alert {
+  margin-top: 8px;
+}
+.role-alert svg {
+  width: 20px;
+  flex: none;
+}
+.role-alert span {
+  flex: 1;
+}
+.role-alert.warn {
+  background: hsl(var(--warn-bg));
+  color: hsl(var(--warn-ink));
+}
+.role-alert.info {
+  background: hsl(var(--info-bg));
+  color: hsl(var(--info-ink));
+}
+.role-alert .btn {
+  flex: none;
+}
+.role-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: stretch;
+}
+.role-grid > .role-card {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+.role-grid > .role-card:first-child {
+  flex-grow: 2;
+}
+.role-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.role-card-head h2 {
+  margin: 0;
+}
+.role-table-wrap {
+  overflow-x: auto;
+}
+.role-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.role-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid hsl(var(--line));
+  color: hsl(var(--muted));
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.role-table td {
+  padding: 10px;
+  border-bottom: 1px solid hsl(var(--line));
+}
+.role-table tr:last-child td {
+  border-bottom: 0;
+}
+.role-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.role-table .ph-chip:not(.ok):not(.warn) {
+  background: hsl(var(--paper));
+  color: hsl(var(--muted));
+}
+.role-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.role-bar {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr) auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 14px;
+}
+.role-bar span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.role-bar-track {
+  height: 12px;
+  border-radius: 6px;
+  background: hsl(var(--paper));
+}
+.role-bar-track > div {
+  height: 12px;
+  border-radius: 6px;
+  background: hsl(var(--orange));
+}
+/* La tabla del equipo ocupa todo el ancho; las barras por mercado van debajo. */
+.role-grid > .role-card:first-child {
+  flex-basis: 100%;
+}

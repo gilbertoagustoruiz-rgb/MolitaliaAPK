@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
   Gift,
   House,
+  Lock,
   LogOut,
   MapPin,
   Minus,
@@ -7795,6 +7796,181 @@ function SalesDashboard({
   );
 }
 
+/**
+ * Resumen del día para el coordinador (solo lectura): totales de sus mercados,
+ * quién falta marcar entrada, su equipo y ventas por mercado. Usa solo los datos
+ * que el servidor ya envía para su alcance.
+ */
+function CoordinatorToday({
+  markets,
+  promoters,
+  sales,
+  attendance,
+  onOpen,
+}: {
+  markets: Market[];
+  promoters: AppUser[];
+  sales: Sale[];
+  attendance: Attendance[];
+  onOpen: (tab: string) => void;
+}) {
+  const now = new Date();
+  const today = attendanceDay(now);
+  const todaySales = sales.filter((sale) => attendanceDay(sale.date) === today);
+  const todayAttendance = attendance.filter((item) => attendanceDay(item.date) === today);
+  const amount = todaySales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0);
+  const planchas = todaySales
+    .filter((sale) => sale.mode === "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.planchas) || 0), 0);
+  const looseUnits = todaySales
+    .filter((sale) => sale.mode !== "PLANCHAS")
+    .reduce((total, sale) => total + (Number(sale.units) || 0), 0);
+  const withCanje = todaySales.filter((sale) => effectiveSaleBonus(sale)).length;
+  const team = promoters
+    .filter((person) => person.status === "ACTIVO" && isPromoterRole(person.role))
+    .map((person) => {
+      const own = todayAttendance
+        .filter((item) => item.promoterId === person.id || (item.promoterDni && item.promoterDni === person.dni))
+        .sort((first, second) => new Date(first.date).getTime() - new Date(second.date).getTime());
+      const latest = own[own.length - 1];
+      const firstEntry = own.find((item) => item.type === "ENTRADA");
+      const ownSales = todaySales.filter((sale) => sale.promoterId === person.id);
+      const marketId = latest?.marketId || person.marketId || "";
+      return {
+        person,
+        market: markets.find((market) => market.id === marketId)?.name || "—",
+        entry: firstEntry ? limaTime(firstEntry.date) : "—",
+        state: latest?.type === "ENTRADA" ? "En jornada" : latest?.type === "SALIDA" ? "Salió" : "Sin marcar",
+        salesCount: ownSales.length,
+        salesAmount: ownSales.reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0),
+      };
+    })
+    .sort((first, second) => second.salesAmount - first.salesAmount);
+  const working = team.filter((row) => row.state === "En jornada").length;
+  const missing = team.filter((row) => row.state === "Sin marcar");
+  const byMarket = markets
+    .map((market) => ({
+      market,
+      amount: todaySales
+        .filter((sale) => sale.marketId === market.id)
+        .reduce((total, sale) => total + (Number(sale.amountSoles) || 0), 0),
+    }))
+    .sort((first, second) => second.amount - first.amount);
+  const maxMarket = Math.max(1, ...byMarket.map((row) => row.amount));
+  const hour = now.toLocaleTimeString("es-PE", { hour: "numeric", minute: "2-digit", timeZone: "America/Lima" });
+  return (
+    <section className="role-today" data-testid="coordinator-today" aria-label="Resumen de hoy">
+      <div className="role-kpis">
+        <div>
+          <span>Ventas de hoy</span>
+          <strong>{formatSoles(amount)}</strong>
+          <small>{todaySales.length} venta{todaySales.length === 1 ? "" : "s"}</small>
+        </div>
+        <div>
+          <span>Planchas</span>
+          <strong>{planchas}</strong>
+          <small>+ {looseUnits} unidades sueltas</small>
+        </div>
+        <div>
+          <span>Ventas con canje</span>
+          <strong>{withCanje}</strong>
+          <small>de {todaySales.length} hoy</small>
+        </div>
+        <div>
+          <span>En jornada ahora</span>
+          <strong>
+            {working} de {team.length}
+          </strong>
+          <small className={missing.length ? "warn" : ""}>
+            {missing.length ? `${missing.length} sin marcar entrada` : "Todos marcaron"}
+          </small>
+        </div>
+      </div>
+
+      {missing.length > 0 && (
+        <div className="role-attention">
+          <h2>Requiere atención</h2>
+          <p className="role-alert warn">
+            <Clock3 />
+            <span>
+              <strong>{missing.map((row) => row.person.name).join(", ")}</strong>{" "}
+              {missing.length === 1 ? "no ha" : "no han"} marcado entrada hoy (son las {hour}).
+            </span>
+          </p>
+        </div>
+      )}
+
+      <div className="role-grid">
+        <div className="role-card">
+          <div className="role-card-head">
+            <h2>Equipo de hoy</h2>
+            <button type="button" className="ph-link" onClick={() => onOpen("marcaciones")}>
+              Ver marcaciones
+            </button>
+          </div>
+          {team.length ? (
+            <div className="role-table-wrap">
+              <table className="role-table">
+                <thead>
+                  <tr>
+                    <th>Promotor</th>
+                    <th>Mercado</th>
+                    <th>Entrada</th>
+                    <th>Estado</th>
+                    <th className="num">Ventas</th>
+                    <th className="num">Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {team.map((row) => (
+                    <tr key={row.person.id}>
+                      <td><strong>{row.person.name}</strong></td>
+                      <td>{row.market}</td>
+                      <td>{row.entry}</td>
+                      <td>
+                        <span className={`ph-chip ${row.state === "En jornada" ? "ok" : row.state === "Sin marcar" ? "warn" : ""}`}>
+                          {row.state}
+                        </span>
+                      </td>
+                      <td className="num">{row.salesCount}</td>
+                      <td className="num"><strong>{formatSoles(row.salesAmount)}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="ph-empty">No hay promotores asignados a tus mercados.</p>
+          )}
+        </div>
+        <div className="role-card">
+          <div className="role-card-head">
+            <h2>Ventas por mercado hoy</h2>
+            <button type="button" className="ph-link" onClick={() => onOpen("ventas")}>
+              Ver ventas
+            </button>
+          </div>
+          {byMarket.length ? (
+            <div className="role-bars">
+              {byMarket.map((row) => (
+                <div className="role-bar" key={row.market.id}>
+                  <span>{row.market.name}</span>
+                  <div className="role-bar-track" aria-hidden="true">
+                    <div style={{ width: `${Math.round((row.amount / maxMarket) * 100)}%` }} />
+                  </div>
+                  <strong>{formatSoles(row.amount)}</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="ph-empty">No tienes mercados asignados. Pide al analista que te asigne.</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function CoordinatorApp({
   user,
   markets,
@@ -8079,8 +8255,15 @@ function CoordinatorApp({
         <div>
           <span className="eyebrow">PANEL DE COORDINACIÓN</span>
           <h1>Hola, {user.name}</h1>
-          <p>Consulta y descarga la información de tus zonas. Este perfil es solo lectura.</p>
+          <p>
+            {allowedMarkets.length
+              ? `Tus mercados: ${allowedMarkets.map((market) => market.name).join(", ")}`
+              : "Aún no tienes mercados asignados."}
+          </p>
         </div>
+        <span className="readonly-badge" title="Puedes consultar y descargar; no editar.">
+          <Lock /> Solo lectura
+        </span>
       </div>
       <nav className="tabs" aria-label="Módulos">
         {allowedTabs.map(([value, label]) => (
@@ -8095,6 +8278,15 @@ function CoordinatorApp({
         ))}
       </nav>
 
+      {tab === "inicio" && (
+        <CoordinatorToday
+          markets={allowedMarkets}
+          promoters={allowedUsers}
+          sales={allowedSales}
+          attendance={allowedAttendance}
+          onOpen={setTab}
+        />
+      )}
       {tab === "inicio" && (
         <SalesDashboard
           sales={allowedSales}
