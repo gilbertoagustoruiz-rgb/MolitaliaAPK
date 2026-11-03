@@ -1315,12 +1315,73 @@ try {
   if (Number(legacyAfter.rows[0]?.data?.planchaMultiplier) !== 2)
     throw new Error("Legacy sale edit did not persist multiplier x2.");
 
+  // Incremental feed: no full catalog, cursor recovery, delayed commit and retry idempotence.
+  const initialFeed = await request("/app-storage");
+  if (!initialFeed.syncCursor) throw new Error("Initial hydration did not return a sync cursor.");
+  const deltaPath = (since) => `/app-storage/operational-changes?since=${encodeURIComponent(since)}`;
+  const firstDelta = await request(deltaPath(initialFeed.syncCursor));
+  if (!firstDelta.cursor || !Array.isArray(firstDelta.snapshot.sales) || !Array.isArray(firstDelta.snapshot.attendance))
+    throw new Error("Incremental feed is missing its cursor or operational collections.");
+  if ("users" in firstDelta.snapshot || "markets" in firstDelta.snapshot)
+    throw new Error("Incremental feed unexpectedly downloaded the catalog.");
+  const badCursor = await fetch(base + "/app-storage/operational-changes?since=invalid");
+  if (badCursor.status !== 400) throw new Error("Invalid incremental cursor was accepted.");
+
+  // A transaction whose update timestamp predates commit must remain recoverable.
+  const delayed = await pool.connect();
+  try {
+    await delayed.query("BEGIN");
+    await delayed.query(
+      "UPDATE sales SET data=jsonb_set(data, '{syncProbe}', '\"delayed-commit\"'), updated_at = now() - interval '90 seconds' WHERE id=$1",
+      ["VTA-E2E-LEGACY"],
+    );
+    const during = await request(deltaPath(initialFeed.syncCursor));
+    if (during.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY" && sale.syncProbe === "delayed-commit"))
+      throw new Error("Uncommitted sale change became visible.");
+    await delayed.query("COMMIT");
+    const after = await request(deltaPath(initialFeed.syncCursor));
+    if (!after.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY" && sale.syncProbe === "delayed-commit"))
+      throw new Error("Delayed committed sale was lost by incremental cursor.");
+    const retry = await request(deltaPath(initialFeed.syncCursor));
+    if (retry.snapshot.sales.filter((sale) => sale.id === "VTA-E2E-LEGACY").length !== 1)
+      throw new Error("Incremental retry returned duplicate sale IDs.");
+    // A transaction older than the ten-minute replay window is recovered by reconciliation.
+    await pool.query("UPDATE sales SET updated_at=now() - interval '30 minutes' WHERE id=$1", ["VTA-E2E-LEGACY"]);
+    const ordinary = await request(deltaPath(new Date().toISOString()));
+    if (ordinary.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Normal incremental feed unexpectedly returned an out-of-window sale.");
+    const reconciled = await request(deltaPath(new Date().toISOString()) + "&reconcile=1");
+    if (!reconciled.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Full operational reconciliation failed to recover a delayed sale.");
+    const reconnect = await request(deltaPath(new Date(Date.now() - 60 * 60 * 1000).toISOString()));
+    if (!reconnect.snapshot.sales.some((sale) => sale.id === "VTA-E2E-LEGACY"))
+      throw new Error("Reconnection did not recover a previously committed sale.");
+    await pool.query("UPDATE sales SET data=data - 'syncProbe', updated_at=now() WHERE id=$1", ["VTA-E2E-LEGACY"]);
+  } catch (error) {
+    await delayed.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    delayed.release();
+  }
+
   const beforeDelete = await pool.query("SELECT stock FROM warehouses WHERE id='ALM-E2E'");
   const beforeAvena = Number(beforeDelete.rows[0].stock.AVENA);
   await request("/app-storage/admin/sales/VTA-E2E-UNIT", { method: "DELETE", headers: adminHeaders });
   const afterDelete = await pool.query("SELECT stock FROM warehouses WHERE id='ALM-E2E'");
   const afterAvena = Number(afterDelete.rows[0].stock.AVENA);
   if (afterAvena !== beforeAvena + 1) throw new Error("Deleting the sale did not restore canje stock exactly once.");
+  const tombstoneCheck = await pool.query(
+    "SELECT collection,record_id,deleted_at,now() AS db_now FROM app_storage_tombstones WHERE collection='sales' AND record_id=$1",
+    ["VTA-E2E-UNIT"],
+  );
+  if (!tombstoneCheck.rows.length)
+    throw new Error("Sale deletion did not persist a tombstone in PostgreSQL.");
+  const deleteFeed = await request(deltaPath(initialFeed.syncCursor));
+  if (!deleteFeed.deleted?.sales?.includes("VTA-E2E-UNIT"))
+    throw new Error(`Deleted sale was not propagated: cursor=${initialFeed.syncCursor} tombstone=${JSON.stringify(tombstoneCheck.rows[0])} feed=${JSON.stringify(deleteFeed.deleted)}`);
+  const repeatedDeleteFeed = await request(deltaPath(initialFeed.syncCursor));
+  if (repeatedDeleteFeed.deleted.sales.filter((id) => id === "VTA-E2E-UNIT").length !== 1)
+    throw new Error("Deletion retry returned duplicate tombstones.");
   const remainingItems = await pool.query("SELECT 1 FROM sale_items WHERE sale_id='VTA-E2E-UNIT'");
   if (remainingItems.rows.length) throw new Error("sale_items was not removed with the deleted sale.");
 

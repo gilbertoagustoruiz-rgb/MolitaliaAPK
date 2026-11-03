@@ -3184,11 +3184,63 @@ router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
   }
 });
 
+// Incremental operational feed. The cursor is a database-server timestamp, never a device clock.
+// A small overlap protects against timestamp precision and network retries; clients merge by ID.
+router.get("/app-storage/operational-changes", async (req, res): Promise<void> => {
+  const rawSince = typeof req.query.since === "string" ? req.query.since : "";
+  const since = new Date(rawSince);
+  if (!rawSince || Number.isNaN(since.getTime())) {
+    res.status(400).json({ message: "Cursor de sincronización inválido." });
+    return;
+  }
+  try {
+    // Keep a conservative replay window: late commits remain visible even when
+    // their updated_at was assigned before the transaction committed.
+    const replayMs = 10 * 60 * 1000;
+    const reconcile = req.query.reconcile === "1";
+    const boundary = await pool.query("SELECT clock_timestamp() AS cursor");
+    const cursor = new Date(String(boundary.rows[0].cursor)).toISOString();
+    const snapshot: Partial<StorageSnapshot> = {};
+    for (const name of ["sales", "attendance", "movements"] as const) {
+      const { table } = collectionConfig[name];
+      const result = await pool.query(
+        reconcile
+          ? `SELECT data,status FROM ${table} ORDER BY updated_at ASC`
+          : `SELECT data,status FROM ${table} WHERE updated_at >= $1::timestamptz AND updated_at <= $2::timestamptz ORDER BY updated_at ASC`,
+        reconcile ? [] : [new Date(since.getTime() - replayMs).toISOString(), cursor],
+      );
+      snapshot[name] = result.rows.map((row) => ({
+        ...(row.data as StoredRecord),
+        status: String(row.status || (row.data as StoredRecord).status || "SINCRONIZADA"),
+      }));
+    }
+    const removed = await pool.query(
+      reconcile
+        ? "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[])"
+        : "SELECT collection,record_id FROM app_storage_tombstones WHERE collection = ANY($1::text[]) AND deleted_at >= $2::timestamptz",
+      reconcile
+        ? [["sales", "attendance", "movements"]]
+        : [["sales", "attendance", "movements"], new Date(since.getTime() - replayMs).toISOString()],
+    );
+    const deleted = { sales: [] as string[], attendance: [] as string[], movements: [] as string[] };
+    for (const row of removed.rows) {
+      const collection = String(row.collection) as keyof typeof deleted;
+      if (collection in deleted) deleted[collection].push(String(row.record_id));
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ cursor, snapshot, deleted });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to read incremental operational changes");
+    res.status(500).json({ message: "No se pudieron consultar los cambios operativos." });
+  }
+});
+
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
     res.json({
       storage: "digitalocean-postgresql",
       stockSource: "warehouses",
+      syncCursor: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
     });

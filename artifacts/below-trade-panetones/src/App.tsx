@@ -13407,6 +13407,7 @@ export default function App() {
   );
   const [referencesReady, setReferencesReady] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
+  const operationalCursorRef = useRef<string | null>(null);
   const [cloudSyncTick, setCloudSyncTick] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
   const [promoterSession, setPromoterSession] = useState({
@@ -13562,9 +13563,11 @@ export default function App() {
           throw new Error("Sincronización inicial no disponible");
         const payload = (await response.json()) as {
           catalogRevision?: string | null;
+          syncCursor?: string;
           snapshot?: Partial<CloudSnapshot>;
         };
         if (cancelled || !payload.snapshot) return;
+        if (payload.syncCursor) operationalCursorRef.current = payload.syncCursor;
         if (payload.catalogRevision)
           safeStorageSet(
             CATALOG_REVISION_STORE_KEY,
@@ -13696,17 +13699,23 @@ export default function App() {
       return;
     let cancelled = false;
     let refreshing = false;
+    let lastReconciliationAt = 0;
     const refreshOperationalSnapshot = async () => {
       if (!navigator.onLine || refreshing || document.visibilityState === "hidden")
         return;
       refreshing = true;
       try {
-        const response = await fetch(APP_STORAGE_READ, { cache: "no-store" });
-        if (!response.ok) throw new Error("Datos operativos no disponibles");
+        const since = operationalCursorRef.current;
+        if (!since) return; // Initial full hydration must finish before incremental polling.
+        const reconcile = Date.now() - lastReconciliationAt >= 15 * 60 * 1000;
+        const response = await fetch(`/api/app-storage/operational-changes?since=${encodeURIComponent(since)}${reconcile ? "&reconcile=1" : ""}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Cambios operativos no disponibles");
         const payload = (await response.json()) as {
+          cursor?: string;
           snapshot?: Partial<CloudSnapshot>;
+          deleted?: { sales?: string[]; attendance?: string[]; movements?: string[] };
         };
-        if (cancelled || !payload.snapshot) return;
+        if (cancelled || !payload.snapshot || !payload.cursor) return;
         const cloudSales = Array.isArray(payload.snapshot.sales)
           ? payload.snapshot.sales
           : [];
@@ -13718,25 +13727,30 @@ export default function App() {
           : [];
 
         setSales((current) => {
-          const next = mergeSales(current, cloudSales);
+          const removed = new Set(payload.deleted?.sales || []);
+          const next = mergeSales(current, cloudSales).filter((item) => !removed.has(item.id));
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-sales", next);
           return next;
         });
         if (Array.isArray(payload.snapshot.attendance)) {
           setAttendance((current) => {
-            const next = mergeAttendance(current, cloudAttendance);
+            const removed = new Set(payload.deleted?.attendance || []);
+          const next = mergeAttendance(current, cloudAttendance).filter((item) => !removed.has(item.id));
             if (JSON.stringify(next) === JSON.stringify(current)) return current;
             writeStore("bt-attendance", next);
             return next;
           });
         }
         setMovements((current) => {
-          const next = mergeMovements(current, cloudMovements);
+          const removed = new Set(payload.deleted?.movements || []);
+          const next = mergeMovements(current, cloudMovements).filter((item) => !removed.has(item.id));
           if (JSON.stringify(next) === JSON.stringify(current)) return current;
           writeStore("bt-inventory-movements", next);
           return next;
         });
+        operationalCursorRef.current = payload.cursor;
+        if (reconcile) lastReconciliationAt = Date.now();
       } catch {
         // Conserva la última vista válida; el siguiente ciclo reintentará.
       } finally {
@@ -13751,7 +13765,7 @@ export default function App() {
     };
 
     void refreshOperationalSnapshot();
-    const interval = window.setInterval(refreshOperationalSnapshot, 10_000);
+    const interval = window.setInterval(refreshOperationalSnapshot, 30_000);
     window.addEventListener("focus", onFocus);
     window.addEventListener("online", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
