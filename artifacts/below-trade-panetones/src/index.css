@@ -5582,3 +5582,31 @@ select:focus-visible,
     display: none;
   }
 }
+
+/* Filtros en cascada (Región → Ciudad → Mercado → Cliente → Promotor + fechas) */
+.cascade-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px 10px;
+  align-items: end;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid hsl(var(--line));
+  border-radius: 12px;
+  background: hsl(var(--surface));
+}
+.cascade-bar .field { margin: 0; min-width: 0; }
+.cascade-bar .select, .cascade-bar .input { width: 100%; min-height: 38px; }
+.cascade-summary {
+  grid-column: 1 / -1;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+@media (max-width: 700px) {
+  .cascade-bar { grid-template-columns: 1fr 1fr; padding: 10px; }
+}
