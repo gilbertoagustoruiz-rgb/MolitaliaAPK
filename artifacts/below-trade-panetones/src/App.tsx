@@ -653,6 +653,15 @@ function removeStoredPassword(dni: string) {
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
+// Refresco del catálogo tras guardar en el panel: se agrupa para que varios
+// guardados seguidos generen una sola descarga (antes, una por cada guardado).
+let catalogRefreshTimer: number | undefined;
+function upsertById<T>(list: T[], record: T, key: (item: T) => string) {
+  const id = key(record);
+  return list.some((item) => key(item) === id)
+    ? list.map((item) => (key(item) === id ? { ...item, ...record } : item))
+    : [...list, record];
+}
 const EVIDENCE_PHOTO_UPLOAD = "/api/evidence-photos";
 const PRODUCT_PRICES_STORE_KEY = "bt-product-prices";
 const CATEGORIES_STORE_KEY = "bt-client-categories";
@@ -3742,8 +3751,11 @@ function NewUserModal({
     password.length >= 3 &&
     (!isZoneManagerRole(role) || Boolean(marketId)) &&
     (role !== "CLIENTE" || Boolean(clientId));
+  // Evita el doble clic y muestra que se está guardando mientras responde el servidor.
+  const [saving, setSaving] = useState(false);
   const save = async () => {
-    if (!canSave) return;
+    if (!canSave || saving) return;
+    setSaving(true);
     const saved = await onSave({
       id: `USR-${Date.now()}`,
       dni,
@@ -3754,7 +3766,7 @@ function NewUserModal({
       clientId: role === "CLIENTE" ? clientId : undefined,
       password,
       status: "ACTIVO",
-    });
+    }).finally(() => setSaving(false));
     if (saved) close();
   };
   return (
@@ -3826,8 +3838,8 @@ function NewUserModal({
         <Btn variant="outline" onClick={close}>
           Cancelar
         </Btn>
-        <Btn disabled={!canSave} onClick={save} testId="button-create-user">
-          Crear usuario
+        <Btn disabled={!canSave || saving} onClick={save} testId="button-create-user">
+          {saving ? "Guardando..." : "Crear usuario"}
         </Btn>
       </div>
     </Modal>
@@ -3856,8 +3868,11 @@ function NewMarketModal({
   const [department, setDepartment] = useState("");
   const [province, setProvince] = useState("");
   const [district, setDistrict] = useState("");
+  // Evita el doble clic y muestra que se está guardando mientras responde el servidor.
+  const [saving, setSaving] = useState(false);
   const save = async () => {
     if (
+      saving ||
       !name.trim() ||
       !department.trim() ||
       !province.trim() ||
@@ -3865,6 +3880,7 @@ function NewMarketModal({
       !warehouseId
     )
       return;
+    setSaving(true);
     const saved = await onSave({
       id: `MKT-${Date.now()}`,
       name: name.trim().toUpperCase(),
@@ -3874,7 +3890,7 @@ function NewMarketModal({
       district: district.trim().toUpperCase(),
       status: "ACTIVO",
       warehouseId: warehouseId || undefined,
-    });
+    }).finally(() => setSaving(false));
     if (saved) close();
   };
   return (
@@ -3932,8 +3948,8 @@ function NewMarketModal({
         <Btn variant="outline" onClick={close}>
           Cancelar
         </Btn>
-        <Btn onClick={save} testId="button-create-market">
-          Guardar mercado
+        <Btn disabled={saving} onClick={save} testId="button-create-market">
+          {saving ? "Guardando..." : "Guardar mercado"}
         </Btn>
       </div>
     </Modal>
@@ -4880,8 +4896,11 @@ function NewClientModal({
     activeCategories[0]?.id || "",
   );
   const [marketId, setMarketId] = useState("");
+  // Evita el doble clic y muestra que se está guardando mientras responde el servidor.
+  const [saving, setSaving] = useState(false);
   const save = async () => {
-    if (!name.trim() || !marketId) return;
+    if (!name.trim() || !marketId || saving) return;
+    setSaving(true);
     const saved = await onSave({
       id: `${Date.now()}`,
       code: `CLI-${String(count + 1).padStart(6, "0")}`,
@@ -4890,7 +4909,7 @@ function NewClientModal({
       category,
       marketId,
       status: "ACTIVO",
-    });
+    }).finally(() => setSaving(false));
     if (saved) close();
   };
   return (
@@ -4934,8 +4953,8 @@ function NewClientModal({
         <Btn variant="outline" onClick={close}>
           Cancelar
         </Btn>
-        <Btn disabled={!category} onClick={save} testId="button-create-client">
-          Guardar cliente
+        <Btn disabled={!category || saving} onClick={save} testId="button-create-client">
+          {saving ? "Guardando..." : "Guardar cliente"}
         </Btn>
       </div>
     </Modal>
@@ -9070,7 +9089,7 @@ function AnalystApp({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ market }),
-        });
+        }, { refreshCatalog: false });
         count += 1;
       }
       if (!count) throw new Error("No se encontraron mercados válidos en el archivo.");
@@ -9395,7 +9414,11 @@ function AnalystApp({
       writeStore(CATEGORIES_STORE_KEY, snapshot.categories);
     }
   };
-  const adminRequest = async (path: string, init?: RequestInit) => {
+  const adminRequest = async (
+    path: string,
+    init?: RequestInit,
+    options: { refreshCatalog?: boolean } = {},
+  ) => {
     const headers = new Headers(init?.headers);
     headers.set("X-Admin-Dni", user.dni);
     headers.set("X-Admin-Key", sessionAdminKey(user));
@@ -9409,6 +9432,9 @@ function AnalystApp({
       message?: string;
       catalogRevision?: string | null;
       snapshot?: Partial<CloudSnapshot>;
+      market?: Market;
+      user?: AppUser;
+      client?: Client;
     };
     if (!response.ok)
       throw new Error(payload.message || "No se pudo guardar el cambio");
@@ -9422,15 +9448,20 @@ function AnalystApp({
     applyAdminSnapshot(payload.snapshot, removedSaleId);
     // Las altas de catálogos devuelven confirmación inmediata después del COMMIT.
     // La actualización del catálogo se consulta aparte, sin bloquear el cierre del modal.
-    if (!payload.snapshot && init?.method === "POST" &&
+    // El registro guardado ya se muestra al instante (ver save*); este refresco solo
+    // trae cambios de otros usuarios. Se agrupa y no se hace en importaciones masivas.
+    if (options.refreshCatalog !== false && !payload.snapshot && init?.method === "POST" &&
         ["/markets", "/clients", "/users", "/catalog/products", "/catalog/categories"].includes(path)) {
-      void fetch(APP_STORAGE_READ, { cache: "no-store" })
-        .then(async (refresh) => {
-          if (!refresh.ok) return;
-          const result = await refresh.json() as { snapshot?: Partial<CloudSnapshot> };
-          if (result.snapshot) applyAdminSnapshot(result.snapshot);
-        })
-        .catch((error) => console.warn("Catálogo pendiente de actualizar:", error));
+      window.clearTimeout(catalogRefreshTimer);
+      catalogRefreshTimer = window.setTimeout(() => {
+        void fetch(APP_STORAGE_READ, { cache: "no-store" })
+          .then(async (refresh) => {
+            if (!refresh.ok) return;
+            const result = await refresh.json() as { snapshot?: Partial<CloudSnapshot> };
+            if (result.snapshot) applyAdminSnapshot(result.snapshot);
+          })
+          .catch((error) => console.warn("Catálogo pendiente de actualizar:", error));
+      }, 2_000);
     }
     return payload;
   };
@@ -9501,11 +9532,16 @@ function AnalystApp({
   };
   const saveUser = async (newUser: AppUser) => {
     try {
-      await adminRequest("/users", {
+      const payload = await adminRequest("/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user: newUser }),
       });
+      // Se muestra al instante, sin la clave.
+      const { password: _password, ...publicNewUser } = newUser;
+      const nextUsers = upsertById(users, { ...publicNewUser, ...(payload.user || {}) } as AppUser, (item) => item.dni);
+      setUsers(nextUsers);
+      writeStore("bt-users", nextUsers);
       notify("Usuario creado y guardado en DigitalOcean");
       return true;
     } catch (error) {
@@ -9518,12 +9554,15 @@ function AnalystApp({
   };
   const saveMarket = async (market: Market) => {
     try {
-      await adminRequest("/markets", {
+      const payload = await adminRequest("/markets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ market }),
       });
-      writeStore("bt-markets", [...markets, market]);
+      // Se muestra al instante en la lista (antes aparecía recién con la descarga completa).
+      const nextMarkets = upsertById(markets, payload.market || market, (item) => item.id);
+      setMarkets(nextMarkets);
+      writeStore("bt-markets", nextMarkets);
       setModal(null);
       notify("Mercado creado como ACTIVO");
       return true;
@@ -9558,11 +9597,15 @@ function AnalystApp({
   };
   const saveClient = async (client: Client) => {
     try {
-      await adminRequest("/clients", {
+      const payload = await adminRequest("/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client }),
       });
+      // Se muestra al instante en la lista.
+      const nextClients = upsertById(clients, payload.client || client, (item) => item.id);
+      setClients(nextClients);
+      writeStore("bt-clients", nextClients);
       notify("Cliente creado como ACTIVO");
       return true;
     } catch (error) {
@@ -9575,11 +9618,15 @@ function AnalystApp({
   };
   const saveClientEdit = async (client: Client) => {
     try {
-      await adminRequest("/clients", {
+      const payload = await adminRequest("/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client }),
       });
+      // Se muestra al instante en la lista.
+      const nextClients = upsertById(clients, payload.client || client, (item) => item.id);
+      setClients(nextClients);
+      writeStore("bt-clients", nextClients);
       notify(`Cliente actualizado: ${client.name}`);
       return true;
     } catch (error) {
@@ -9620,6 +9667,9 @@ function AnalystApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ record }),
       });
+      const nextProducts = upsertById(productPrices, record, (item) => item.sku);
+      setProductPrices(nextProducts);
+      writeStore(PRODUCT_PRICES_STORE_KEY, nextProducts);
       notify(`Producto guardado: ${record.product}`);
       return true;
     } catch (error) {
@@ -9639,6 +9689,9 @@ function AnalystApp({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ record }),
       });
+      const nextCategories = upsertById(categories, record, (item) => item.id);
+      setCategories(nextCategories);
+      writeStore(CATEGORIES_STORE_KEY, nextCategories);
       notify(`Categoría guardada: ${record.name}`);
       return true;
     } catch (error) {

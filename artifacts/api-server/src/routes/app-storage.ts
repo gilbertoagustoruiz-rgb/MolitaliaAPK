@@ -1128,6 +1128,25 @@ async function validateNewAttendance(
   return { role, campaignDay };
 }
 
+// Tope de sincronizaciones simultáneas. Las que exceden esperan aquí, en memoria,
+// SIN tomar una conexión de la base: así siempre quedan conexiones libres para el
+// panel (crear mercados, clientes, usuarios) y para las lecturas. Antes, una fila
+// de sincronizaciones podía ocupar todo el pool y dejar colgado cualquier guardado.
+const SYNC_CONCURRENCY = Math.max(1, Math.floor(Number(process.env.SYNC_CONCURRENCY) || 4));
+let activeSyncs = 0;
+const syncWaiters: Array<() => void> = [];
+async function withSyncSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeSyncs < SYNC_CONCURRENCY) activeSyncs += 1;
+  else await new Promise<void>((resolve) => syncWaiters.push(resolve)); // recibe el cupo liberado
+  try {
+    return await task();
+  } finally {
+    const next = syncWaiters.shift();
+    if (next) next(); // el cupo pasa directo al siguiente en espera
+    else activeSyncs -= 1;
+  }
+}
+
 async function syncSnapshot(
   incoming: Partial<StorageSnapshot>,
   incomingRevision?: string | null,
@@ -3684,12 +3703,12 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       res.status(403).json({ code: "WRITE_NOT_ALLOWED", message: denied });
       return;
     }
-    const snapshot = await syncSnapshot(
+    const snapshot = await withSyncSlot(() => syncSnapshot(
       incoming as Partial<StorageSnapshot>,
       incomingRevision,
       req.body?.compactAttendance === true && Array.isArray(incoming.attendance) && incoming.attendance.length === 1 && Object.keys(incoming).every((key) => key === "attendance"),
       req.body?.compactSale === true && Array.isArray(incoming.sales) && incoming.sales.length === 1 && Object.keys(incoming).every((key) => key === "sales"),
-    );
+    ));
     res.json({
       storage: "digitalocean-postgresql",
       syncedAt: new Date().toISOString(),
