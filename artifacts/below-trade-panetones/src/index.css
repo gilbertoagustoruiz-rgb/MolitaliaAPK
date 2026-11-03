@@ -5488,3 +5488,97 @@ select:focus-visible,
   margin: 2px 0 0;
   font-weight: 700;
 }
+
+/* ==========================================================================
+   Densidad (2026-11): menos espacio vacío en paneles de escritorio.
+   ========================================================================== */
+.page-head-slim {
+  margin-bottom: 10px;
+}
+.page-head-slim .page-head-greeting {
+  display: none;
+}
+@media (min-width: 701px) {
+  .workspace {
+    padding-top: 22px;
+  }
+  .panel-header {
+    padding: 14px 20px;
+  }
+  .panel-header h2 {
+    margin-bottom: 2px;
+  }
+  .panel-body {
+    padding: 16px 20px;
+  }
+  /* Buscador en una franja: campo a la izquierda; ayuda y conteo a la derecha. */
+  .table-search {
+    display: grid;
+    grid-template-columns: minmax(280px, 560px) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    column-gap: 18px;
+    row-gap: 2px;
+    align-items: end;
+    max-width: none;
+    margin: 0 0 12px;
+    padding: 0;
+  }
+  .table-search-label {
+    grid-row: 1 / 3;
+    gap: 6px;
+  }
+  .table-search-detail {
+    grid-column: 2;
+    margin: 0;
+  }
+  .table-search > small[role="status"] {
+    grid-column: 2;
+    font-weight: 600;
+    color: hsl(var(--ink));
+  }
+  /* Filas de tabla más bajas. */
+  .module-table-row {
+    min-height: 54px;
+  }
+  .module-table-row.module-table-header {
+    min-height: 34px;
+  }
+  .module-table-row > span {
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+  .module-table-row .photo-thumbnail,
+  .module-table-row .sales-evidence .photo-thumbnail {
+    width: 48px;
+    min-height: 48px;
+  }
+  .module-table-row .photo-thumbnail img,
+  .module-table-row .sales-evidence .photo-thumbnail img {
+    width: 48px;
+    height: 48px;
+  }
+  .module-table-row .photo-thumbnail small {
+    padding: 2px 3px;
+    font-size: 8px;
+  }
+  .module-table-actions {
+    gap: 4px;
+  }
+  .module-table-actions .btn {
+    min-height: 26px;
+    padding: 3px 7px;
+  }
+}
+.role-scope {
+  margin: 0;
+  color: hsl(var(--muted));
+  font-size: 13px;
+}
+.top-user-info strong {
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .top-user-info {
+    display: none;
+  }
+}
