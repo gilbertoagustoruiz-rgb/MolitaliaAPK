@@ -556,6 +556,100 @@ function installSessionFetch() {
   };
 }
 installSessionFetch();
+
+// Ingreso sin señal sin guardar la clave: se guarda una huella irreversible
+// (PBKDF2-SHA256 con sal aleatoria) de quien ya ingresó con señal en este
+// dispositivo. Al ingresar sin señal se compara la huella de lo que se escribe.
+const OFFLINE_VERIFIERS_KEY = "bt-offline-verifiers";
+const OFFLINE_VERIFIER_ITERATIONS = 150_000;
+type OfflineVerifier = { salt: string; hash: string; iterations: number; user: AppUser };
+// Clave tecleada en un ingreso sin señal: solo en memoria, para obtener el pase
+// al recuperar la conexión. Nunca se escribe en el almacenamiento.
+let offlineCredential: { dni: string; password: string } | null = null;
+function setOfflineCredential(value: { dni: string; password: string } | null) {
+  offlineCredential = value;
+}
+function readOfflineCredential(dni: string) {
+  return offlineCredential?.dni === dni ? offlineCredential.password : "";
+}
+function bytesToBase64(bytes: Uint8Array) {
+  let text = "";
+  bytes.forEach((byte) => {
+    text += String.fromCharCode(byte);
+  });
+  return btoa(text);
+}
+async function derivePasswordHash(password: string, saltBase64: string, iterations: number) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const salt = Uint8Array.from(atob(saltBase64), (char) => char.charCodeAt(0));
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    key,
+    256,
+  );
+  return bytesToBase64(new Uint8Array(bits));
+}
+function offlineVerifiers() {
+  return readStore<Record<string, OfflineVerifier>>(OFFLINE_VERIFIERS_KEY, {});
+}
+function hasOfflineVerifier(dni: string) {
+  return Boolean(offlineVerifiers()[dni]);
+}
+/** Guarda la huella tras un ingreso confirmado. Devuelve false si el navegador no
+ * permite calcularla (entonces se conserva el comportamiento anterior). */
+async function rememberOfflineLogin(user: AppUser, password: string) {
+  try {
+    if (!globalThis.crypto?.subtle || !user.dni || !password) return false;
+    const salt = bytesToBase64(crypto.getRandomValues(new Uint8Array(16)));
+    const hash = await derivePasswordHash(password, salt, OFFLINE_VERIFIER_ITERATIONS);
+    const { password: _password, ...publicUser } = user;
+    writeStore(OFFLINE_VERIFIERS_KEY, {
+      ...offlineVerifiers(),
+      [user.dni]: { salt, hash, iterations: OFFLINE_VERIFIER_ITERATIONS, user: publicUser },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function verifyOfflineLogin(dni: string, password: string) {
+  const verifier = offlineVerifiers()[dni];
+  if (!verifier || !globalThis.crypto?.subtle) return null;
+  try {
+    const hash = await derivePasswordHash(password, verifier.salt, verifier.iterations);
+    return hash === verifier.hash ? verifier.user : null;
+  } catch {
+    return null;
+  }
+}
+/** Borra la clave en texto plano de quien ya tiene huella y pase. Solo toca a
+ * esa persona: claves de usuarios importados que aún no se suben no se tocan. */
+function removeStoredPassword(dni: string) {
+  if (!hasOfflineVerifier(dni) || !readSessionToken()) return false;
+  const session = readStore<AppUser | null>("bt-session", null);
+  if (session?.dni === dni && session.password) {
+    const { password: _password, ...rest } = session;
+    writeStore("bt-session", rest);
+  }
+  const users = readStore<AppUser[]>("bt-users", []);
+  if (users.some((item) => item.dni === dni && item.password)) {
+    writeStore(
+      "bt-users",
+      users.map((item) => {
+        if (item.dni !== dni) return item;
+        const { password: _password, ...rest } = item;
+        return rest;
+      }),
+    );
+  }
+  return true;
+}
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
@@ -3124,18 +3218,32 @@ function Login({
           return;
         }
         writeSessionToken(payload.token || "");
-        const user = { ...payload.user, password };
+        // Con huella y pase, la clave ya no se guarda en el dispositivo.
+        const remembered = Boolean(payload.token) && (await rememberOfflineLogin(payload.user, password));
+        const user = remembered ? { ...payload.user } : { ...payload.user, password };
         writeStore("bt-session", user);
+        if (remembered) removeStoredPassword(user.dni);
         onLogin(user);
         return;
       }
-      const user =
-        users.find(
-          (item) =>
-            item.dni === dni &&
-            item.password === password &&
-            item.status === "ACTIVO",
-        ) || null;
+      const verified = await verifyOfflineLogin(dni, password);
+      const legacyUser = verified
+        ? null
+        : users.find(
+            (item) =>
+              item.dni === dni &&
+              item.password === password &&
+              item.status === "ACTIVO",
+          ) || null;
+      const catalogUser = users.find((item) => item.dni === dni);
+      const user = verified
+        ? catalogUser && !isArchivedUser(catalogUser) && catalogUser.status !== "INACTIVO"
+          ? { ...verified, ...catalogUser, password: undefined }
+          : catalogUser
+            ? null
+            : verified
+        : legacyUser;
+      if (user) setOfflineCredential({ dni, password });
       if (!user) {
         notify(
           "Sin conexión: usa una cuenta que ya haya ingresado en este dispositivo",
@@ -14295,20 +14403,53 @@ export default function App() {
   useEffect(() => {
     if (!user?.dni) return;
     let cancelled = false;
+    const dni = user.dni;
+    // Con pase y huella guardada, la clave en texto plano se borra del
+    // dispositivo y del estado de la app (si no, el estado la volvería a escribir).
+    const forgetPlainPassword = async (password: string) => {
+      if (!readSessionToken()) return;
+      if (!hasOfflineVerifier(dni) && password) {
+        const session = readStore<AppUser | null>("bt-session", null);
+        const base = session?.dni === dni ? session : user;
+        if (!(await rememberOfflineLogin(base, password))) return;
+      }
+      if (cancelled || !removeStoredPassword(dni)) return;
+      setOfflineCredential(null);
+      const strip = (item: AppUser) => {
+        if (item.dni !== dni || !item.password) return item;
+        const { password: _password, ...rest } = item;
+        return rest;
+      };
+      setUsers((current) =>
+        current.some((item) => item.dni === dni && item.password) ? current.map(strip) : current,
+      );
+      setUser((current) => (current && current.dni === dni && current.password ? strip(current) : current));
+    };
     const acquire = async () => {
-      if (cancelled || readSessionToken() || !navigator.onLine) return;
+      if (cancelled) return;
       const session = readStore<AppUser | null>("bt-session", null);
-      const password = session?.dni === user.dni ? session.password : user.password;
-      if (!password) return;
+      const password =
+        readOfflineCredential(dni) ||
+        (session?.dni === dni ? session.password : undefined) ||
+        user.password ||
+        "";
+      if (readSessionToken()) {
+        await forgetPlainPassword(password);
+        return;
+      }
+      if (!password || !navigator.onLine) return;
       try {
         const response = await fetch(APP_STORAGE_LOGIN, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dni: user.dni, password }),
+          body: JSON.stringify({ dni, password }),
         });
         const payload = (await response.json().catch(() => ({}))) as { token?: string };
         if (cancelled) return;
-        if (response.ok && payload.token) writeSessionToken(payload.token);
+        if (response.ok && payload.token) {
+          writeSessionToken(payload.token);
+          await forgetPlainPassword(password);
+        }
         // Clave cambiada o usuario desactivado por un admin: pedir nuevo ingreso.
         else if (response.status === 401)
           window.dispatchEvent(new CustomEvent("bt-session-expired"));
