@@ -13699,6 +13699,7 @@ export default function App() {
       return;
     let cancelled = false;
     let refreshing = false;
+    let lastReconciliationAt = 0;
     const refreshOperationalSnapshot = async () => {
       if (!navigator.onLine || refreshing || document.visibilityState === "hidden")
         return;
@@ -13706,7 +13707,8 @@ export default function App() {
       try {
         const since = operationalCursorRef.current;
         if (!since) return; // Initial full hydration must finish before incremental polling.
-        const response = await fetch(`/api/app-storage/operational-changes?since=${encodeURIComponent(since)}`, { cache: "no-store" });
+        const reconcile = Date.now() - lastReconciliationAt >= 15 * 60 * 1000;
+        const response = await fetch(`/api/app-storage/operational-changes?since=${encodeURIComponent(since)}${reconcile ? "&reconcile=1" : ""}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Cambios operativos no disponibles");
         const payload = (await response.json()) as {
           cursor?: string;
@@ -13748,6 +13750,7 @@ export default function App() {
           return next;
         });
         operationalCursorRef.current = payload.cursor;
+        if (reconcile) lastReconciliationAt = Date.now();
       } catch {
         // Conserva la última vista válida; el siguiente ciclo reintentará.
       } finally {
