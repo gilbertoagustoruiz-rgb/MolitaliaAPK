@@ -501,6 +501,7 @@ const LOCAL_WAREHOUSE_DEMO = import.meta.env.DEV && window.location.hostname ===
 const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
 const APP_STORAGE_VERIFY_IDS = "/api/app-storage/verify-ids";
+const APP_STORAGE_RECORD_PHOTO = "/api/app-storage/records/photo";
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
@@ -951,6 +952,55 @@ type PendingPhotoUpload = {
   mimeType: string;
   blob: Blob;
 };
+// URLs de fotos de la cola que deben quedar enlazadas en PostgreSQL aunque el
+// registro ya se haya sincronizado sin ellas. Se guardan en el dispositivo hasta
+// que el servidor confirma, así no se pierden si no hay señal.
+const PHOTO_LINK_STORE_KEY = "bt-pending-photo-links";
+type PendingPhotoLink = Pick<PendingPhotoUpload, "entityType" | "entityId" | "field"> & {
+  url: string;
+};
+function queuePhotoLink(link: PendingPhotoLink) {
+  const current = readStore<PendingPhotoLink[]>(PHOTO_LINK_STORE_KEY, []).filter(
+    (item) =>
+      !(item.entityType === link.entityType &&
+        item.entityId === link.entityId &&
+        item.field === link.field),
+  );
+  writeStore(PHOTO_LINK_STORE_KEY, [...current, link]);
+}
+async function flushPhotoLinks() {
+  const pending = readStore<PendingPhotoLink[]>(PHOTO_LINK_STORE_KEY, []);
+  if (!pending.length || !navigator.onLine) return;
+  const done = new Set<PendingPhotoLink>();
+  for (const link of pending) {
+    try {
+      const response = await fetch(APP_STORAGE_RECORD_PHOTO, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(link),
+      });
+      // 200: guardada o el registro ya tenía foto. 404: el registro aún no está
+      // en el servidor; la URL ya va en el registro local y viaja con su sync.
+      // 400: datos inválidos que no mejorarán con reintentos.
+      if (response.ok || response.status === 404 || response.status === 400) done.add(link);
+      else break;
+    } catch {
+      break;
+    }
+  }
+  if (!done.size) return;
+  const remaining = readStore<PendingPhotoLink[]>(PHOTO_LINK_STORE_KEY, []).filter(
+    (item) =>
+      ![...done].some(
+        (sent) =>
+          sent.entityType === item.entityType &&
+          sent.entityId === item.entityId &&
+          sent.field === item.field &&
+          sent.url === item.url,
+      ),
+  );
+  writeStore(PHOTO_LINK_STORE_KEY, remaining);
+}
 const PHOTO_QUEUE_DB = "below-trade-photo-queue";
 const PHOTO_QUEUE_STORE = "uploads";
 function openPhotoQueue() {
@@ -13453,6 +13503,14 @@ export default function App() {
         return next;
       });
     }
+    // Enlaza la URL en PostgreSQL sin reenviar el registro completo, para no
+    // pisar ediciones posteriores ni depender de que siga "pendiente".
+    queuePhotoLink({
+      entityType: upload.entityType,
+      entityId: upload.entityId,
+      field: upload.field,
+      url,
+    });
     setCloudSyncTick((value) => value + 1);
   };
   const flushEvidencePhotos = async () => {
@@ -13499,6 +13557,7 @@ export default function App() {
           break;
         }
       }
+      await flushPhotoLinks();
     } finally {
       photoUploadRunning.current = false;
     }

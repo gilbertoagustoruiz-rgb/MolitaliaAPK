@@ -3344,6 +3344,58 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
   }
 });
 
+// Completa la URL de una foto subida después de que el registro ya se sincronizó
+// (fotos que quedaron en la cola del celular). Solo escribe esa foto y solo si el
+// registro aún no tiene una: nunca reemplaza otra foto ni pisa ediciones del
+// registro hechas por un administrador. Un registro eliminado no existe y no se crea.
+const photoTargets: Record<string, Record<string, string>> = {
+  sale: { receiptPhoto: "receipt_photo", exchangePhoto: "exchange_photo" },
+  attendance: { photo: "photo" },
+};
+const evidencePhotoUrl =
+  /^(https?:\/\/[^/\s]+)?\/api\/evidence-photos\/(storage|drive)\/[A-Za-z0-9_-]+$/;
+
+router.post("/app-storage/records/photo", async (req, res): Promise<void> => {
+  const entityType = String(req.body?.entityType || "");
+  const field = String(req.body?.field || "");
+  const entityId = String(req.body?.entityId || "").trim();
+  const url = String(req.body?.url || "").trim();
+  const column = photoTargets[entityType]?.[field];
+  if (!column || !entityId || !evidencePhotoUrl.test(url)) {
+    res.status(400).json({ message: "Datos de fotografía inválidos." });
+    return;
+  }
+  const table = entityType === "sale" ? "sales" : "attendance";
+  try {
+    const updated = await pool.query(
+      `UPDATE ${table}
+          SET ${column}=$2,
+              data=jsonb_set(COALESCE(data,'{}'::jsonb),$3::text[],to_jsonb($2::text),true),
+              updated_at=now()
+        WHERE id=$1 AND COALESCE(${column},'')=''
+        RETURNING id`,
+      [entityId, url, [field]],
+    );
+    if (updated.rows.length) {
+      bumpDataVersion();
+      res.json({ status: "saved" });
+      return;
+    }
+    const current = await pool.query(
+      `SELECT ${column} AS photo FROM ${table} WHERE id=$1 LIMIT 1`,
+      [entityId],
+    );
+    if (!current.rows.length) {
+      res.status(404).json({ status: "missing", message: "El registro aún no existe en PostgreSQL." });
+      return;
+    }
+    res.json({ status: current.rows[0].photo === url ? "unchanged" : "kept-existing" });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to attach evidence photo");
+    res.status(500).json({ message: "No se pudo guardar la fotografía en el registro." });
+  }
+});
+
 // Verificación del botón "Sincronizar": el celular envía los IDs que tiene como
 // sincronizados y el servidor responde cuáles no existen. Reemplaza descargar
 // la base completa solo para comparar IDs. Respeta los registros eliminados.
