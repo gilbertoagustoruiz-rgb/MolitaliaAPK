@@ -7,6 +7,7 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
+import { bumpDataVersion, cachedJson } from "../lib/read-cache";
 import { Router, type IRouter, type Request } from "express";
 
 const router: IRouter = Router();
@@ -16,6 +17,9 @@ const campaignTimeZone = "America/Lima";
 // repetía la misma consulta y transacción todo el día; cada 10 min sigue cubriendo
 // marcaciones que sincronizan tarde sin cargar la base.
 const automaticClosureIntervalMs = 10 * 60 * 1000;
+// Antigüedad máxima de una lectura en caché si una escritura no pasó por este
+// proceso. Las escrituras de la propia API la invalidan al instante.
+const READ_CACHE_TTL_MS = 15_000;
 const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
 const miniHalfPlanchaSkus = new Set([
   "TODINNITO-85",
@@ -502,6 +506,7 @@ async function createAutomaticClosuresForDay(day: string) {
       created += 1;
     }
     await client.query("COMMIT");
+    if (created) bumpDataVersion();
   } catch (error) {
     await client.query("ROLLBACK");
     console.error(`Unable to create automatic closures for ${day}`, error);
@@ -1210,6 +1215,8 @@ async function syncSnapshot(
       }
     }
     await client.query("COMMIT");
+    // Invalida la caché aunque el celular haya cortado la conexión antes.
+    bumpDataVersion();
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -3264,19 +3271,22 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
 // Catálogos ligeros para habilitar la selección de visita sin esperar ventas y fotos.
 router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
   try {
-    const [markets, clients, assignments, revision] = await Promise.all([
-      pool.query("SELECT data FROM markets"),
-      pool.query("SELECT data FROM clients"),
-      pool.query("SELECT data FROM assignments"),
-      readCatalogRevision(),
-    ]);
-    res.setHeader("Cache-Control", "no-store");
-    res.json({
-      catalogRevision: revision,
-      markets: markets.rows.map((row) => row.data),
-      clients: clients.rows.map((row) => row.data),
-      assignments: assignments.rows.map((row) => row.data),
+    const body = await cachedJson("visit-catalog", READ_CACHE_TTL_MS, async () => {
+      const [markets, clients, assignments, revision] = await Promise.all([
+        pool.query("SELECT data FROM markets"),
+        pool.query("SELECT data FROM clients"),
+        pool.query("SELECT data FROM assignments"),
+        readCatalogRevision(),
+      ]);
+      return {
+        catalogRevision: revision,
+        markets: markets.rows.map((row) => row.data),
+        clients: clients.rows.map((row) => row.data),
+        assignments: assignments.rows.map((row) => row.data),
+      };
     });
+    res.setHeader("Cache-Control", "no-store");
+    res.type("application/json").send(body);
   } catch (error) {
     req.log.error({ err: error }, "Unable to read visit catalog");
     res.status(500).json({ message: "No se pudieron cargar mercados y clientes." });
@@ -3334,15 +3344,55 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
   }
 });
 
+// Verificación del botón "Sincronizar": el celular envía los IDs que tiene como
+// sincronizados y el servidor responde cuáles no existen. Reemplaza descargar
+// la base completa solo para comparar IDs. Respeta los registros eliminados.
+router.post("/app-storage/verify-ids", async (req, res): Promise<void> => {
+  const toIds = (input: unknown) =>
+    Array.isArray(input)
+      ? [...new Set(input.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 50_000)
+      : [];
+  const salesIds = toIds(req.body?.sales);
+  const attendanceIds = toIds(req.body?.attendance);
+  try {
+    const [sales, attendance] = await Promise.all([
+      salesIds.length
+        ? pool.query("SELECT id FROM sales WHERE id = ANY($1::text[])", [salesIds])
+        : { rows: [] as Array<Record<string, unknown>> },
+      attendanceIds.length
+        ? pool.query("SELECT id FROM attendance WHERE id = ANY($1::text[])", [attendanceIds])
+        : { rows: [] as Array<Record<string, unknown>> },
+    ]);
+    const foundSales = new Set(sales.rows.map((row) => String(row.id)));
+    const foundAttendance = new Set(attendance.rows.map((row) => String(row.id)));
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      missing: {
+        sales: salesIds.filter((id) => !foundSales.has(id)),
+        attendance: attendanceIds.filter((id) => !foundAttendance.has(id)),
+      },
+      checked: { sales: salesIds.length, attendance: attendanceIds.length },
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to verify synchronized ids");
+    res.status(500).json({ message: "No se pudo verificar el historial en PostgreSQL." });
+  }
+});
+
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
-    res.json({
-      storage: "digitalocean-postgresql",
-      stockSource: "warehouses",
-      syncCursor: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    // El cursor se calcula en cada pedido; el snapshot y la revisión se toman
+    // de la caché (una sola lectura completa aunque muchos abran la app a la vez).
+    const syncCursor = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const cached = await cachedJson("full-snapshot", READ_CACHE_TTL_MS, async () => ({
       catalogRevision: await readCatalogRevision(),
       snapshot: await readSnapshot(),
-    });
+    }));
+    res
+      .type("application/json")
+      .send(
+        `{"storage":"digitalocean-postgresql","stockSource":"warehouses","syncCursor":${JSON.stringify(syncCursor)},${cached.slice(1)}`,
+      );
   } catch (error) {
     req.log.error({ err: error }, "Unable to read app storage");
     res.status(500).json({ message: "No se pudo leer PostgreSQL." });
@@ -3399,19 +3449,23 @@ router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> =
     const actor = credentials.rows[0];
     if (!actor || actor.status !== "ACTIVO" ||
         !["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"].includes(String(actor.role || "").toUpperCase()) ||
-        !actor.password_hash || !(await verifyPassword(password, actor.password_hash))) {
+        !actor.password_hash || !(await passwordMatchesStored(password, String(actor.password_hash)))) {
       res.status(403).json({ message: "No autorizado." });
       return;
     }
-    const rows = await pool.query(
-      "SELECT data,status FROM attendance WHERE promoter_id=$1 ORDER BY event_date DESC",
-      [String(actor.id)],
-    );
+    const promoterId = String(actor.id);
+    const body = await cachedJson(`promoter-attendance:${promoterId}`, READ_CACHE_TTL_MS, async () => {
+      const rows = await pool.query(
+        "SELECT data,status FROM attendance WHERE promoter_id=$1 ORDER BY event_date DESC",
+        [promoterId],
+      );
+      return { attendance: rows.rows.map((row) => ({
+        ...(row.data as StoredRecord),
+        status: String(row.status || "SINCRONIZADA"),
+      })) };
+    });
     res.setHeader("Cache-Control", "no-store");
-    res.json({ attendance: rows.rows.map((row) => ({
-      ...(row.data as StoredRecord),
-      status: String(row.status || "SINCRONIZADA"),
-    })) });
+    res.type("application/json").send(body);
   } catch (error) {
     req.log.error({ err: error }, "Unable to refresh promoter attendance");
     res.status(500).json({ message: "No se pudo actualizar la asistencia." });
@@ -3420,8 +3474,11 @@ router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> =
 
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
-    const result = await pool.query("SELECT data FROM assignments");
-    res.json({ storage: "digitalocean-postgresql", assignments: result.rows.map((row) => row.data) });
+    const body = await cachedJson("assignments", READ_CACHE_TTL_MS, async () => {
+      const result = await pool.query("SELECT data FROM assignments");
+      return { storage: "digitalocean-postgresql", assignments: result.rows.map((row) => row.data) };
+    });
+    res.type("application/json").send(body);
   } catch (error) {
     req.log.error({ err: error }, "Unable to read assignments");
     res.status(500).json({ message: "No se pudieron leer las asignaciones." });

@@ -500,6 +500,7 @@ type CloudSnapshot = {
 const LOCAL_WAREHOUSE_DEMO = import.meta.env.DEV && window.location.hostname === "localhost";
 const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
+const APP_STORAGE_VERIFY_IDS = "/api/app-storage/verify-ids";
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
@@ -13691,13 +13692,22 @@ export default function App() {
         // Se conserva la última asignación local válida.
       }
     };
+    // Cada 60 s (antes 15 s) y además al volver a la app, para que un cambio
+    // de asignación se vea en cuanto el promotor la abre.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshAssignments();
+    };
     void refreshAssignments();
-    const interval = window.setInterval(refreshAssignments, 15_000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void refreshAssignments();
+    }, 60_000);
     window.addEventListener("online", refreshAssignments);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("online", refreshAssignments);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [referencesReady]);
 
@@ -13706,7 +13716,9 @@ export default function App() {
       return;
     let cancelled = false;
     let refreshing = false;
-    let lastReconciliationAt = 0;
+    // La carga inicial ya trajo todo: la primera reconciliación completa
+    // espera una hora en lugar de repetirse apenas el admin entra.
+    let lastReconciliationAt = Date.now();
     const refreshOperationalSnapshot = async () => {
       if (!navigator.onLine || refreshing || document.visibilityState === "hidden")
         return;
@@ -13714,7 +13726,7 @@ export default function App() {
       try {
         const since = operationalCursorRef.current;
         if (!since) return; // Initial full hydration must finish before incremental polling.
-        const reconcile = Date.now() - lastReconciliationAt >= 15 * 60 * 1000;
+        const reconcile = Date.now() - lastReconciliationAt >= 60 * 60 * 1000;
         const response = await fetch(`/api/app-storage/operational-changes?since=${encodeURIComponent(since)}${reconcile ? "&reconcile=1" : ""}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Cambios operativos no disponibles");
         const payload = (await response.json()) as {
@@ -13940,20 +13952,25 @@ export default function App() {
             const controller = new AbortController();
             const timer = window.setTimeout(() => controller.abort(), 12_000);
             try {
-              const response = await fetch(APP_STORAGE_READ, {
-                cache: "no-store",
-                signal: controller.signal,
-              });
-              if (!response.ok) throw new Error("Consulta de historial no disponible");
-              const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
-              if (!Array.isArray(payload.snapshot?.sales) || !Array.isArray(payload.snapshot?.attendance))
-                throw new Error("Respuesta de historial incompleta");
-              const serverSales = new Set(payload.snapshot.sales.map((item) => item.id));
-              const serverAttendance = new Set(payload.snapshot.attendance.map((item) => item.id));
+              // Se envían solo los IDs sincronizados y el servidor responde los
+              // que no encuentra (antes se descargaba la base completa).
               const localSales = readStore<Sale[]>("bt-sales", []);
               const localAttendance = readStore<Attendance[]>("bt-attendance", []);
-              const missing = localSales.filter((item) => item.status === "SINCRONIZADA" && !serverSales.has(item.id)).length
-                + localAttendance.filter((item) => item.status === "SINCRONIZADA" && !serverAttendance.has(item.id)).length;
+              const response = await fetch(APP_STORAGE_VERIFY_IDS, {
+                method: "POST",
+                cache: "no-store",
+                headers: { "Content-Type": "application/json" },
+                signal: controller.signal,
+                body: JSON.stringify({
+                  sales: localSales.filter((item) => item.status === "SINCRONIZADA").map((item) => item.id),
+                  attendance: localAttendance.filter((item) => item.status === "SINCRONIZADA").map((item) => item.id),
+                }),
+              });
+              if (!response.ok) throw new Error("Consulta de historial no disponible");
+              const payload = await response.json() as { missing?: { sales?: string[]; attendance?: string[] } };
+              if (!Array.isArray(payload.missing?.sales) || !Array.isArray(payload.missing?.attendance))
+                throw new Error("Respuesta de historial incompleta");
+              const missing = payload.missing.sales.length + payload.missing.attendance.length;
               message = missing
                 ? `Atención: ${missing} registro(s) locales no aparecen en el historial del servidor. Contacta al analista; no los vuelvas a crear.`
                 : `Historial local contrastado con PostgreSQL: ${localSales.length} ventas y ${localAttendance.length} marcaciones sin faltantes detectados.`;
