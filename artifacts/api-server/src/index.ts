@@ -1,6 +1,9 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { ensureDatabaseSchema } from "@workspace/db/init";
+import {
+  ensureDatabaseSchema,
+  ensurePerformanceIndexes,
+} from "@workspace/db/init";
 
 const rawPort = process.env["PORT"];
 
@@ -25,4 +28,9 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // En segundo plano: no retrasa el arranque ni bloquea tablas.
+  void ensurePerformanceIndexes((message, error) =>
+    error ? logger.error({ err: error }, message) : logger.info(message),
+  );
 });

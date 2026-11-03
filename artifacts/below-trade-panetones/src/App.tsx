@@ -500,6 +500,156 @@ type CloudSnapshot = {
 const LOCAL_WAREHOUSE_DEMO = import.meta.env.DEV && window.location.hostname === "localhost";
 const APP_STORAGE_READ = "/api/app-storage";
 const APP_STORAGE_SYNC = "/api/app-storage/sync";
+const APP_STORAGE_VERIFY_IDS = "/api/app-storage/verify-ids";
+const APP_STORAGE_RECORD_PHOTO = "/api/app-storage/records/photo";
+
+// Pase de sesión: se recibe al iniciar sesión y viaja solo en cada petición a la
+// API (encabezado Authorization). El usuario no vuelve a escribir su clave; el
+// servidor lo renueva mientras la app se use.
+const SESSION_TOKEN_KEY = "bt-session-token";
+function readSessionToken() {
+  return safeStorageGet(SESSION_TOKEN_KEY) || "";
+}
+function writeSessionToken(token: string) {
+  if (token) safeStorageSet(SESSION_TOKEN_KEY, token);
+  else safeStorageRemove(SESSION_TOKEN_KEY);
+}
+function installSessionFetch() {
+  if (typeof window === "undefined") return;
+  const marker = window as unknown as { __btSessionFetch?: boolean };
+  if (marker.__btSessionFetch) return;
+  marker.__btSessionFetch = true;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    let isApi = false;
+    try {
+      const parsed = new URL(url, window.location.origin);
+      isApi = parsed.origin === window.location.origin && parsed.pathname.startsWith("/api/");
+    } catch {
+      isApi = false;
+    }
+    if (!isApi) return nativeFetch(input, init);
+    const token = readSessionToken();
+    let nextInit = init;
+    if (token) {
+      const headers = new Headers(
+        init?.headers ?? (input instanceof Request ? input.headers : undefined),
+      );
+      if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+      nextInit = { ...init, headers };
+    }
+    const response = await nativeFetch(input, nextInit);
+    const renewed = response.headers.get("X-Session-Token");
+    if (renewed) writeSessionToken(renewed);
+    if (response.status === 401 && !url.includes("/app-storage/login")) {
+      const code = await response
+        .clone()
+        .json()
+        .then((payload: { code?: string }) => payload?.code)
+        .catch(() => undefined);
+      if (code === "SESSION_REQUIRED" || code === "SESSION_INVALID")
+        window.dispatchEvent(new CustomEvent("bt-session-expired"));
+    }
+    return response;
+  };
+}
+installSessionFetch();
+
+// Ingreso sin señal sin guardar la clave: se guarda una huella irreversible
+// (PBKDF2-SHA256 con sal aleatoria) de quien ya ingresó con señal en este
+// dispositivo. Al ingresar sin señal se compara la huella de lo que se escribe.
+const OFFLINE_VERIFIERS_KEY = "bt-offline-verifiers";
+const OFFLINE_VERIFIER_ITERATIONS = 150_000;
+type OfflineVerifier = { salt: string; hash: string; iterations: number; user: AppUser };
+// Clave tecleada en un ingreso sin señal: solo en memoria, para obtener el pase
+// al recuperar la conexión. Nunca se escribe en el almacenamiento.
+let offlineCredential: { dni: string; password: string } | null = null;
+function setOfflineCredential(value: { dni: string; password: string } | null) {
+  offlineCredential = value;
+}
+function readOfflineCredential(dni: string) {
+  return offlineCredential?.dni === dni ? offlineCredential.password : "";
+}
+function bytesToBase64(bytes: Uint8Array) {
+  let text = "";
+  bytes.forEach((byte) => {
+    text += String.fromCharCode(byte);
+  });
+  return btoa(text);
+}
+async function derivePasswordHash(password: string, saltBase64: string, iterations: number) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const salt = Uint8Array.from(atob(saltBase64), (char) => char.charCodeAt(0));
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
+    key,
+    256,
+  );
+  return bytesToBase64(new Uint8Array(bits));
+}
+function offlineVerifiers() {
+  return readStore<Record<string, OfflineVerifier>>(OFFLINE_VERIFIERS_KEY, {});
+}
+function hasOfflineVerifier(dni: string) {
+  return Boolean(offlineVerifiers()[dni]);
+}
+/** Guarda la huella tras un ingreso confirmado. Devuelve false si el navegador no
+ * permite calcularla (entonces se conserva el comportamiento anterior). */
+async function rememberOfflineLogin(user: AppUser, password: string) {
+  try {
+    if (!globalThis.crypto?.subtle || !user.dni || !password) return false;
+    const salt = bytesToBase64(crypto.getRandomValues(new Uint8Array(16)));
+    const hash = await derivePasswordHash(password, salt, OFFLINE_VERIFIER_ITERATIONS);
+    const { password: _password, ...publicUser } = user;
+    writeStore(OFFLINE_VERIFIERS_KEY, {
+      ...offlineVerifiers(),
+      [user.dni]: { salt, hash, iterations: OFFLINE_VERIFIER_ITERATIONS, user: publicUser },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function verifyOfflineLogin(dni: string, password: string) {
+  const verifier = offlineVerifiers()[dni];
+  if (!verifier || !globalThis.crypto?.subtle) return null;
+  try {
+    const hash = await derivePasswordHash(password, verifier.salt, verifier.iterations);
+    return hash === verifier.hash ? verifier.user : null;
+  } catch {
+    return null;
+  }
+}
+/** Borra la clave en texto plano de quien ya tiene huella y pase. Solo toca a
+ * esa persona: claves de usuarios importados que aún no se suben no se tocan. */
+function removeStoredPassword(dni: string) {
+  if (!hasOfflineVerifier(dni) || !readSessionToken()) return false;
+  const session = readStore<AppUser | null>("bt-session", null);
+  if (session?.dni === dni && session.password) {
+    const { password: _password, ...rest } = session;
+    writeStore("bt-session", rest);
+  }
+  const users = readStore<AppUser[]>("bt-users", []);
+  if (users.some((item) => item.dni === dni && item.password)) {
+    writeStore(
+      "bt-users",
+      users.map((item) => {
+        if (item.dni !== dni) return item;
+        const { password: _password, ...rest } = item;
+        return rest;
+      }),
+    );
+  }
+  return true;
+}
 const APP_STORAGE_ASSIGNMENTS = "/api/app-storage/assignments";
 const APP_STORAGE_LOGIN = "/api/app-storage/login";
 const APP_STORAGE_ADMIN = "/api/app-storage/admin";
@@ -950,6 +1100,55 @@ type PendingPhotoUpload = {
   mimeType: string;
   blob: Blob;
 };
+// URLs de fotos de la cola que deben quedar enlazadas en PostgreSQL aunque el
+// registro ya se haya sincronizado sin ellas. Se guardan en el dispositivo hasta
+// que el servidor confirma, así no se pierden si no hay señal.
+const PHOTO_LINK_STORE_KEY = "bt-pending-photo-links";
+type PendingPhotoLink = Pick<PendingPhotoUpload, "entityType" | "entityId" | "field"> & {
+  url: string;
+};
+function queuePhotoLink(link: PendingPhotoLink) {
+  const current = readStore<PendingPhotoLink[]>(PHOTO_LINK_STORE_KEY, []).filter(
+    (item) =>
+      !(item.entityType === link.entityType &&
+        item.entityId === link.entityId &&
+        item.field === link.field),
+  );
+  writeStore(PHOTO_LINK_STORE_KEY, [...current, link]);
+}
+async function flushPhotoLinks() {
+  const pending = readStore<PendingPhotoLink[]>(PHOTO_LINK_STORE_KEY, []);
+  if (!pending.length || !navigator.onLine) return;
+  const done = new Set<PendingPhotoLink>();
+  for (const link of pending) {
+    try {
+      const response = await fetch(APP_STORAGE_RECORD_PHOTO, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(link),
+      });
+      // 200: guardada o el registro ya tenía foto. 404: el registro aún no está
+      // en el servidor; la URL ya va en el registro local y viaja con su sync.
+      // 400: datos inválidos que no mejorarán con reintentos.
+      if (response.ok || response.status === 404 || response.status === 400) done.add(link);
+      else break;
+    } catch {
+      break;
+    }
+  }
+  if (!done.size) return;
+  const remaining = readStore<PendingPhotoLink[]>(PHOTO_LINK_STORE_KEY, []).filter(
+    (item) =>
+      ![...done].some(
+        (sent) =>
+          sent.entityType === item.entityType &&
+          sent.entityId === item.entityId &&
+          sent.field === item.field &&
+          sent.url === item.url,
+      ),
+  );
+  writeStore(PHOTO_LINK_STORE_KEY, remaining);
+}
 const PHOTO_QUEUE_DB = "below-trade-photo-queue";
 const PHOTO_QUEUE_STORE = "uploads";
 function openPhotoQueue() {
@@ -3011,24 +3210,40 @@ function Login({
         });
         const payload = (await response.json()) as {
           user?: AppUser;
+          token?: string;
           message?: string;
         };
         if (!response.ok || !payload.user) {
           notify(payload.message || "DNI o clave incorrectos", true);
           return;
         }
-        const user = { ...payload.user, password };
+        writeSessionToken(payload.token || "");
+        // Con huella y pase, la clave ya no se guarda en el dispositivo.
+        const remembered = Boolean(payload.token) && (await rememberOfflineLogin(payload.user, password));
+        const user = remembered ? { ...payload.user } : { ...payload.user, password };
         writeStore("bt-session", user);
+        if (remembered) removeStoredPassword(user.dni);
         onLogin(user);
         return;
       }
-      const user =
-        users.find(
-          (item) =>
-            item.dni === dni &&
-            item.password === password &&
-            item.status === "ACTIVO",
-        ) || null;
+      const verified = await verifyOfflineLogin(dni, password);
+      const legacyUser = verified
+        ? null
+        : users.find(
+            (item) =>
+              item.dni === dni &&
+              item.password === password &&
+              item.status === "ACTIVO",
+          ) || null;
+      const catalogUser = users.find((item) => item.dni === dni);
+      const user = verified
+        ? catalogUser && !isArchivedUser(catalogUser) && catalogUser.status !== "INACTIVO"
+          ? { ...verified, ...catalogUser, password: undefined }
+          : catalogUser
+            ? null
+            : verified
+        : legacyUser;
+      if (user) setOfflineCredential({ dni, password });
       if (!user) {
         notify(
           "Sin conexión: usa una cuenta que ya haya ingresado en este dispositivo",
@@ -13420,6 +13635,13 @@ export default function App() {
   const photoUploadErrorShown = useRef(false);
   const photoContextRef = useRef({ sales, attendance, clients, markets });
   photoContextRef.current = { sales, attendance, clients, markets };
+  // Estado del ciclo de sincronización compartido entre renders: evita que dos
+  // ciclos envíen el mismo registro pendiente en paralelo.
+  const syncRunningRef = useRef(false);
+  const syncRetryRef = useRef(new Map<string, { attempts: number; nextAt: number }>());
+  const syncNowRef = useRef<(manual?: boolean) => Promise<void>>(async () => {});
+  const pendingSyncRef = useRef({ sales, attendance });
+  pendingSyncRef.current = { sales, attendance };
   const applyUploadedPhoto = (upload: PendingPhotoUpload, url: string) => {
     const updatedAt = new Date().toISOString();
     if (upload.entityType === "sale") {
@@ -13445,6 +13667,14 @@ export default function App() {
         return next;
       });
     }
+    // Enlaza la URL en PostgreSQL sin reenviar el registro completo, para no
+    // pisar ediciones posteriores ni depender de que siga "pendiente".
+    queuePhotoLink({
+      entityType: upload.entityType,
+      entityId: upload.entityId,
+      field: upload.field,
+      url,
+    });
     setCloudSyncTick((value) => value + 1);
   };
   const flushEvidencePhotos = async () => {
@@ -13491,6 +13721,7 @@ export default function App() {
           break;
         }
       }
+      await flushPhotoLinks();
     } finally {
       photoUploadRunning.current = false;
     }
@@ -13551,7 +13782,7 @@ export default function App() {
       cancelled = true;
       window.removeEventListener("online", retry);
     };
-  }, [referencesReady]);
+  }, [referencesReady, user?.id]);
 
   useEffect(() => {
     if (!referencesReady) return;
@@ -13564,9 +13795,22 @@ export default function App() {
         const payload = (await response.json()) as {
           catalogRevision?: string | null;
           syncCursor?: string;
+          dataScope?: string | null;
           snapshot?: Partial<CloudSnapshot>;
         };
         if (cancelled || !payload.snapshot) return;
+        // Si el servidor envió solo lo que le corresponde a este rol, se quitan del
+        // dispositivo los registros ya sincronizados de otros que quedaron de cargas
+        // anteriores. Los pendientes de enviar nunca se borran.
+        const scopedSnapshot = Boolean(payload.dataScope);
+        const keepLocal = <T extends { id: string; status?: string }>(
+          local: T[],
+          cloud: T[] | undefined,
+        ) => {
+          if (!scopedSnapshot || !Array.isArray(cloud)) return local;
+          const cloudIds = new Set(cloud.map((item) => item.id));
+          return local.filter((item) => item.status !== "SINCRONIZADA" || cloudIds.has(item.id));
+        };
         if (payload.syncCursor) operationalCursorRef.current = payload.syncCursor;
         if (payload.catalogRevision)
           safeStorageSet(
@@ -13594,14 +13838,17 @@ export default function App() {
           ? snapshot.clients
           : [];
         const cloudSales = Array.isArray(snapshot.sales) ? snapshot.sales : [];
-        const localSales = readStore<Sale[]>("bt-sales", []);
+        const localSales = keepLocal(readStore<Sale[]>("bt-sales", []), snapshot.sales);
         const nextSales = mergeSales(localSales, cloudSales).map((sale) =>
           enrichSaleMarketLocation(sale, nextMarkets),
         );
         const cloudAttendance = Array.isArray(snapshot.attendance)
           ? snapshot.attendance
           : [];
-        const localAttendance = readStore<Attendance[]>("bt-attendance", []);
+        const localAttendance = keepLocal(
+          readStore<Attendance[]>("bt-attendance", []),
+          snapshot.attendance,
+        );
         const nextAttendance = mergeAttendance(
           localAttendance,
           cloudAttendance,
@@ -13609,9 +13856,9 @@ export default function App() {
         const cloudMovements = Array.isArray(snapshot.movements)
           ? snapshot.movements
           : [];
-        const localMovements = readStore<InventoryMovement[]>(
-          "bt-inventory-movements",
-          [],
+        const localMovements = keepLocal(
+          readStore<InventoryMovement[]>("bt-inventory-movements", []),
+          snapshot.movements,
         );
         const nextMovements = mergeMovements(localMovements, cloudMovements);
         const nextInventory = reconcileInventory(
@@ -13662,7 +13909,9 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [referencesReady]);
+    // Se repite al iniciar sesión: con el pase llegan los datos de ese rol (y en
+    // modo bloqueo, la carga sin sesión antes del login no trae datos).
+  }, [referencesReady, user?.id]);
   useEffect(() => {
     if (!referencesReady) return;
     let cancelled = false;
@@ -13684,22 +13933,33 @@ export default function App() {
         // Se conserva la última asignación local válida.
       }
     };
+    // Cada 60 s (antes 15 s) y además al volver a la app, para que un cambio
+    // de asignación se vea en cuanto el promotor la abre.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshAssignments();
+    };
     void refreshAssignments();
-    const interval = window.setInterval(refreshAssignments, 15_000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void refreshAssignments();
+    }, 60_000);
     window.addEventListener("online", refreshAssignments);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("online", refreshAssignments);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [referencesReady]);
+  }, [referencesReady, user?.id]);
 
   useEffect(() => {
     if (!referencesReady || !user || isPromoterRole(user.role) || user.role === "CLIENTE")
       return;
     let cancelled = false;
     let refreshing = false;
-    let lastReconciliationAt = 0;
+    // La carga inicial ya trajo todo: la primera reconciliación completa
+    // espera una hora en lugar de repetirse apenas el admin entra.
+    let lastReconciliationAt = Date.now();
     const refreshOperationalSnapshot = async () => {
       if (!navigator.onLine || refreshing || document.visibilityState === "hidden")
         return;
@@ -13707,7 +13967,7 @@ export default function App() {
       try {
         const since = operationalCursorRef.current;
         if (!since) return; // Initial full hydration must finish before incremental polling.
-        const reconcile = Date.now() - lastReconciliationAt >= 15 * 60 * 1000;
+        const reconcile = Date.now() - lastReconciliationAt >= 60 * 60 * 1000;
         const response = await fetch(`/api/app-storage/operational-changes?since=${encodeURIComponent(since)}${reconcile ? "&reconcile=1" : ""}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Cambios operativos no disponibles");
         const payload = (await response.json()) as {
@@ -13777,21 +14037,41 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [referencesReady, user?.id, user?.role]);
+  // Un único ciclo de sincronización vivo mientras la sesión esté lista.
+  // Antes el efecto dependía de [sales, attendance]: cada confirmación o cambio
+  // del servidor destruía y recreaba el ciclo, y como la bandera "running" era
+  // local, el ciclo nuevo reenviaba el mismo registro mientras el anterior seguía
+  // esperando respuesta. Ahora el estado vive en refs y los cambios solo "piden"
+  // una sincronización; si ya hay una en curso, no se duplica.
   useEffect(() => {
-    if (!cloudReady || !navigator.onLine) return;
+    if (!cloudReady) return;
     let cancelled = false;
-    let running = false;
+    // Debe superar el statement_timeout del servidor (45 s) más el lock_timeout
+    // (8 s): si el celular se rinde antes, reenvía algo que PostgreSQL sigue
+    // procesando y genera trabajo duplicado.
+    const SYNC_REQUEST_TIMEOUT_MS = 60_000;
+    // Espera creciente por registro tras un fallo: 10 s, 30 s, 1 min, 2 min, 5 min.
+    const RETRY_DELAYS_MS = [10_000, 30_000, 60_000, 120_000, 300_000];
+    const retries = syncRetryRef.current;
+    const isDue = (id: string, manual: boolean) =>
+      manual || (retries.get(id)?.nextAt ?? 0) <= Date.now();
+    const markFailed = (id: string) => {
+      const attempts = (retries.get(id)?.attempts ?? 0) + 1;
+      const delay = RETRY_DELAYS_MS[Math.min(attempts - 1, RETRY_DELAYS_MS.length - 1)];
+      retries.set(id, { attempts, nextAt: Date.now() + delay });
+    };
+    const markConfirmed = (id: string) => retries.delete(id);
 
     const syncPendingOperationalRecords = async (manual = false) => {
       let confirmedCount = 0;
       let failedCount = 0;
-      if (running || cancelled || !navigator.onLine) {
+      if (syncRunningRef.current || cancelled || !navigator.onLine) {
         if (manual) window.dispatchEvent(new CustomEvent("bt-manual-sync-complete", {
-          detail: { message: running ? "Hay una sincronización en curso. Espera unos segundos." : "Sin conexión o sesión no disponible." },
+          detail: { message: syncRunningRef.current ? "Hay una sincronización en curso. Espera unos segundos." : "Sin conexión o sesión no disponible." },
         }));
         return;
       }
-      running = true;
+      syncRunningRef.current = true;
       const catalogRevision =
         safeStorageGet(CATALOG_REVISION_STORE_KEY) || undefined;
 
@@ -13801,7 +14081,7 @@ export default function App() {
         // El mismo ID se conserva en los reintentos. Abortar la espera no
         // implica que PostgreSQL haya cancelado una transacción ya iniciada.
         const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 20_000);
+        const timeout = window.setTimeout(() => controller.abort(), SYNC_REQUEST_TIMEOUT_MS);
         let response: Response;
         try {
           response = await fetch(APP_STORAGE_SYNC, {
@@ -13828,14 +14108,14 @@ export default function App() {
       };
 
       try {
-        const pendingAttendance = attendance
-          .filter((item) => item.status !== "SINCRONIZADA")
+        const pendingAttendance = pendingSyncRef.current.attendance
+          .filter((item) => item.status !== "SINCRONIZADA" && isDue(item.id, manual))
           .sort(
             (first, second) =>
               new Date(first.date).getTime() - new Date(second.date).getTime(),
           );
         for (const item of pendingAttendance) {
-          if (cancelled) break;
+          if (cancelled || !navigator.onLine) break;
           try {
             const snapshot = await syncOne({ attendance: [item] });
             if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
@@ -13845,6 +14125,7 @@ export default function App() {
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la marcación.");
             confirmedCount += 1;
+            markConfirmed(item.id);
             setAttendance((current) => {
               // Respuesta compacta: actualizar solo los IDs confirmados.
               // No eliminar otras marcaciones sincronizadas del historial.
@@ -13857,6 +14138,7 @@ export default function App() {
             });
           } catch (error) {
             failedCount += 1;
+            markFailed(item.id);
             console.error(
               `No se pudo sincronizar marcación ${item.id}`,
               error,
@@ -13864,11 +14146,11 @@ export default function App() {
           }
         }
 
-        const pendingSales = sales.filter(
-          (sale) => sale.status !== "SINCRONIZADA",
+        const pendingSales = pendingSyncRef.current.sales.filter(
+          (sale) => sale.status !== "SINCRONIZADA" && isDue(sale.id, manual),
         );
         for (const sale of pendingSales) {
-          if (cancelled) break;
+          if (cancelled || !navigator.onLine) break;
           try {
             const snapshot = await syncOne({ sales: [sale] });
             if (!snapshot) throw new Error("PostgreSQL no devolvió snapshot.");
@@ -13878,6 +14160,7 @@ export default function App() {
             if (!confirmed || confirmed.status !== "SINCRONIZADA")
               throw new Error("PostgreSQL no confirmó la venta.");
             confirmedCount += 1;
+            markConfirmed(sale.id);
             setSales((current) => {
               // Respuesta compacta: confirmar solo el ID enviado, sin
               // convertir otras ventas sincronizadas en pendientes.
@@ -13891,6 +14174,7 @@ export default function App() {
             });
           } catch (error) {
             failedCount += 1;
+            markFailed(sale.id);
             console.error(
               `No se pudo sincronizar venta ${sale.id}`,
               error,
@@ -13898,7 +14182,7 @@ export default function App() {
           }
         }
       } finally {
-        running = false;
+        syncRunningRef.current = false;
         if (manual) {
           const remaining = readStore<Sale[]>("bt-sales", []).filter((entry) => entry.status === "PENDIENTE").length
             + readStore<Attendance[]>("bt-attendance", []).filter((entry) => entry.status === "PENDIENTE").length;
@@ -13909,20 +14193,25 @@ export default function App() {
             const controller = new AbortController();
             const timer = window.setTimeout(() => controller.abort(), 12_000);
             try {
-              const response = await fetch(APP_STORAGE_READ, {
-                cache: "no-store",
-                signal: controller.signal,
-              });
-              if (!response.ok) throw new Error("Consulta de historial no disponible");
-              const payload = await response.json() as { snapshot?: Partial<CloudSnapshot> };
-              if (!Array.isArray(payload.snapshot?.sales) || !Array.isArray(payload.snapshot?.attendance))
-                throw new Error("Respuesta de historial incompleta");
-              const serverSales = new Set(payload.snapshot.sales.map((item) => item.id));
-              const serverAttendance = new Set(payload.snapshot.attendance.map((item) => item.id));
+              // Se envían solo los IDs sincronizados y el servidor responde los
+              // que no encuentra (antes se descargaba la base completa).
               const localSales = readStore<Sale[]>("bt-sales", []);
               const localAttendance = readStore<Attendance[]>("bt-attendance", []);
-              const missing = localSales.filter((item) => item.status === "SINCRONIZADA" && !serverSales.has(item.id)).length
-                + localAttendance.filter((item) => item.status === "SINCRONIZADA" && !serverAttendance.has(item.id)).length;
+              const response = await fetch(APP_STORAGE_VERIFY_IDS, {
+                method: "POST",
+                cache: "no-store",
+                headers: { "Content-Type": "application/json" },
+                signal: controller.signal,
+                body: JSON.stringify({
+                  sales: localSales.filter((item) => item.status === "SINCRONIZADA").map((item) => item.id),
+                  attendance: localAttendance.filter((item) => item.status === "SINCRONIZADA").map((item) => item.id),
+                }),
+              });
+              if (!response.ok) throw new Error("Consulta de historial no disponible");
+              const payload = await response.json() as { missing?: { sales?: string[]; attendance?: string[] } };
+              if (!Array.isArray(payload.missing?.sales) || !Array.isArray(payload.missing?.attendance))
+                throw new Error("Respuesta de historial incompleta");
+              const missing = payload.missing.sales.length + payload.missing.attendance.length;
               message = missing
                 ? `Atención: ${missing} registro(s) locales no aparecen en el historial del servidor. Contacta al analista; no los vuelvas a crear.`
                 : `Historial local contrastado con PostgreSQL: ${localSales.length} ventas y ${localAttendance.length} marcaciones sin faltantes detectados.`;
@@ -13939,18 +14228,34 @@ export default function App() {
       }
     };
 
+    syncNowRef.current = syncPendingOperationalRecords;
     const onManualSync = () => void syncPendingOperationalRecords(true);
     window.addEventListener("bt-manual-sync-request", onManualSync);
     void syncPendingOperationalRecords();
-    const interval = window.setInterval(syncPendingOperationalRecords, 10_000);
-    const retry = () => void syncPendingOperationalRecords();
+    const interval = window.setInterval(() => void syncPendingOperationalRecords(), 10_000);
+    const retry = () => {
+      // Al recuperar señal se reintenta de inmediato, sin esperar el backoff.
+      retries.clear();
+      void syncPendingOperationalRecords();
+    };
     window.addEventListener("online", retry);
     return () => {
       cancelled = true;
+      syncNowRef.current = async () => {};
       window.clearInterval(interval);
       window.removeEventListener("online", retry);
       window.removeEventListener("bt-manual-sync-request", onManualSync);
     };
+  }, [cloudReady]);
+
+  // Un registro nuevo o una foto aplicada pide sincronizar de inmediato sin
+  // reiniciar el ciclo. Si ya hay un envío en curso, el siguiente pase lo toma.
+  useEffect(() => {
+    if (!cloudReady) return;
+    const hasPending =
+      sales.some((sale) => sale.status !== "SINCRONIZADA") ||
+      attendance.some((item) => item.status !== "SINCRONIZADA");
+    if (hasPending) void syncNowRef.current();
   }, [cloudReady, sales, attendance, cloudSyncTick]);
 
   useEffect(() => {
@@ -14106,9 +14411,92 @@ export default function App() {
 
   const logoutImmediately = () => {
     safeStorageRemove("bt-session");
+    writeSessionToken("");
     setPromoterSession({ marketId: "", clientId: "" });
     setUser(null);
   };
+
+  // Sesiones abiertas antes de esta versión: se obtiene el pase en segundo plano
+  // con las credenciales ya guardadas en el dispositivo, sin pedir la clave.
+  useEffect(() => {
+    if (!user?.dni) return;
+    let cancelled = false;
+    const dni = user.dni;
+    // Con pase y huella guardada, la clave en texto plano se borra del
+    // dispositivo y del estado de la app (si no, el estado la volvería a escribir).
+    const forgetPlainPassword = async (password: string) => {
+      if (!readSessionToken()) return;
+      if (!hasOfflineVerifier(dni) && password) {
+        const session = readStore<AppUser | null>("bt-session", null);
+        const base = session?.dni === dni ? session : user;
+        if (!(await rememberOfflineLogin(base, password))) return;
+      }
+      if (cancelled || !removeStoredPassword(dni)) return;
+      setOfflineCredential(null);
+      const strip = (item: AppUser) => {
+        if (item.dni !== dni || !item.password) return item;
+        const { password: _password, ...rest } = item;
+        return rest;
+      };
+      setUsers((current) =>
+        current.some((item) => item.dni === dni && item.password) ? current.map(strip) : current,
+      );
+      setUser((current) => (current && current.dni === dni && current.password ? strip(current) : current));
+    };
+    const acquire = async () => {
+      if (cancelled) return;
+      const session = readStore<AppUser | null>("bt-session", null);
+      const password =
+        readOfflineCredential(dni) ||
+        (session?.dni === dni ? session.password : undefined) ||
+        user.password ||
+        "";
+      if (readSessionToken()) {
+        await forgetPlainPassword(password);
+        return;
+      }
+      if (!password || !navigator.onLine) return;
+      try {
+        const response = await fetch(APP_STORAGE_LOGIN, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dni, password }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { token?: string };
+        if (cancelled) return;
+        if (response.ok && payload.token) {
+          writeSessionToken(payload.token);
+          await forgetPlainPassword(password);
+        }
+        // Clave cambiada o usuario desactivado por un admin: pedir nuevo ingreso.
+        else if (response.status === 401)
+          window.dispatchEvent(new CustomEvent("bt-session-expired"));
+      } catch {
+        // Sin señal: se reintenta al recuperar conexión.
+      }
+    };
+    void acquire();
+    window.addEventListener("online", acquire);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", acquire);
+    };
+  }, [user?.dni]);
+
+  // Pase vencido o revocado: volver a la pantalla de ingreso. Las ventas y
+  // marcaciones pendientes se quedan en el dispositivo y se envían al reingresar.
+  useEffect(() => {
+    const onExpired = () => {
+      if (!readStore<AppUser | null>("bt-session", null)) return;
+      safeStorageRemove("bt-session");
+      writeSessionToken("");
+      setPromoterSession({ marketId: "", clientId: "" });
+      setUser(null);
+      notify("Tu sesión venció. Ingresa de nuevo con tu DNI y clave; tus registros pendientes se conservan.", true);
+    };
+    window.addEventListener("bt-session-expired", onExpired);
+    return () => window.removeEventListener("bt-session-expired", onExpired);
+  }, []);
   return (
     <>
       {activeUser ? (

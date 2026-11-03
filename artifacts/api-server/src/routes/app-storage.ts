@@ -1,4 +1,5 @@
 import {
+  createHash,
   randomBytes,
   randomUUID,
   scrypt as scryptCallback,
@@ -6,12 +7,20 @@ import {
 } from "node:crypto";
 import { promisify } from "node:util";
 import { pool } from "@workspace/db";
+import { bumpDataVersion, cachedJson, cachedValue } from "../lib/read-cache";
+import { issueSessionToken, sessionOf } from "../lib/session";
 import { Router, type IRouter, type Request } from "express";
 
 const router: IRouter = Router();
 const scrypt = promisify(scryptCallback);
 const campaignTimeZone = "America/Lima";
-const automaticClosureIntervalMs = 30_000;
+// El barrido cierra el día anterior de Lima y es idempotente. Correrlo cada 30 s
+// repetía la misma consulta y transacción todo el día; cada 10 min sigue cubriendo
+// marcaciones que sincronizan tarde sin cargar la base.
+const automaticClosureIntervalMs = 10 * 60 * 1000;
+// Antigüedad máxima de una lectura en caché si una escritura no pasó por este
+// proceso. Las escrituras de la propia API la invalidan al instante.
+const READ_CACHE_TTL_MS = 15_000;
 const redemptionItemIds = ["AVENA", "BATEA", "MANDIL", "SPAGHETTI"];
 const miniHalfPlanchaSkus = new Set([
   "TODINNITO-85",
@@ -335,6 +344,24 @@ async function verifyPassword(password: string, stored: string) {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
+// Contraseñas ya verificadas contra un hash concreto (huella SHA-256, nunca el
+// texto plano). Evita repetir scrypt en cada sincronización del mismo usuario.
+const verifiedPasswords = new Map<string, string>();
+const passwordFingerprint = (password: string, stored: string) =>
+  createHash("sha256").update(`${stored}\u0000${password}`).digest("hex");
+
+async function passwordMatchesStored(password: string, stored: string) {
+  if (!stored) return false;
+  const fingerprint = passwordFingerprint(password, stored);
+  if (verifiedPasswords.get(stored) === fingerprint) return true;
+  const matches = await verifyPassword(password, stored);
+  if (matches) {
+    if (verifiedPasswords.size > 5000) verifiedPasswords.clear();
+    verifiedPasswords.set(stored, fingerprint);
+  }
+  return matches;
+}
+
 function publicUser(record: StoredRecord) {
   const { password: _password, ...safe } = record;
   return safe;
@@ -342,6 +369,175 @@ function publicUser(record: StoredRecord) {
 
 function isRecord(value: unknown): value is StoredRecord {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+/*
+ * Alcance de datos por rol (según el pase de la petición):
+ * - ADMIN, ANALISTA, SUPERVISOR, TRADE: todo (sin cambios).
+ * - PROMOTOR (los tres tipos): sus propios registros y los catálogos de su trabajo.
+ * - COORDINADOR: lo de los mercados que tiene asignados; solo lectura.
+ * - CLIENTE: las ventas de su cliente; solo lectura.
+ * Sin pase (modo aviso) se mantiene el comportamiento anterior.
+ */
+type DataScope =
+  | { kind: "full" }
+  | { kind: "promoter"; userId: string; dni: string; marketIds: Set<string>; clientIds: Set<string> }
+  | { kind: "coordinator"; userId: string; dni: string; marketIds: Set<string> }
+  | { kind: "client"; userId: string; dni: string; clientRef: string };
+
+const promoterRoleSet = new Set(["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"]);
+
+async function dataScopeFor(req: Request): Promise<DataScope> {
+  const session = sessionOf(req);
+  if (!session) return { kind: "full" };
+  const role = session.role.toUpperCase();
+  if (promoterRoleSet.has(role) || role === "COORDINADOR") {
+    const assignment = await pool.query(
+      "SELECT market_ids,client_ids FROM assignments WHERE promoter_id=$1 OR (promoter_dni<>'' AND promoter_dni=$2) LIMIT 1",
+      [session.id, session.dni],
+    );
+    const row = assignment.rows[0];
+    const assignedMarkets = row && Array.isArray(row.market_ids) ? row.market_ids.map(String) : [];
+    const fallbackMarket = value(session.data, "marketId");
+    const marketIds = new Set<string>(
+      assignedMarkets.length ? assignedMarkets : fallbackMarket ? [fallbackMarket] : [],
+    );
+    if (role === "COORDINADOR")
+      return { kind: "coordinator", userId: session.id, dni: session.dni, marketIds };
+    const clientIds = new Set<string>(
+      row && Array.isArray(row.client_ids) ? row.client_ids.map(String) : [],
+    );
+    return { kind: "promoter", userId: session.id, dni: session.dni, marketIds, clientIds };
+  }
+  if (role === "CLIENTE")
+    return {
+      kind: "client",
+      userId: session.id,
+      dni: session.dni,
+      clientRef: value(session.data, "clientId"),
+    };
+  return { kind: "full" };
+}
+
+function scopeName(scope: DataScope) {
+  return scope.kind === "full" ? null : scope.kind;
+}
+
+/** Filtra un snapshot (o parte de él) al alcance del rol. No modifica el original. */
+function scopeSnapshot(
+  scope: DataScope,
+  snapshot: Partial<StorageSnapshot>,
+): Partial<StorageSnapshot> {
+  if (scope.kind === "full") return snapshot;
+  const list = (name: CollectionName) =>
+    Array.isArray(snapshot[name]) ? (snapshot[name] as StoredRecord[]) : [];
+  const has = (name: CollectionName) => Array.isArray(snapshot[name]);
+  const out: Partial<StorageSnapshot> = {};
+  const put = (name: CollectionName, rows: StoredRecord[]) => {
+    if (has(name)) out[name] = rows;
+  };
+  const isSelfUser = (user: StoredRecord) =>
+    value(user, "id") === scope.userId || (scope.dni !== "" && value(user, "dni") === scope.dni);
+  // Catálogos de referencia que todos los roles necesitan para mostrar nombres y precios.
+  put("markets", list("markets"));
+  put("productPrices", list("productPrices"));
+  put("categories", list("categories"));
+
+  if (scope.kind === "promoter") {
+    const own = (record: StoredRecord) =>
+      value(record, "promoterId") === scope.userId ||
+      (scope.dni !== "" && value(record, "promoterDni") === scope.dni);
+    const sales = list("sales").filter(own);
+    const attendance = list("attendance").filter(own);
+    const movements = list("movements").filter(
+      (record) => own(record) || value(record, "actorId") === scope.userId,
+    );
+    const closures = list("closures").filter(own);
+    const referencedClients = new Set(
+      [...sales, ...attendance, ...closures].map((record) => value(record, "clientId")),
+    );
+    put("sales", sales);
+    put("attendance", attendance);
+    put("movements", movements);
+    put("closures", closures);
+    put("clients", list("clients").filter((client) =>
+      scope.marketIds.has(value(client, "marketId")) ||
+      scope.clientIds.has(value(client, "id")) ||
+      referencedClients.has(value(client, "id"))));
+    put("users", list("users").filter(isSelfUser));
+    put("assignments", list("assignments").filter(own));
+    put("inventory", list("inventory").filter((row) => scope.marketIds.has(value(row, "marketId"))));
+    return out;
+  }
+
+  if (scope.kind === "coordinator") {
+    const inMarkets = (record: StoredRecord) => scope.marketIds.has(value(record, "marketId"));
+    const assignments = list("assignments");
+    const marketsByPerson = new Map<string, string[]>();
+    for (const assignment of assignments) {
+      const ids = Array.isArray(assignment.marketIds) ? assignment.marketIds.map(String) : [];
+      if (value(assignment, "promoterId")) marketsByPerson.set(value(assignment, "promoterId"), ids);
+      if (value(assignment, "promoterDni")) marketsByPerson.set(`dni:${value(assignment, "promoterDni")}`, ids);
+    }
+    const userMarkets = (user: StoredRecord) => {
+      const assigned =
+        marketsByPerson.get(value(user, "id")) || marketsByPerson.get(`dni:${value(user, "dni")}`);
+      if (assigned?.length) return assigned;
+      return value(user, "marketId") ? [value(user, "marketId")] : [];
+    };
+    put("sales", list("sales").filter(inMarkets));
+    put("attendance", list("attendance").filter(inMarkets));
+    put("movements", list("movements").filter(inMarkets));
+    put("closures", list("closures").filter(inMarkets));
+    put("inventory", list("inventory").filter(inMarkets));
+    put("clients", list("clients").filter(inMarkets));
+    put("users", list("users").filter((user) =>
+      isSelfUser(user) || userMarkets(user).some((id) => scope.marketIds.has(id))));
+    put("assignments", assignments.filter((assignment) =>
+      value(assignment, "promoterId") === scope.userId ||
+      (Array.isArray(assignment.marketIds) &&
+        assignment.marketIds.some((id) => scope.marketIds.has(String(id))))));
+    return out;
+  }
+
+  // CLIENTE: su cliente (por id o código) y sus ventas.
+  const ref = scope.clientRef;
+  const clients = ref
+    ? list("clients").filter((client) => value(client, "id") === ref || value(client, "code") === ref)
+    : [];
+  const clientIds = new Set(clients.map((client) => value(client, "id")));
+  put("clients", clients);
+  put("sales", list("sales").filter((sale) => clientIds.has(value(sale, "clientId"))));
+  put("users", list("users").filter(isSelfUser));
+  for (const name of ["attendance", "movements", "closures", "inventory", "assignments"] as CollectionName[])
+    put(name, []);
+  return out;
+}
+
+/** Qué puede escribir cada rol por /sync. Devuelve un mensaje si no se permite. */
+function writeScopeError(scope: DataScope, incoming: Partial<StorageSnapshot>) {
+  if (scope.kind === "full") return null;
+  const nonEmpty = (Object.keys(incoming) as CollectionName[]).filter(
+    (name) => Array.isArray(incoming[name]) && incoming[name]!.length > 0,
+  );
+  if (!nonEmpty.length) return null;
+  if (scope.kind === "coordinator" || scope.kind === "client")
+    return "Tu rol solo permite consultar información.";
+  const allowed = new Set<CollectionName>(["sales", "attendance", "movements", "closures"]);
+  const notAllowed = nonEmpty.filter((name) => !allowed.has(name));
+  if (notAllowed.length)
+    return "Solo puedes enviar tus propias ventas y marcaciones.";
+  const own = (record: StoredRecord) =>
+    value(record, "promoterId") === scope.userId ||
+    (!value(record, "promoterId") && scope.dni !== "" && value(record, "promoterDni") === scope.dni) ||
+    (!value(record, "promoterId") && value(record, "actorId") === scope.userId);
+  for (const name of nonEmpty) {
+    for (const record of incoming[name]!) {
+      if (isRecord(record) && !own(record))
+        return "Este registro pertenece a otro promotor; se enviará cuando esa persona ingrese.";
+    }
+  }
+  return null;
 }
 
 async function lockInventoryLedger(client: QueryClient) {
@@ -480,6 +676,7 @@ async function createAutomaticClosuresForDay(day: string) {
       created += 1;
     }
     await client.query("COMMIT");
+    if (created) bumpDataVersion();
   } catch (error) {
     await client.query("ROLLBACK");
     console.error(`Unable to create automatic closures for ${day}`, error);
@@ -551,7 +748,9 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,region=EXCLUDED.region,department=EXCLUDED.department,
        province=EXCLUDED.province,district=EXCLUDED.district,status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (markets.name,markets.region,markets.department,markets.province,markets.district,markets.status,markets.data,markets.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.name,EXCLUDED.region,EXCLUDED.department,EXCLUDED.province,EXCLUDED.district,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "name"),
@@ -566,11 +765,19 @@ async function upsertRecord(
     );
   } else if (name === "users") {
     const password = value(source, "password");
-    const passwordHash = password ? await hashPassword(password) : null;
     const existingByDni = await client.query(
-      "SELECT id,data FROM users WHERE dni=$1 LIMIT 1",
+      "SELECT id,data,password_hash FROM users WHERE dni=$1 LIMIT 1",
       [key],
     );
+    // Solo se genera un hash nuevo si la contraseña cambió. Reenviar el mismo
+    // usuario ya no recalcula scrypt ni reescribe la fila.
+    const storedHash = existingByDni.rows[0]?.password_hash
+      ? String(existingByDni.rows[0].password_hash)
+      : "";
+    const passwordHash =
+      password && !(await passwordMatchesStored(password, storedHash))
+        ? await hashPassword(password)
+        : null;
     let userId = value(source, "id") || key;
     if (existingByDni.rows[0]?.id) {
       userId = String(existingByDni.rows[0].id);
@@ -605,7 +812,10 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (dni) DO UPDATE SET name=EXCLUDED.name,role=EXCLUDED.role,status=EXCLUDED.status,
        password_hash=COALESCE(EXCLUDED.password_hash,users.password_hash),data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE EXCLUDED.password_hash IS NOT NULL
+          OR (users.name,users.role,users.status,users.data,users.record_updated_at)
+             IS DISTINCT FROM (EXCLUDED.name,EXCLUDED.role,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         userId,
         key,
@@ -621,7 +831,9 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO clients (id,code,name,market_id,status,data,record_updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code,name=EXCLUDED.name,market_id=EXCLUDED.market_id,
-       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       status=EXCLUDED.status,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (clients.code,clients.name,clients.market_id,clients.status,clients.data,clients.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.code,EXCLUDED.name,EXCLUDED.market_id,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "code") || key,
@@ -633,13 +845,16 @@ async function upsertRecord(
       ],
     );
   } else if (name === "sales") {
-    await client.query(
+    const written = await client.query(
       `INSERT INTO sales (id,promoter_id,client_id,market_id,mode,units,amount_soles,weight_kg,sale_date,status,receipt_photo,exchange_photo,redemption_rule_id,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (id) DO UPDATE SET receipt_photo=EXCLUDED.receipt_photo,exchange_photo=EXCLUDED.exchange_photo,
        redemption_rule_id=EXCLUDED.redemption_rule_id,status=EXCLUDED.status,data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
-       WHERE sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at`,
+       WHERE (sales.record_updated_at IS NULL OR EXCLUDED.record_updated_at >= sales.record_updated_at)
+         AND (sales.receipt_photo,sales.exchange_photo,sales.redemption_rule_id,sales.status,sales.data,sales.record_updated_at)
+             IS DISTINCT FROM (EXCLUDED.receipt_photo,EXCLUDED.exchange_photo,EXCLUDED.redemption_rule_id,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)
+       RETURNING id`,
       [
         key,
         value(source, "promoterId"),
@@ -658,13 +873,23 @@ async function upsertRecord(
         updated,
       ],
     );
-    await replaceSaleItems(client, key, normalized);
+    // Las líneas se reconstruyen solo si la venta se insertó o realmente cambió.
+    // Antes se borraban y reinsertaban en cada reenvío, incluso cuando la venta
+    // entrante era más antigua que la guardada. Si una venta existente no tiene
+    // líneas (histórico), se completan igual que antes.
+    const saleChanged = written.rows.length > 0;
+    const hasItems = saleChanged
+      ? true
+      : (await client.query("SELECT 1 FROM sale_items WHERE sale_id=$1 LIMIT 1", [key])).rows.length > 0;
+    if (saleChanged || !hasItems) await replaceSaleItems(client, key, normalized);
   } else if (name === "attendance") {
     await client.query(
       `INSERT INTO attendance (id,promoter_id,client_id,market_id,event_type,event_date,status,photo,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET photo=EXCLUDED.photo,status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (attendance.photo,attendance.status,attendance.data,attendance.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.photo,EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "promoterId"),
@@ -682,7 +907,9 @@ async function upsertRecord(
     await client.query(
       `INSERT INTO inventory (market_id,tasting_stock,redemption_stock,data,record_updated_at) VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (market_id) DO UPDATE SET tasting_stock=EXCLUDED.tasting_stock,redemption_stock=EXCLUDED.redemption_stock,
-       data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (inventory.tasting_stock,inventory.redemption_stock,inventory.data,inventory.record_updated_at)
+         IS DISTINCT FROM (EXCLUDED.tasting_stock,EXCLUDED.redemption_stock,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         numeric(source, "tastingStock"),
@@ -697,8 +924,10 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,data=EXCLUDED.data,
        record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
-       WHERE inventory_movements.kind <> 'DEGUSTACION'
-          OR inventory_movements.record_updated_at <= EXCLUDED.record_updated_at`,
+       WHERE (inventory_movements.kind <> 'DEGUSTACION'
+          OR inventory_movements.record_updated_at <= EXCLUDED.record_updated_at)
+         AND (inventory_movements.status,inventory_movements.data,inventory_movements.record_updated_at)
+             IS DISTINCT FROM (EXCLUDED.status,EXCLUDED.data,EXCLUDED.record_updated_at)`,
       [
         key,
         value(source, "marketId"),
@@ -718,7 +947,9 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (promoter_id) DO UPDATE SET promoter_dni=EXCLUDED.promoter_dni,market_ids=EXCLUDED.market_ids,
        client_ids=EXCLUDED.client_ids,data=EXCLUDED.data,record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
-       WHERE assignments.record_updated_at <= EXCLUDED.record_updated_at`,
+       WHERE assignments.record_updated_at <= EXCLUDED.record_updated_at
+         AND (assignments.promoter_dni,assignments.market_ids,assignments.client_ids,assignments.data)
+             IS DISTINCT FROM (EXCLUDED.promoter_dni,EXCLUDED.market_ids,EXCLUDED.client_ids,EXCLUDED.data)`,
       [
         key,
         value(source, "promoterDni") || null,
@@ -752,7 +983,9 @@ async function upsertRecord(
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (sku) DO UPDATE SET product=EXCLUDED.product,units_per_package=EXCLUDED.units_per_package,
        unit_price=EXCLUDED.unit_price,total_price=EXCLUDED.total_price,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (product_prices.product,product_prices.units_per_package,product_prices.unit_price,product_prices.total_price,product_prices.data)
+         IS DISTINCT FROM (EXCLUDED.product,EXCLUDED.units_per_package,EXCLUDED.unit_price,EXCLUDED.total_price,EXCLUDED.data)`,
       [
         key,
         value(source, "product") || key,
@@ -768,7 +1001,9 @@ async function upsertRecord(
       `INSERT INTO client_categories (id,name,status,data,record_updated_at)
        VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,status=EXCLUDED.status,data=EXCLUDED.data,
-       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()`,
+       record_updated_at=EXCLUDED.record_updated_at,updated_at=now()
+       WHERE (client_categories.name,client_categories.status,client_categories.data)
+         IS DISTINCT FROM (EXCLUDED.name,EXCLUDED.status,EXCLUDED.data)`,
       [
         key,
         value(source, "name") || key,
@@ -952,18 +1187,56 @@ async function syncSnapshot(
         [`sale:${saleId}`],
       );
     }
-    await lockInventoryLedger(client as unknown as QueryClient);
-    const deletedSalesResult = await client.query(
-      "SELECT record_id FROM app_storage_tombstones WHERE collection='sales'",
+    // El candado global del inventario solo se necesita cuando el lote puede tocar
+    // stock o registros que las rutas administrativas modifican bajo ese candado.
+    // Un lote de solo marcaciones ya queda serializado por su propio candado
+    // (promotor+mercado+día en validateNewAttendance) y no mueve stock de almacén;
+    // así deja de esperar detrás de ventas y canjes de otros promotores.
+    const attendanceOnly = (Object.keys(guardedIncoming) as CollectionName[]).every(
+      (name) =>
+        name === "attendance" ||
+        !Array.isArray(guardedIncoming[name]) ||
+        guardedIncoming[name]!.length === 0,
     );
-    const deletedSaleIds = new Set(
-      deletedSalesResult.rows.map((row) => String(row.record_id)),
-    );
-    const tombstones = await client.query(
-      "SELECT collection,record_id FROM app_storage_tombstones",
-    );
+    if (!attendanceOnly) {
+      await lockInventoryLedger(client as unknown as QueryClient);
+    }
+    // Solo se consultan los tombstones de los IDs que vienen en este lote
+    // (antes se leía la tabla completa dos veces en cada sincronización).
+    // El resultado es el mismo: un registro eliminado nunca se vuelve a crear.
+    const tombstoneKeys = new Map<string, [string, string]>();
+    const addTombstoneKey = (collection: string, recordId: string) => {
+      if (recordId) tombstoneKeys.set(`${collection}:${recordId}`, [collection, recordId]);
+    };
+    for (const name of Object.keys(collectionConfig) as CollectionName[]) {
+      const list = guardedIncoming[name];
+      if (!Array.isArray(list)) continue;
+      for (const record of list) {
+        if (!isRecord(record)) continue;
+        addTombstoneKey(name, value(record, "id"));
+        if (name === "movements") {
+          const saleId = saleIdFromCanjeMovement(record);
+          if (saleId) addTombstoneKey("sales", saleId);
+        }
+      }
+    }
+    const tombstonePairs = [...tombstoneKeys.values()];
+    const tombstones = tombstonePairs.length
+      ? await client.query(
+          `SELECT t.collection,t.record_id
+             FROM app_storage_tombstones t
+             JOIN unnest($1::text[],$2::text[]) AS k(collection,record_id)
+               ON t.collection=k.collection AND t.record_id=k.record_id`,
+          [tombstonePairs.map(([c]) => c), tombstonePairs.map(([, id]) => id)],
+        )
+      : { rows: [] as Array<Record<string, unknown>> };
     const deletedRecords = new Set(
       tombstones.rows.map((row) => `${row.collection}:${row.record_id}`),
+    );
+    const deletedSaleIds = new Set(
+      tombstones.rows
+        .filter((row) => row.collection === "sales")
+        .map((row) => String(row.record_id)),
     );
     for (const name of Object.keys(collectionConfig) as CollectionName[]) {
       // inventory es histórico: nunca se acepta como fuente de saldo operativo.
@@ -982,11 +1255,12 @@ async function syncSnapshot(
         if (!isRecord(record)) continue;
         if (deletedRecords.has(`${name}:${value(record, "id")}`)) continue;
         const config = collectionConfig[name];
+        // Solo se necesita saber si existe y su updatedAt; no traer el JSON completo.
         const existing = await client.query(
-          `SELECT data FROM ${config.table} WHERE ${config.column}=$1`,
+          `SELECT data->>'updatedAt' AS edited_at FROM ${config.table} WHERE ${config.column}=$1`,
           [value(record, config.key)],
         );
-        const editedAt = existing.rows[0]?.data?.updatedAt;
+        const editedAt = existing.rows[0]?.edited_at;
         if (
           editedAt &&
           (!recordDate(record) || String(editedAt) > String(recordDate(record)))
@@ -1111,6 +1385,8 @@ async function syncSnapshot(
       }
     }
     await client.query("COMMIT");
+    // Invalida la caché aunque el celular haya cortado la conexión antes.
+    bumpDataVersion();
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -1155,7 +1431,17 @@ async function syncSnapshot(
   return readSnapshot();
 }
 
+// Admin o analista con pase válido. Se mantiene la verificación por DNI y clave
+// (encabezados x-admin-*) para versiones anteriores de la app.
+function sessionAdminActor(req: Request) {
+  const session = sessionOf(req);
+  if (!session || !["ADMIN", "ANALISTA"].includes(session.role)) return null;
+  return { id: session.id, role: session.role, data: session.data };
+}
+
 async function authorizedTradeActor(req: Request) {
+  const fromSession = sessionAdminActor(req);
+  if (fromSession) return fromSession;
   const dni = req.get("x-admin-dni") || "";
   const key = req.get("x-admin-key") || "";
   if (!dni || !key) return null;
@@ -3165,18 +3451,38 @@ router.post("/app-storage/trade-approvals/:id/resolve", async (req, res): Promis
 // Catálogos ligeros para habilitar la selección de visita sin esperar ventas y fotos.
 router.get("/app-storage/visit-catalog", async (req, res): Promise<void> => {
   try {
-    const [markets, clients, assignments, revision] = await Promise.all([
-      pool.query("SELECT data FROM markets"),
-      pool.query("SELECT data FROM clients"),
-      pool.query("SELECT data FROM assignments"),
-      readCatalogRevision(),
-    ]);
+    const produceCatalog = async () => {
+      const [markets, clients, assignments, revision] = await Promise.all([
+        pool.query("SELECT data FROM markets"),
+        pool.query("SELECT data FROM clients"),
+        pool.query("SELECT data FROM assignments"),
+        readCatalogRevision(),
+      ]);
+      return {
+        catalogRevision: revision,
+        markets: markets.rows.map((row) => row.data),
+        clients: clients.rows.map((row) => row.data),
+        assignments: assignments.rows.map((row) => row.data),
+      };
+    };
     res.setHeader("Cache-Control", "no-store");
+    const scope = await dataScopeFor(req);
+    if (scope.kind === "full") {
+      res.type("application/json").send(await cachedJson("visit-catalog", READ_CACHE_TTL_MS, produceCatalog));
+      return;
+    }
+    const catalog = await cachedValue("visit-catalog", READ_CACHE_TTL_MS, produceCatalog);
+    const scoped = scopeSnapshot(scope, {
+      markets: catalog.markets as StoredRecord[],
+      clients: catalog.clients as StoredRecord[],
+      assignments: catalog.assignments as StoredRecord[],
+    });
     res.json({
-      catalogRevision: revision,
-      markets: markets.rows.map((row) => row.data),
-      clients: clients.rows.map((row) => row.data),
-      assignments: assignments.rows.map((row) => row.data),
+      catalogRevision: catalog.catalogRevision,
+      markets: scoped.markets,
+      clients: scoped.clients,
+      assignments: scoped.assignments,
+      dataScope: scopeName(scope),
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read visit catalog");
@@ -3199,7 +3505,10 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
     const replayMs = 10 * 60 * 1000;
     const reconcile = req.query.reconcile === "1";
     const boundary = await pool.query("SELECT clock_timestamp() AS cursor");
-    const cursor = new Date(String(boundary.rows[0].cursor)).toISOString();
+    // pg entrega un Date: convertirlo a texto antes perdía los milisegundos y dejaba
+    // fuera de esta respuesta lo guardado en el mismo segundo (llegaba en la siguiente).
+    const rawCursor = boundary.rows[0].cursor;
+    const cursor = (rawCursor instanceof Date ? rawCursor : new Date(String(rawCursor))).toISOString();
     const snapshot: Partial<StorageSnapshot> = {};
     for (const name of ["sales", "attendance", "movements"] as const) {
       const { table } = collectionConfig[name];
@@ -3228,21 +3537,129 @@ router.get("/app-storage/operational-changes", async (req, res): Promise<void> =
       if (collection in deleted) deleted[collection].push(String(row.record_id));
     }
     res.setHeader("Cache-Control", "no-store");
-    res.json({ cursor, snapshot, deleted });
+    const scope = await dataScopeFor(req);
+    res.json({ cursor, snapshot: scopeSnapshot(scope, snapshot), deleted, dataScope: scopeName(scope) });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read incremental operational changes");
     res.status(500).json({ message: "No se pudieron consultar los cambios operativos." });
   }
 });
 
+// Completa la URL de una foto subida después de que el registro ya se sincronizó
+// (fotos que quedaron en la cola del celular). Solo escribe esa foto y solo si el
+// registro aún no tiene una: nunca reemplaza otra foto ni pisa ediciones del
+// registro hechas por un administrador. Un registro eliminado no existe y no se crea.
+const photoTargets: Record<string, Record<string, string>> = {
+  sale: { receiptPhoto: "receipt_photo", exchangePhoto: "exchange_photo" },
+  attendance: { photo: "photo" },
+};
+const evidencePhotoUrl =
+  /^(https?:\/\/[^/\s]+)?\/api\/evidence-photos\/(storage|drive)\/[A-Za-z0-9_-]+$/;
+
+router.post("/app-storage/records/photo", async (req, res): Promise<void> => {
+  const entityType = String(req.body?.entityType || "");
+  const field = String(req.body?.field || "");
+  const entityId = String(req.body?.entityId || "").trim();
+  const url = String(req.body?.url || "").trim();
+  const column = photoTargets[entityType]?.[field];
+  if (!column || !entityId || !evidencePhotoUrl.test(url)) {
+    res.status(400).json({ message: "Datos de fotografía inválidos." });
+    return;
+  }
+  const table = entityType === "sale" ? "sales" : "attendance";
+  try {
+    const updated = await pool.query(
+      `UPDATE ${table}
+          SET ${column}=$2,
+              data=jsonb_set(COALESCE(data,'{}'::jsonb),$3::text[],to_jsonb($2::text),true),
+              updated_at=now()
+        WHERE id=$1 AND COALESCE(${column},'')=''
+        RETURNING id`,
+      [entityId, url, [field]],
+    );
+    if (updated.rows.length) {
+      bumpDataVersion();
+      res.json({ status: "saved" });
+      return;
+    }
+    const current = await pool.query(
+      `SELECT ${column} AS photo FROM ${table} WHERE id=$1 LIMIT 1`,
+      [entityId],
+    );
+    if (!current.rows.length) {
+      res.status(404).json({ status: "missing", message: "El registro aún no existe en PostgreSQL." });
+      return;
+    }
+    res.json({ status: current.rows[0].photo === url ? "unchanged" : "kept-existing" });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to attach evidence photo");
+    res.status(500).json({ message: "No se pudo guardar la fotografía en el registro." });
+  }
+});
+
+// Verificación del botón "Sincronizar": el celular envía los IDs que tiene como
+// sincronizados y el servidor responde cuáles no existen. Reemplaza descargar
+// la base completa solo para comparar IDs. Respeta los registros eliminados.
+router.post("/app-storage/verify-ids", async (req, res): Promise<void> => {
+  const toIds = (input: unknown) =>
+    Array.isArray(input)
+      ? [...new Set(input.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 50_000)
+      : [];
+  const salesIds = toIds(req.body?.sales);
+  const attendanceIds = toIds(req.body?.attendance);
+  try {
+    const [sales, attendance] = await Promise.all([
+      salesIds.length
+        ? pool.query("SELECT id FROM sales WHERE id = ANY($1::text[])", [salesIds])
+        : { rows: [] as Array<Record<string, unknown>> },
+      attendanceIds.length
+        ? pool.query("SELECT id FROM attendance WHERE id = ANY($1::text[])", [attendanceIds])
+        : { rows: [] as Array<Record<string, unknown>> },
+    ]);
+    const foundSales = new Set(sales.rows.map((row) => String(row.id)));
+    const foundAttendance = new Set(attendance.rows.map((row) => String(row.id)));
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      missing: {
+        sales: salesIds.filter((id) => !foundSales.has(id)),
+        attendance: attendanceIds.filter((id) => !foundAttendance.has(id)),
+      },
+      checked: { sales: salesIds.length, attendance: attendanceIds.length },
+    });
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to verify synchronized ids");
+    res.status(500).json({ message: "No se pudo verificar el historial en PostgreSQL." });
+  }
+});
+
 router.get("/app-storage", async (req, res): Promise<void> => {
   try {
+    // El cursor se calcula en cada pedido; el snapshot y la revisión se toman
+    // de la caché (una sola lectura completa aunque muchos abran la app a la vez).
+    const syncCursor = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const produceSnapshot = async () => ({
+      catalogRevision: await readCatalogRevision(),
+      snapshot: await readSnapshot(),
+    });
+    const scope = await dataScopeFor(req);
+    if (scope.kind === "full") {
+      const cached = await cachedJson("full-snapshot", READ_CACHE_TTL_MS, produceSnapshot);
+      res
+        .type("application/json")
+        .send(
+          `{"storage":"digitalocean-postgresql","stockSource":"warehouses","syncCursor":${JSON.stringify(syncCursor)},${cached.slice(1)}`,
+        );
+      return;
+    }
+    // Rol con alcance limitado: misma lectura en caché, filtrada a lo que le corresponde.
+    const full = await cachedValue("full-snapshot", READ_CACHE_TTL_MS, produceSnapshot);
     res.json({
       storage: "digitalocean-postgresql",
       stockSource: "warehouses",
-      syncCursor: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-      catalogRevision: await readCatalogRevision(),
-      snapshot: await readSnapshot(),
+      syncCursor,
+      dataScope: scopeName(scope),
+      catalogRevision: full.catalogRevision,
+      snapshot: scopeSnapshot(scope, full.snapshot),
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read app storage");
@@ -3261,6 +3678,12 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       typeof req.body?.catalogRevision === "string"
         ? req.body.catalogRevision
         : null;
+    const scope = await dataScopeFor(req);
+    const denied = writeScopeError(scope, incoming as Partial<StorageSnapshot>);
+    if (denied) {
+      res.status(403).json({ code: "WRITE_NOT_ALLOWED", message: denied });
+      return;
+    }
     const snapshot = await syncSnapshot(
       incoming as Partial<StorageSnapshot>,
       incomingRevision,
@@ -3271,7 +3694,7 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
       storage: "digitalocean-postgresql",
       syncedAt: new Date().toISOString(),
       catalogRevision: await readCatalogRevision(),
-      snapshot,
+      snapshot: scopeSnapshot(scope, snapshot),
     });
   } catch (error) {
     req.log.error({ err: error }, "Unable to sync app storage");
@@ -3286,33 +3709,46 @@ router.post("/app-storage/sync", async (req, res): Promise<void> => {
 
 // Historial privado del promotor: credenciales verificadas contra PostgreSQL.
 router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> => {
+  const promoterRoles = ["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"];
+  // Con pase válido de promotor no hace falta la clave; si no, DNI y clave
+  // (versiones anteriores de la app).
+  const session = sessionOf(req);
+  const sessionPromoterId =
+    session && promoterRoles.includes(session.role.toUpperCase()) ? session.id : "";
   const dni = String(req.get("x-promoter-dni") || "").trim();
   const password = String(req.get("x-promoter-key") || "");
-  if (!/^\d{8}$/.test(dni) || !password) {
+  if (!sessionPromoterId && (!/^\d{8}$/.test(dni) || !password)) {
     res.status(401).json({ message: "Sesión no válida." });
     return;
   }
   try {
-    const credentials = await pool.query(
-      "SELECT id,role,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
-      [dni],
-    );
-    const actor = credentials.rows[0];
-    if (!actor || actor.status !== "ACTIVO" ||
-        !["PROMOTOR", "PROMOTOR PERMANENTE", "PROMOTOR ROTATIVO"].includes(String(actor.role || "").toUpperCase()) ||
-        !actor.password_hash || !(await verifyPassword(password, actor.password_hash))) {
-      res.status(403).json({ message: "No autorizado." });
-      return;
+    let promoterId = sessionPromoterId;
+    if (!promoterId) {
+      const credentials = await pool.query(
+        "SELECT id,role,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
+        [dni],
+      );
+      const actor = credentials.rows[0];
+      if (!actor || actor.status !== "ACTIVO" ||
+          !promoterRoles.includes(String(actor.role || "").toUpperCase()) ||
+          !actor.password_hash || !(await passwordMatchesStored(password, String(actor.password_hash)))) {
+        res.status(403).json({ message: "No autorizado." });
+        return;
+      }
+      promoterId = String(actor.id);
     }
-    const rows = await pool.query(
-      "SELECT data,status FROM attendance WHERE promoter_id=$1 ORDER BY event_date DESC",
-      [String(actor.id)],
-    );
+    const body = await cachedJson(`promoter-attendance:${promoterId}`, READ_CACHE_TTL_MS, async () => {
+      const rows = await pool.query(
+        "SELECT data,status FROM attendance WHERE promoter_id=$1 ORDER BY event_date DESC",
+        [promoterId],
+      );
+      return { attendance: rows.rows.map((row) => ({
+        ...(row.data as StoredRecord),
+        status: String(row.status || "SINCRONIZADA"),
+      })) };
+    });
     res.setHeader("Cache-Control", "no-store");
-    res.json({ attendance: rows.rows.map((row) => ({
-      ...(row.data as StoredRecord),
-      status: String(row.status || "SINCRONIZADA"),
-    })) });
+    res.type("application/json").send(body);
   } catch (error) {
     req.log.error({ err: error }, "Unable to refresh promoter attendance");
     res.status(500).json({ message: "No se pudo actualizar la asistencia." });
@@ -3321,8 +3757,20 @@ router.get("/app-storage/promoter/attendance", async (req, res): Promise<void> =
 
 router.get("/app-storage/assignments", async (req, res): Promise<void> => {
   try {
-    const result = await pool.query("SELECT data FROM assignments");
-    res.json({ storage: "digitalocean-postgresql", assignments: result.rows.map((row) => row.data) });
+    const produceAssignments = async () => {
+      const result = await pool.query("SELECT data FROM assignments");
+      return { storage: "digitalocean-postgresql", assignments: result.rows.map((row) => row.data) };
+    };
+    const scope = await dataScopeFor(req);
+    if (scope.kind === "full") {
+      res.type("application/json").send(await cachedJson("assignments", READ_CACHE_TTL_MS, produceAssignments));
+      return;
+    }
+    const all = await cachedValue("assignments", READ_CACHE_TTL_MS, produceAssignments);
+    res.json({
+      storage: all.storage,
+      assignments: scopeSnapshot(scope, { assignments: all.assignments as StoredRecord[] }).assignments,
+    });
   } catch (error) {
     req.log.error({ err: error }, "Unable to read assignments");
     res.status(500).json({ message: "No se pudieron leer las asignaciones." });
@@ -4266,6 +4714,8 @@ router.post("/app-storage/admin/clients", async (req, res): Promise<void> => {
 });
 
 async function authorizedCatalogActor(req: Request) {
+  const fromSession = sessionAdminActor(req);
+  if (fromSession) return fromSession;
   const credentials = await pool.query(
     "SELECT id,role,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
     [req.get("x-admin-dni") || ""],
@@ -5498,7 +5948,7 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
   }
   try {
     const result = await pool.query(
-      "SELECT data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
+      "SELECT id,role,data,password_hash,status FROM users WHERE dni=$1 LIMIT 1",
       [dni],
     );
     const row = result.rows[0];
@@ -5511,7 +5961,8 @@ router.post("/app-storage/login", async (req, res): Promise<void> => {
       res.status(401).json({ message: "DNI o clave incorrectos." });
       return;
     }
-    res.json({ user: publicUser(row.data as StoredRecord) });
+    // El pase permite al celular identificarse en cada petición sin reenviar la clave.
+    res.json({ user: publicUser(row.data as StoredRecord), token: await issueSessionToken(row) });
   } catch (error) {
     req.log.error({ err: error }, "Unable to validate login");
     res.status(500).json({ message: "No se pudo validar el acceso." });
