@@ -388,7 +388,7 @@ export async function ensureDatabaseSchema() {
         'RR-ESC-002','ESCALA_2','Escala 2','UNIDADES','UNITS',1,2,false,
         true,1,ARRAY[]::text[],
         'NINGUNO','{"AVENA":1}'::jsonb,20,'ACTIVO',
-        '{"description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje; aplica a todos los productos del módulo Unidades"}'::jsonb
+        '{"description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas; de 3 a 5 unidades ver Escala 2 · 3 a 5; no aplica a minis 80/85 g"}'::jsonb
       ),
       (
         'RR-ESC-003','ESCALA_3','Escala 3','PLANCHAS','PLANCHAS',1,1,false,
@@ -481,6 +481,17 @@ export async function ensureDatabaseSchema() {
       )
     ON CONFLICT (id) DO NOTHING;
 
+    -- Ventas por unidad de 3 a 5 unidades: 2 Avenas (no se repite por unidad).
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES (
+      'RR-ESC-002-3-5','ESCALA_2_3_5','Escala 2 · 3 a 5 unidades','UNIDADES','UNITS',3,5,false,
+      false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":2}'::jsonb,21,'ACTIVO',
+      '{"description":"3, 4 o 5 unidades = 2 Avenas; no aplica a minis 80/85 g"}'::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING;
+
     UPDATE redemption_rules
     SET min_exclusive=false, updated_at=now()
     WHERE id IN ('RR-ESC-006','RR-ESC-006-M','RR-ESC-006-B')
@@ -497,7 +508,7 @@ export async function ensureDatabaseSchema() {
         data=jsonb_set(
           COALESCE(data,'{}'::jsonb),
           '{description}',
-          to_jsonb('1 unidad = 1 Avena; 2 unidades = 2 Avenas; 3 a 5 sin canje; aplica a todos los productos del módulo Unidades'::text),
+          to_jsonb('1 unidad = 1 Avena; 2 unidades = 2 Avenas; de 3 a 5 unidades ver Escala 2 · 3 a 5; no aplica a minis 80/85 g'::text),
           true
         ),
         updated_at=now()

@@ -172,6 +172,15 @@ async function isUnitSaleBelowCanjeWeight(db: QueryClient, record: StoredRecord)
   return isMiniHalfPlanchaLine({ sku, product: String(found.rows[0]?.product || "") });
 }
 
+// Escala de Unidades cuando la venta no trae una Escala de Canje (respaldo):
+// 1 und = 1 Avena, 2 und = 2 Avenas, de 3 a 5 und = 2 Avenas.
+function legacyUnitCanjeCount(units: number) {
+  return units <= 2 ? units : 1;
+}
+function legacyUnitAvenas(units: number) {
+  return units <= 2 ? units : 2;
+}
+
 function stripCanjeFromSale(
   record: StoredRecord,
   reason: "JULIACA" | "PESO" = "JULIACA",
@@ -5296,7 +5305,11 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (
       (bonus && (!Number.isInteger(count) || count < 1 || count > 3)) ||
       (!bonus && count !== 0) ||
-      (!punoWithoutCanje && mode === "UNIDADES" && count !== Math.floor(units / 2)) ||
+      (!punoWithoutCanje &&
+        mode === "UNIDADES" &&
+        bonus &&
+        !value(input, "redemptionRuleId") &&
+        count !== legacyUnitCanjeCount(units)) ||
       (count === 3 && !value(input, "comment"))
     )
       throw new Error("Número de canjes o justificación no válido.");
@@ -5337,12 +5350,15 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (
       !validatedRule &&
       mode === "UNIDADES" &&
-      (requested.AVENA !== count ||
+      bonus &&
+      (requested.AVENA !== legacyUnitAvenas(units) ||
         requested.BATEA ||
         requested.MANDIL ||
         requested.SPAGHETTI)
     )
-      throw new Error("En unidades corresponde una avena cada 2 unidades.");
+      throw new Error(
+        "En unidades: 1 und = 1 Avena, 2 und = 2 Avenas y de 3 a 5 und = 2 Avenas.",
+      );
     if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje) {
       const month = Number(
         new Intl.DateTimeFormat("en-US", {

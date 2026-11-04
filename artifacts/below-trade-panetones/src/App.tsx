@@ -2807,10 +2807,13 @@ function bonusProductsFor(
   date = new Date(),
 ) {
   const activeProducts = activeCanjeProducts(date, stock);
+  // Unidades: 1 und = 1 Avena, 2 und = 2 Avenas, de 3 a 5 und = 2 Avenas.
   if (mode === "UNIDADES")
     return total >= 1 && total <= 2
       ? canjeProducts.filter((product) => product.id === "CANJE_AVENA_1")
-      : [];
+      : total >= 3 && total <= 5
+        ? canjeProducts.filter((product) => product.id === "CANJE_AVENA_2")
+        : [];
   if (planchas >= 80) {
     const fixed = canjeProducts.find(
       (product) => product.id === "CANJE_AVENA_144_SPAGHETTI_100",
@@ -12647,7 +12650,11 @@ function PromoterApp({
     bonusProducts.find((product) => product.id === selectedBonusProductId) ||
     bonusProducts[0];
   const automaticUnitCanjeCount =
-    mode === "UNIDADES" && unitQty >= 1 && unitQty <= 2 ? unitQty : 0;
+    mode === "UNIDADES" && unitQty >= 1 && unitQty <= 2
+      ? unitQty
+      : mode === "UNIDADES" && unitQty >= 3 && unitQty <= 5
+        ? 1
+        : 0;
   const canjeCount = masterRuleMatch
     ? mode === "UNIDADES"
       ? masterRuleMatch.appliedFactor
