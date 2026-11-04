@@ -153,52 +153,23 @@ function isNoCanjeMarketData(record: StoredRecord) {
   return isNoCanjeLocation(record);
 }
 
-// Canje en ventas por unidad: solo aplica a productos de 900 g o más.
-const UNIT_CANJE_MIN_WEIGHT_KG = 0.9;
+// Canje en ventas por unidad: los minis (Todinnito 85 g, Mini Costa Minions 80 g
+// y Mini Costa Jurassic 80 g) no llevan canje. Todos los demás productos sí.
 const UNIT_CANJE_WEIGHT_MESSAGE =
-  "En ventas por unidad, el canje solo aplica a productos de 900 g o más.";
+  "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.";
 
-function gramsFromProductLabel(text: string) {
-  const match = String(text || "")
-    .toUpperCase()
-    .match(/(\d{2,4})\s*(?:G|GR|GRS|GRAMOS)\b/);
-  return match ? Number(match[1]) : null;
-}
-
-/**
- * true si es una venta por unidad de un producto de menos de 900 g.
- * Peso: catálogo de productos → peso enviado en la venta → gramos en el nombre.
- * Si no se puede saber el peso, no se bloquea (comportamiento anterior).
- */
+/** true si es una venta por unidad de uno de los minis (se reconoce por SKU o por nombre). */
 async function isUnitSaleBelowCanjeWeight(db: QueryClient, record: StoredRecord) {
   if (value(record, "mode") !== "UNIDADES") return false;
   const prices = isRecord(record.unitPrices) ? record.unitPrices : {};
   const sku = String(Object.keys(prices)[0] || "").trim();
-  let kg = 0;
-  let label = sku;
-  if (sku) {
-    const found = await db.query(
-      "SELECT product, data FROM product_prices WHERE upper(sku)=upper($1) LIMIT 1",
-      [sku],
-    );
-    const row = found.rows[0];
-    if (row) {
-      const data = isRecord(row.data) ? row.data : {};
-      kg = Number(data.weightKg) || 0;
-      label = `${sku} ${String(row.product || "")}`;
-    }
-  }
-  if (!(kg > 0)) {
-    const units = Number(record.units) || 0;
-    const totalKg = Number(record.weightKg) || 0;
-    if (units > 0 && totalKg > 0) kg = totalKg / units;
-  }
-  if (!(kg > 0)) {
-    const grams = gramsFromProductLabel(label);
-    if (grams) kg = grams / 1000;
-  }
-  if (!(kg > 0)) return false;
-  return kg < UNIT_CANJE_MIN_WEIGHT_KG - 0.0005;
+  if (!sku) return false;
+  if (isMiniHalfPlanchaLine({ sku })) return true;
+  const found = await db.query(
+    "SELECT product FROM product_prices WHERE upper(sku)=upper($1) LIMIT 1",
+    [sku],
+  );
+  return isMiniHalfPlanchaLine({ sku, product: String(found.rows[0]?.product || "") });
 }
 
 function stripCanjeFromSale(
@@ -228,7 +199,7 @@ function stripCanjeFromSale(
           punoWithoutCanje: true,
           noCanjeZone: "JULIACA",
         }
-      : { noCanjeReason: "PRODUCTO_MENOR_900G" }),
+      : { noCanjeReason: "MINI_POR_UNIDAD" }),
   };
 }
 

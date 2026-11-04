@@ -132,19 +132,14 @@ function isNoCanjeLocation(location: { name?: string; province?: string; distric
     name.includes(NO_CANJE_NAME_KEYWORD)
   );
 }
-// Canje en ventas por unidad: solo aplica a productos de 900 g o más.
-const UNIT_CANJE_MIN_WEIGHT_KG = 0.9;
-function gramsFromProductLabel(text: string) {
-  const match = String(text || "").toUpperCase().match(/(\d{2,4})\s*(?:G|GR|GRS|GRAMOS)\b/);
-  return match ? Number(match[1]) : null;
+// Canje en ventas por unidad: los minis (Todinnito 85 g, Mini Costa Minions 80 g
+// y Mini Costa Jurassic 80 g) no llevan canje. Todos los demás productos sí.
+function unitProductAllowsCanje(sku?: string, label?: string) {
+  return !isMiniHalfPlanchaProduct(sku, label);
 }
-function unitWeightAllowsCanje(weightKg: number, label = "") {
-  const grams = gramsFromProductLabel(label);
-  const kg = weightKg > 0 ? weightKg : grams ? grams / 1000 : 0;
-  // Si el peso no se conoce no se bloquea el canje (igual que antes).
-  if (!(kg > 0)) return true;
-  return kg >= UNIT_CANJE_MIN_WEIGHT_KG - 0.0005;
-}
+const UNIT_NO_CANJE_TITLE = "Mini por unidad: venta sin canje";
+const UNIT_NO_CANJE_DETAIL =
+  "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.";
 function isNoCanjeMarket(market?: Pick<Market, "name" | "province" | "district"> | null) {
   return Boolean(market) && isNoCanjeLocation(market!);
 }
@@ -5202,12 +5197,18 @@ function SaleEditModal({
       );
   const saleMarket = markets.find((market) => market.id === sale.marketId);
   const punoWithoutCanje = isNoCanjeMarket(saleMarket);
-  // Ventas por unidad de menos de 900 g: no se les puede agregar canje
+  // Minis vendidos por unidad: no se les puede agregar canje
   // (si ya tenían uno registrado antes de esta regla, se conserva).
+  const editSaleSku = Object.keys(sale.unitPrices || {})[0] || "";
   const weightWithoutCanje =
     sale.mode === "UNIDADES" &&
     originalCount === 0 &&
-    !unitWeightAllowsCanje(saleWeightKg(sale) / Math.max(1, Number(sale.units) || 1), Object.keys(sale.unitPrices || {})[0] || "");
+    !unitProductAllowsCanje(
+      editSaleSku,
+      products.find((item) => item.sku === editSaleSku)?.name ||
+        UNIT_SALE_PRODUCTS.find((item) => item.sku === editSaleSku)?.label ||
+        "",
+    );
   const editWithoutCanje = punoWithoutCanje || weightWithoutCanje;
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
@@ -5461,8 +5462,8 @@ function SaleEditModal({
       )}
       {!punoWithoutCanje && weightWithoutCanje && (
         <div className="notice">
-          <strong>Producto de menos de 900 g: venta sin canje</strong>
-          <p>En ventas por unidad, el canje solo aplica a productos de 900 g o más.</p>
+          <strong>{UNIT_NO_CANJE_TITLE}</strong>
+          <p>{UNIT_NO_CANJE_DETAIL}</p>
         </div>
       )}
       <div className="form-grid">
@@ -12576,11 +12577,11 @@ function PromoterApp({
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
   const punoWithoutCanje = isNoCanjeMarket(selectedMarket);
-  // Venta por unidad de un producto de menos de 900 g: no lleva canje.
+  // Venta por unidad de un mini (Todinnito 85 g, Minions 80 g, Jurassic 80 g): sin canje.
   const unitProductWithoutCanje =
     mode === "UNIDADES" &&
     Boolean(selectedProduct) &&
-    !unitWeightAllowsCanje(Number(selectedProduct?.weightKg) || 0, `${selectedProduct?.sku || ""} ${selectedProduct?.label || ""}`);
+    !unitProductAllowsCanje(selectedProduct?.sku, selectedProduct?.label);
   const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje;
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
@@ -13868,8 +13869,8 @@ function PromoterApp({
         )}
         {!punoWithoutCanje && unitProductWithoutCanje && (
           <div className="notice" data-testid="notice-unit-no-canje">
-            <strong>Producto de menos de 900 g: venta sin canje</strong>
-            <p>En ventas por unidad, el canje solo aplica a productos de 900 g o más.</p>
+            <strong>{UNIT_NO_CANJE_TITLE}</strong>
+            <p>{UNIT_NO_CANJE_DETAIL}</p>
           </div>
         )}
         {punoWithoutCanje && (
