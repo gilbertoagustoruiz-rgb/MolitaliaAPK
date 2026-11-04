@@ -153,7 +153,29 @@ function isNoCanjeMarketData(record: StoredRecord) {
   return isNoCanjeLocation(record);
 }
 
-function stripCanjeFromSale(record: StoredRecord): StoredRecord {
+// Canje en ventas por unidad: los minis (Todinnito 85 g, Mini Costa Minions 80 g
+// y Mini Costa Jurassic 80 g) no llevan canje. Todos los demás productos sí.
+const UNIT_CANJE_WEIGHT_MESSAGE =
+  "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.";
+
+/** true si es una venta por unidad de uno de los minis (se reconoce por SKU o por nombre). */
+async function isUnitSaleBelowCanjeWeight(db: QueryClient, record: StoredRecord) {
+  if (value(record, "mode") !== "UNIDADES") return false;
+  const prices = isRecord(record.unitPrices) ? record.unitPrices : {};
+  const sku = String(Object.keys(prices)[0] || "").trim();
+  if (!sku) return false;
+  if (isMiniHalfPlanchaLine({ sku })) return true;
+  const found = await db.query(
+    "SELECT product FROM product_prices WHERE upper(sku)=upper($1) LIMIT 1",
+    [sku],
+  );
+  return isMiniHalfPlanchaLine({ sku, product: String(found.rows[0]?.product || "") });
+}
+
+function stripCanjeFromSale(
+  record: StoredRecord,
+  reason: "JULIACA" | "PESO" = "JULIACA",
+): StoredRecord {
   const {
     bonus: _bonus,
     redemptionItems: _redemptionItems,
@@ -171,14 +193,21 @@ function stripCanjeFromSale(record: StoredRecord): StoredRecord {
     redemptionCount: 0,
     planchaAccessory: value(record, "mode") === "PLANCHAS" ? "NINGUNO" : undefined,
     planchaMultiplier: value(record, "mode") === "PLANCHAS" ? 1 : undefined,
-    // Nombre histórico de la marca: se conserva para reportes y ventas anteriores.
-    punoWithoutCanje: true,
-    noCanjeZone: "JULIACA",
+    ...(reason === "JULIACA"
+      ? {
+          // Nombre histórico de la marca: se conserva para reportes y ventas anteriores.
+          punoWithoutCanje: true,
+          noCanjeZone: "JULIACA",
+        }
+      : { noCanjeReason: "MINI_POR_UNIDAD" }),
   };
 }
 
-function enforceSaleWithoutCanje(record: StoredRecord) {
-  const clean = stripCanjeFromSale(record);
+function enforceSaleWithoutCanje(
+  record: StoredRecord,
+  reason: "JULIACA" | "PESO" = "JULIACA",
+) {
+  const clean = stripCanjeFromSale(record, reason);
   delete record.bonus;
   delete record.redemptionItems;
   delete record.suggestedRedemptionItems;
@@ -1367,6 +1396,8 @@ async function syncSnapshot(
             const saleMarketData = isRecord(saleMarket.rows[0]?.data) ? saleMarket.rows[0].data : null;
             if (saleMarketData ? isNoCanjeMarketData(saleMarketData) : isNoCanjeSaleRecord(record))
               enforceSaleWithoutCanje(record);
+            else if (await isUnitSaleBelowCanjeWeight(client as unknown as QueryClient, record))
+              enforceSaleWithoutCanje(record, "PESO");
             const validatedRule = await validateSubmittedRedemptionRule(
               client as unknown as QueryClient,
               record,
@@ -5175,11 +5206,18 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (!customer.rows.length || !market.rows.length)
       throw new Error("Selecciona un cliente activo del mercado elegido.");
     const marketData = isRecord(market.rows[0].data) ? market.rows[0].data : {};
-    const punoWithoutCanje = isNoCanjeMarketData(marketData);
-    if (punoWithoutCanje) {
+    const juliacaWithoutCanje = isNoCanjeMarketData(marketData);
+    const weightWithoutCanje =
+      !juliacaWithoutCanje &&
+      (await isUnitSaleBelowCanjeWeight(db as unknown as QueryClient, input));
+    // Variable con nombre histórico: aquí significa "esta venta va sin canje".
+    const punoWithoutCanje = juliacaWithoutCanje || weightWithoutCanje;
+    if (juliacaWithoutCanje) {
       input.marketRegion = value(marketData, "region");
       input.marketDepartment = value(marketData, "department");
       enforceSaleWithoutCanje(input);
+    } else if (weightWithoutCanje) {
+      enforceSaleWithoutCanje(input, "PESO");
     } else {
       requireFinalClientForCanje(input);
     }
@@ -5492,6 +5530,16 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         });
         return;
       }
+    }
+    if (
+      !punoWithoutCanje &&
+      !hasRedemptionConsumption(currentSale.data) &&
+      hasRedemptionConsumption(input) &&
+      (await isUnitSaleBelowCanjeWeight(client as unknown as QueryClient, currentSale.data))
+    ) {
+      await client.query("ROLLBACK");
+      res.status(400).json({ message: UNIT_CANJE_WEIGHT_MESSAGE });
+      return;
     }
     const saleMode = value(currentSale.data, "mode");
     const salePlanchas = Math.max(0, Math.floor(numeric(currentSale.data, "planchas")));

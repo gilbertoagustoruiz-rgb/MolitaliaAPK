@@ -132,6 +132,14 @@ function isNoCanjeLocation(location: { name?: string; province?: string; distric
     name.includes(NO_CANJE_NAME_KEYWORD)
   );
 }
+// Canje en ventas por unidad: los minis (Todinnito 85 g, Mini Costa Minions 80 g
+// y Mini Costa Jurassic 80 g) no llevan canje. Todos los demás productos sí.
+function unitProductAllowsCanje(sku?: string, label?: string) {
+  return !isMiniHalfPlanchaProduct(sku, label);
+}
+const UNIT_NO_CANJE_TITLE = "Mini por unidad: venta sin canje";
+const UNIT_NO_CANJE_DETAIL =
+  "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.";
 function isNoCanjeMarket(market?: Pick<Market, "name" | "province" | "district"> | null) {
   return Boolean(market) && isNoCanjeLocation(market!);
 }
@@ -5189,6 +5197,19 @@ function SaleEditModal({
       );
   const saleMarket = markets.find((market) => market.id === sale.marketId);
   const punoWithoutCanje = isNoCanjeMarket(saleMarket);
+  // Minis vendidos por unidad: no se les puede agregar canje
+  // (si ya tenían uno registrado antes de esta regla, se conserva).
+  const editSaleSku = Object.keys(sale.unitPrices || {})[0] || "";
+  const weightWithoutCanje =
+    sale.mode === "UNIDADES" &&
+    originalCount === 0 &&
+    !unitProductAllowsCanje(
+      editSaleSku,
+      products.find((item) => item.sku === editSaleSku)?.name ||
+        UNIT_SALE_PRODUCTS.find((item) => item.sku === editSaleSku)?.label ||
+        "",
+    );
+  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje;
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -5206,7 +5227,7 @@ function SaleEditModal({
     }),
     {} as RedemptionStock,
   );
-  const availableCanjes = punoWithoutCanje
+  const availableCanjes = editWithoutCanje
     ? []
     : bonusProductsFor(
         sale.mode,
@@ -5439,6 +5460,12 @@ function SaleEditModal({
           <p>No se pueden agregar bonificaciones a esta venta.</p>
         </div>
       )}
+      {!punoWithoutCanje && weightWithoutCanje && (
+        <div className="notice">
+          <strong>{UNIT_NO_CANJE_TITLE}</strong>
+          <p>{UNIT_NO_CANJE_DETAIL}</p>
+        </div>
+      )}
       <div className="form-grid">
         <SelectField
           label="Cliente *"
@@ -5478,7 +5505,7 @@ function SaleEditModal({
             testId="input-edit-sale-date"
           />
         </Field>
-        {!punoWithoutCanje && sale.mode === "UNIDADES" ? (
+        {!editWithoutCanje && sale.mode === "UNIDADES" ? (
           <SelectField
             label="Canje"
             value={canjeProductId}
@@ -5583,7 +5610,7 @@ function SaleEditModal({
             </Field>
           </>
         ) : null}
-        {!punoWithoutCanje && sale.mode === "UNIDADES" && selectedCanje && (
+        {!editWithoutCanje && sale.mode === "UNIDADES" && selectedCanje && (
           <Field label="Número de canjes *">
             <select
               className="select"
@@ -12550,6 +12577,12 @@ function PromoterApp({
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
   const punoWithoutCanje = isNoCanjeMarket(selectedMarket);
+  // Venta por unidad de un mini (Todinnito 85 g, Minions 80 g, Jurassic 80 g): sin canje.
+  const unitProductWithoutCanje =
+    mode === "UNIDADES" &&
+    Boolean(selectedProduct) &&
+    !unitProductAllowsCanje(selectedProduct?.sku, selectedProduct?.label);
+  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje;
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
@@ -12582,7 +12615,7 @@ function PromoterApp({
   }, [planchas, planchaMultiplier]);
 
   const masterRuleMatch =
-    !punoWithoutCanje && redemptionRulesLoaded
+    !saleWithoutCanje && redemptionRulesLoaded
       ? resolveRedemptionRule(redemptionRules, {
           mode,
           units: total,
@@ -12601,7 +12634,7 @@ function PromoterApp({
       : null;
 
   const bonusProducts =
-    punoWithoutCanje || redemptionRulesLoaded
+    saleWithoutCanje || redemptionRulesLoaded
       ? []
       : bonusProductsFor(
           mode,
@@ -12633,7 +12666,7 @@ function PromoterApp({
         planchaMultiplier,
       );
   const requiredRedemptions =
-    punoWithoutCanje
+    saleWithoutCanje
       ? ({} as Partial<RedemptionStock>)
       : miniHalfPlanchaCanje
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
@@ -12677,7 +12710,7 @@ function PromoterApp({
   );
   const exceptionNeedsComment = false;
   const exchangeEvidenceRequired = Boolean(
-    bonus || (mode === "PLANCHAS" && !punoWithoutCanje),
+    bonus || (mode === "PLANCHAS" && !saleWithoutCanje),
   );
   const validUnitQty =
     mode === "PLANCHAS" ||
@@ -13026,12 +13059,12 @@ function PromoterApp({
         mode === "PLANCHAS" && hasCanje ? requiredRedemptions : undefined,
       planchaAccessory:
         mode === "PLANCHAS"
-          ? punoWithoutCanje
+          ? saleWithoutCanje
             ? "NINGUNO"
             : effectivePlanchaAccessory
           : undefined,
       planchaMultiplier:
-        mode === "PLANCHAS" ? (punoWithoutCanje ? 1 : planchaMultiplier) : undefined,
+        mode === "PLANCHAS" ? (saleWithoutCanje ? 1 : planchaMultiplier) : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
@@ -13795,7 +13828,7 @@ function PromoterApp({
             )}
           </div>
         </div>
-        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 10 && (
+        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 10 && (
           <Field label="Dinámica de canje *">
             <select
               className="select"
@@ -13819,7 +13852,7 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && (
+        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && (
           <Field label="Multiplicador solicitado *">
             <select
               className="select"
@@ -13834,13 +13867,19 @@ function PromoterApp({
             </select>
           </Field>
         )}
+        {!punoWithoutCanje && unitProductWithoutCanje && (
+          <div className="notice" data-testid="notice-unit-no-canje">
+            <strong>{UNIT_NO_CANJE_TITLE}</strong>
+            <p>{UNIT_NO_CANJE_DETAIL}</p>
+          </div>
+        )}
         {punoWithoutCanje && (
           <div className="notice">
             <strong>Zona Juliaca: venta sin canje</strong>
             <p>Las ventas en Juliaca no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
           </div>
         )}
-        {!punoWithoutCanje && bonus && mode === "PLANCHAS" && (
+        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && (
           <p className="sale-form-note">
             Canje calculado automáticamente: {bonus}
             {selectedWarehouse ? ` · Almacén: ${selectedWarehouse.name}` : " · Mercado sin almacén asignado"}
