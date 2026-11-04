@@ -5212,7 +5212,15 @@ function SaleEditModal({
         UNIT_SALE_PRODUCTS.find((item) => item.sku === editSaleSku)?.label ||
         "",
     );
-  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje;
+  // Minis desde 2 planchas sin canje: tampoco se les puede agregar.
+  const editPlanchaLines = (sale.planchaLines || []).filter((line) => Number(line.units) > 0);
+  const miniPlanchaEditWithoutCanje =
+    sale.mode === "PLANCHAS" &&
+    originalCount === 0 &&
+    (Number(sale.planchas) || 0) > 1 &&
+    editPlanchaLines.length > 0 &&
+    editPlanchaLines.every((line) => isMiniHalfPlanchaProduct(line.sku, line.product));
+  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje || miniPlanchaEditWithoutCanje;
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -5369,7 +5377,7 @@ function SaleEditModal({
     });
   };
   const exchangeEvidenceRequired = Boolean(
-    editedBonus || (sale.mode === "PLANCHAS" && !punoWithoutCanje),
+    editedBonus || (sale.mode === "PLANCHAS" && !editWithoutCanje),
   );
   const exchangeEvidenceReady =
     !exchangeEvidenceRequired || Boolean(exchange || sale.exchangePhoto);
@@ -5463,6 +5471,12 @@ function SaleEditModal({
           <p>No se pueden agregar bonificaciones a esta venta.</p>
         </div>
       )}
+      {!punoWithoutCanje && miniPlanchaEditWithoutCanje && (
+        <div className="notice">
+          <strong>Minis desde 2 planchas: venta sin canje</strong>
+          <p>Los minis 80/85 g solo tienen canje en 1/2 plancha (24 und) y 1 plancha (48 und).</p>
+        </div>
+      )}
       {!punoWithoutCanje && weightWithoutCanje && (
         <div className="notice">
           <strong>{UNIT_NO_CANJE_TITLE}</strong>
@@ -5524,7 +5538,7 @@ function SaleEditModal({
               })),
             ]}
           />
-        ) : !punoWithoutCanje && sale.mode === "PLANCHAS" ? (
+        ) : !editWithoutCanje && sale.mode === "PLANCHAS" ? (
           <>
             {(sale.planchas || 0) >= 10 && (
               <SelectField
@@ -5641,7 +5655,7 @@ function SaleEditModal({
           />
         </Field>
       </div>
-      {!punoWithoutCanje && (sale.mode !== "UNIDADES" || selectedCanje) ? (
+      {!editWithoutCanje && (sale.mode !== "UNIDADES" || selectedCanje) ? (
         missingStock && (
         <div className="stock-warning">
           <PackageCheck /> Stock insuficiente de{" "}
@@ -12585,7 +12599,9 @@ function PromoterApp({
     mode === "UNIDADES" &&
     Boolean(selectedProduct) &&
     !unitProductAllowsCanje(selectedProduct?.sku, selectedProduct?.label);
-  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje;
+  // Minis por planchas: canje solo en 1/2 plancha y 1 plancha; desde 2 planchas, sin canje.
+  const miniPlanchaWithoutCanje = mode === "PLANCHAS" && miniOnlyPlancha && planchas > 1;
+  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje || miniPlanchaWithoutCanje;
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
@@ -13734,7 +13750,7 @@ function PromoterApp({
                   <p className="formula">
                     {product.label} · {unitsPerPlancha} unidades por plancha
                     {isMiniHalfPlanchaProduct(line.sku, product?.label)
-                      ? " · 24 und (1/2 plancha) activa 2 Avena Clásica · 48 und = 1 plancha"
+                      ? " · 24 und (1/2 plancha) = 2 Avenas · 48 und (1 plancha) = 3 Avenas + 1 Spaghetti · desde 2 planchas sin canje"
                       : ""}
                   </p>
                   {planchaType === "MIX" && planchaLines.length > 2 && (
@@ -13873,6 +13889,12 @@ function PromoterApp({
               <option value={4}>x4 · requiere aprobación Trade</option>
             </select>
           </Field>
+        )}
+        {!punoWithoutCanje && miniPlanchaWithoutCanje && (
+          <div className="notice" data-testid="notice-mini-plancha-no-canje">
+            <strong>Minis desde 2 planchas: venta sin canje</strong>
+            <p>Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g solo tienen canje en 1/2 plancha (24 und) y 1 plancha (48 und).</p>
+          </div>
         )}
         {!punoWithoutCanje && unitProductWithoutCanje && (
           <div className="notice" data-testid="notice-unit-no-canje">

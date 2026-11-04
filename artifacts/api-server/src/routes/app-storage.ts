@@ -153,23 +153,73 @@ function isNoCanjeMarketData(record: StoredRecord) {
   return isNoCanjeLocation(record);
 }
 
-// Canje en ventas por unidad: los minis (Todinnito 85 g, Mini Costa Minions 80 g
-// y Mini Costa Jurassic 80 g) no llevan canje. Todos los demás productos sí.
-const UNIT_CANJE_WEIGHT_MESSAGE =
-  "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.";
+// Minis (Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g):
+// - por unidad: sin canje;
+// - por planchas (solo minis): canje en 1/2 plancha (24 und) y 1 plancha (48 und);
+//   desde 2 planchas, sin canje. Mezclas con otros productos: escala normal.
+type CanjeExclusion = "MINI_UNIDAD" | "MINI_PLANCHAS";
+const CANJE_EXCLUSION_MESSAGE: Record<CanjeExclusion, string> = {
+  MINI_UNIDAD:
+    "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.",
+  MINI_PLANCHAS:
+    "Los minis 80/85 g solo tienen canje en 1/2 plancha (24 und) y 1 plancha (48 und). Desde 2 planchas la venta va sin canje.",
+};
 
-/** true si es una venta por unidad de uno de los minis (se reconoce por SKU o por nombre). */
-async function isUnitSaleBelowCanjeWeight(db: QueryClient, record: StoredRecord) {
-  if (value(record, "mode") !== "UNIDADES") return false;
-  const prices = isRecord(record.unitPrices) ? record.unitPrices : {};
-  const sku = String(Object.keys(prices)[0] || "").trim();
-  if (!sku) return false;
-  if (isMiniHalfPlanchaLine({ sku })) return true;
+async function catalogProductsBySku(db: QueryClient, skus: string[]) {
+  const wanted = [...new Set(skus.map((sku) => sku.trim().toUpperCase()).filter(Boolean))];
+  if (!wanted.length) return new Map<string, { product: string; unitsPerPlancha: number }>();
   const found = await db.query(
-    "SELECT product FROM product_prices WHERE upper(sku)=upper($1) LIMIT 1",
-    [sku],
+    "SELECT upper(sku) AS sku, product, data FROM product_prices WHERE upper(sku) = ANY($1::text[])",
+    [wanted],
   );
-  return isMiniHalfPlanchaLine({ sku, product: String(found.rows[0]?.product || "") });
+  return new Map(
+    found.rows.map((row) => {
+      const data = isRecord(row.data) ? row.data : {};
+      return [
+        String(row.sku),
+        {
+          product: String(row.product || ""),
+          unitsPerPlancha: Math.floor(Number(data.unitsPerPlancha) || 0),
+        },
+      ];
+    }),
+  );
+}
+
+async function isMiniLine(
+  line: StoredRecord,
+  catalog: Map<string, { product: string; unitsPerPlancha: number }>,
+) {
+  const sku = value(line, "sku");
+  return (
+    isMiniHalfPlanchaLine(line) ||
+    isMiniHalfPlanchaLine({ sku, product: catalog.get(sku.toUpperCase())?.product || "" })
+  );
+}
+
+/** Motivo por el que el producto de la venta no lleva canje, o null si sí lleva. */
+async function productCanjeExclusion(
+  db: QueryClient,
+  record: StoredRecord,
+): Promise<CanjeExclusion | null> {
+  const mode = value(record, "mode");
+  if (mode === "UNIDADES") {
+    const prices = isRecord(record.unitPrices) ? record.unitPrices : {};
+    const sku = String(Object.keys(prices)[0] || "").trim();
+    if (!sku) return null;
+    const catalog = await catalogProductsBySku(db, [sku]);
+    return (await isMiniLine({ sku }, catalog)) ? "MINI_UNIDAD" : null;
+  }
+  if (mode === "PLANCHAS") {
+    const lines = Array.isArray(record.planchaLines)
+      ? record.planchaLines.filter(isRecord).filter((line) => numeric(line, "units") > 0)
+      : [];
+    if (!lines.length || !(numeric(record, "planchas") > 1)) return null;
+    const catalog = await catalogProductsBySku(db, lines.map((line) => value(line, "sku")));
+    for (const line of lines) if (!(await isMiniLine(line, catalog))) return null;
+    return "MINI_PLANCHAS";
+  }
+  return null;
 }
 
 // Escala de Unidades cuando la venta no trae una Escala de Canje (respaldo):
@@ -183,7 +233,7 @@ function legacyUnitAvenas(units: number) {
 
 function stripCanjeFromSale(
   record: StoredRecord,
-  reason: "JULIACA" | "PESO" = "JULIACA",
+  reason: "JULIACA" | CanjeExclusion = "JULIACA",
 ): StoredRecord {
   const {
     bonus: _bonus,
@@ -208,13 +258,16 @@ function stripCanjeFromSale(
           punoWithoutCanje: true,
           noCanjeZone: "JULIACA",
         }
-      : { noCanjeReason: "MINI_POR_UNIDAD" }),
+      : {
+          noCanjeReason:
+            reason === "MINI_UNIDAD" ? "MINI_POR_UNIDAD" : "MINI_MAS_DE_1_PLANCHA",
+        }),
   };
 }
 
 function enforceSaleWithoutCanje(
   record: StoredRecord,
-  reason: "JULIACA" | "PESO" = "JULIACA",
+  reason: "JULIACA" | CanjeExclusion = "JULIACA",
 ) {
   const clean = stripCanjeFromSale(record, reason);
   delete record.bonus;
@@ -1405,8 +1458,10 @@ async function syncSnapshot(
             const saleMarketData = isRecord(saleMarket.rows[0]?.data) ? saleMarket.rows[0].data : null;
             if (saleMarketData ? isNoCanjeMarketData(saleMarketData) : isNoCanjeSaleRecord(record))
               enforceSaleWithoutCanje(record);
-            else if (await isUnitSaleBelowCanjeWeight(client as unknown as QueryClient, record))
-              enforceSaleWithoutCanje(record, "PESO");
+            else {
+              const exclusion = await productCanjeExclusion(client as unknown as QueryClient, record);
+              if (exclusion) enforceSaleWithoutCanje(record, exclusion);
+            }
             const validatedRule = await validateSubmittedRedemptionRule(
               client as unknown as QueryClient,
               record,
@@ -5216,17 +5271,17 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error("Selecciona un cliente activo del mercado elegido.");
     const marketData = isRecord(market.rows[0].data) ? market.rows[0].data : {};
     const juliacaWithoutCanje = isNoCanjeMarketData(marketData);
-    const weightWithoutCanje =
-      !juliacaWithoutCanje &&
-      (await isUnitSaleBelowCanjeWeight(db as unknown as QueryClient, input));
+    const productExclusion = juliacaWithoutCanje
+      ? null
+      : await productCanjeExclusion(db as unknown as QueryClient, input);
     // Variable con nombre histórico: aquí significa "esta venta va sin canje".
-    const punoWithoutCanje = juliacaWithoutCanje || weightWithoutCanje;
+    const punoWithoutCanje = juliacaWithoutCanje || Boolean(productExclusion);
     if (juliacaWithoutCanje) {
       input.marketRegion = value(marketData, "region");
       input.marketDepartment = value(marketData, "department");
       enforceSaleWithoutCanje(input);
-    } else if (weightWithoutCanje) {
-      enforceSaleWithoutCanje(input, "PESO");
+    } else if (productExclusion) {
+      enforceSaleWithoutCanje(input, productExclusion);
     } else {
       requireFinalClientForCanje(input);
     }
@@ -5280,10 +5335,34 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         units
     )
       throw new Error("El mix debe sumar las unidades de la venta.");
+    // Planchas según las unidades por plancha de cada producto
+    // (catálogo; si falta: minis 48, demás 6).
+    let planchaLinesMatch = false;
+    if (mode === "PLANCHAS" && inputPlanchaLines.length) {
+      const catalog = await catalogProductsBySku(
+        db as unknown as QueryClient,
+        inputPlanchaLines.map((line) => value(line, "sku")),
+      );
+      let lineUnits = 0;
+      let expectedPlanchas = 0;
+      for (const line of inputPlanchaLines) {
+        const lineQty = Math.max(0, Math.floor(numeric(line, "units")));
+        const configured = catalog.get(value(line, "sku").toUpperCase())?.unitsPerPlancha || 0;
+        const perPlancha = configured > 0 ? configured : (await isMiniLine(line, catalog)) ? 48 : 6;
+        lineUnits += lineQty;
+        expectedPlanchas += lineQty / perPlancha;
+      }
+      planchaLinesMatch =
+        lineUnits === units &&
+        Math.abs(expectedPlanchas - planchas) < 1e-9 &&
+        Number.isInteger(planchas) &&
+        planchas >= 1;
+    }
     if (
       mode === "PLANCHAS" &&
       !validMiniHalfPlancha &&
       !validMiniFullPlancha &&
+      !planchaLinesMatch &&
       (!Number.isInteger(planchas) ||
         planchas < 1 ||
         units !== planchas * 6)
@@ -5547,14 +5626,15 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
         return;
       }
     }
-    if (
+    const editExclusion =
       !punoWithoutCanje &&
       !hasRedemptionConsumption(currentSale.data) &&
-      hasRedemptionConsumption(input) &&
-      (await isUnitSaleBelowCanjeWeight(client as unknown as QueryClient, currentSale.data))
-    ) {
+      hasRedemptionConsumption(input)
+        ? await productCanjeExclusion(client as unknown as QueryClient, currentSale.data)
+        : null;
+    if (editExclusion) {
       await client.query("ROLLBACK");
-      res.status(400).json({ message: UNIT_CANJE_WEIGHT_MESSAGE });
+      res.status(400).json({ message: CANJE_EXCLUSION_MESSAGE[editExclusion] });
       return;
     }
     const saleMode = value(currentSale.data, "mode");
