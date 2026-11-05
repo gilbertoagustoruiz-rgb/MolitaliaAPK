@@ -2140,6 +2140,12 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
           const quantity=Number(row.quantity)||0;
           stock[itemId]=Math.max(0,(Number(stock[itemId])||0)+quantity);
         }
+        const tastingAdjustments=await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='AJUSTE_DEGUSTACION' AND movement_date>$2 GROUP BY item_id",[warehouseId,baseDate]);
+        for(const row of tastingAdjustments.rows){
+          const itemId=String(row.item_id);
+          if(!Object.prototype.hasOwnProperty.call(stock,itemId)) continue;
+          stock[itemId]=Math.max(0,(Number(stock[itemId])||0)+(Number(row.quantity)||0));
+        }
         const initialAdjustments=await db.query("SELECT item_id,SUM(quantity)::numeric AS quantity FROM warehouse_movements WHERE warehouse_id=$1 AND kind='AJUSTE_STOCK_INICIAL' AND movement_date>$2 GROUP BY item_id",[warehouseId,baseDate]);
         for(const row of initialAdjustments.rows){
           const itemId=String(row.item_id);
@@ -3228,6 +3234,160 @@ router.put("/app-storage/warehouses/:id/initial-stock", async (req, res): Promis
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
     res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo modificar el stock inicial." });
+  } finally {
+    db.release();
+  }
+});
+
+// Regularizar degustación por Almacén: en un período, lo que los promotores
+// declararon (y se descontó de este Almacén) se compara con lo que realmente se
+// usó. El stock se ajusta solo por la diferencia (movimiento AJUSTE_DEGUSTACION).
+const TASTING_ITEMS = ["PANETON_900G", "PANETON_85G"] as const;
+function limaDayRange(from: string, to: string) {
+  const valid = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) && Number.isFinite(new Date(`${day}T00:00:00-05:00`).getTime());
+  if (!valid(from) || !valid(to) || from > to) return null;
+  const start = new Date(`${from}T00:00:00-05:00`);
+  const end = new Date(`${to}T00:00:00-05:00`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+async function warehouseTastingSummary(db: QueryClient, warehouseId: string, from: string, to: string) {
+  const range = limaDayRange(from, to);
+  if (!range) throw new Error("Período no válido.");
+  const declared: Record<string, number> = { PANETON_900G: 0, PANETON_85G: 0 };
+  const adjusted: Record<string, number> = { PANETON_900G: 0, PANETON_85G: 0 };
+  const consumed = await db.query(
+    `SELECT wm.item_id, COALESCE(SUM(-wm.quantity),0)::numeric AS quantity, COUNT(DISTINCT wm.data->>'referenceId')::int AS records
+       FROM warehouse_movements wm
+      WHERE wm.warehouse_id=$1 AND wm.kind='DEGUSTACION' AND wm.item_id = ANY($2::text[])
+        AND wm.movement_date >= $3 AND wm.movement_date < $4
+        AND NOT EXISTS (SELECT 1 FROM warehouse_movements r WHERE r.data->>'restoresMovementId'=wm.id)
+      GROUP BY wm.item_id`,
+    [warehouseId, [...TASTING_ITEMS], range.start, range.end],
+  );
+  let records = 0;
+  for (const row of consumed.rows) {
+    declared[String(row.item_id)] = Math.max(0, Number(row.quantity) || 0);
+    records += Number(row.records) || 0;
+  }
+  const adjustments = await db.query(
+    `SELECT wm.id, wm.item_id, wm.quantity, wm.actor_id, wm.movement_date, wm.data,
+            COALESCE(u.data->>'name', wm.data->>'actorName', wm.actor_id) AS actor_name
+       FROM warehouse_movements wm
+       LEFT JOIN users u ON u.id = wm.actor_id
+      WHERE wm.warehouse_id=$1 AND wm.kind='AJUSTE_DEGUSTACION'
+        AND wm.data->>'periodFrom' >= $2 AND wm.data->>'periodTo' <= $3
+      ORDER BY wm.movement_date DESC`,
+    [warehouseId, from, to],
+  );
+  for (const row of adjustments.rows) adjusted[String(row.item_id)] += -(Number(row.quantity) || 0);
+  return {
+    from,
+    to,
+    declared,
+    adjusted,
+    registered: {
+      PANETON_900G: declared.PANETON_900G + adjusted.PANETON_900G,
+      PANETON_85G: declared.PANETON_85G + adjusted.PANETON_85G,
+    },
+    records,
+    history: adjustments.rows.map((row) => ({
+      id: row.id,
+      itemId: row.item_id,
+      quantity: Number(row.quantity) || 0,
+      date: new Date(String(row.movement_date)).toISOString(),
+      reason: value(isRecord(row.data) ? row.data : {}, "note"),
+      actorName: String(row.actor_name || row.actor_id || ""),
+    })),
+  };
+}
+
+router.get("/app-storage/warehouses/:id/tasting-summary", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar degustaciones." });
+  try {
+    const found = await pool.query("SELECT id,name,stock FROM warehouses WHERE id=$1 LIMIT 1", [req.params.id]);
+    if (!found.rows[0]) return void res.status(404).json({ message: "El almacén no existe." });
+    const summary = await warehouseTastingSummary(
+      pool as unknown as QueryClient,
+      String(req.params.id),
+      String(req.query.from || ""),
+      String(req.query.to || ""),
+    );
+    res.json({ ...summary, stock: found.rows[0].stock || {} });
+  } catch (error) {
+    res.status(400).json({ message: error instanceof Error ? error.message : "No se pudo consultar la degustación." });
+  }
+});
+
+router.post("/app-storage/warehouses/:id/tasting-regularize", async (req, res): Promise<void> => {
+  const actor = await authorizedWarehouseActor(req);
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar degustaciones." });
+  const input = isRecord(req.body) ? req.body : {};
+  const from = value(input, "from");
+  const to = value(input, "to");
+  const note = value(input, "note").slice(0, 300);
+  const real: Record<string, number> = {
+    PANETON_900G: Number(input.paneton900g),
+    PANETON_85G: Number(input.paneton85g),
+  };
+  if (!note) return void res.status(400).json({ message: "Indica el motivo de la regularización." });
+  if (!limaDayRange(from, to)) return void res.status(400).json({ message: "Período no válido." });
+  if (TASTING_ITEMS.some((itemId) => !Number.isInteger(real[itemId]) || real[itemId] < 0))
+    return void res.status(400).json({ message: "Las cantidades usadas deben ser números enteros desde 0." });
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    await lockInventoryLedger(db as unknown as QueryClient);
+    const found = await db.query("SELECT id,name,stock,data FROM warehouses WHERE id=$1 FOR UPDATE", [req.params.id]);
+    if (!found.rows[0]) throw new Error("El almacén no existe.");
+    const summary = await warehouseTastingSummary(db as unknown as QueryClient, String(req.params.id), from, to);
+    const stock = isRecord(found.rows[0].stock) ? { ...found.rows[0].stock } : {};
+    const now = new Date().toISOString();
+    const actorName = value(actor as unknown as StoredRecord, "name") || actor.id;
+    const applied: Record<string, number> = {};
+    for (const itemId of TASTING_ITEMS) {
+      // diferencia > 0: se usó más de lo registrado → se descuenta; < 0 → se devuelve.
+      const diff = real[itemId] - summary.registered[itemId];
+      if (!diff) continue;
+      const current = Math.max(0, Number(stock[itemId]) || 0);
+      if (diff > current)
+        throw new Error(`Stock insuficiente de ${itemId === "PANETON_900G" ? "Panetón 900 g" : "Panetón 85 g"} en ${found.rows[0].name}. Disponible: ${current}.`);
+      stock[itemId] = current - diff;
+      const movement = {
+        id: `ALM-AJDEG-${randomUUID()}`,
+        warehouseId: req.params.id,
+        kind: "AJUSTE_DEGUSTACION",
+        itemId,
+        quantity: -diff,
+        actorId: actor.id,
+        actorName,
+        date: now,
+        note,
+        periodFrom: from,
+        periodTo: to,
+        declared: summary.declared[itemId],
+        previousAdjustments: summary.adjusted[itemId],
+        realUsed: real[itemId],
+      };
+      await db.query(
+        "INSERT INTO warehouse_movements(id,warehouse_id,kind,item_id,quantity,actor_id,movement_date,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+        [movement.id, req.params.id, movement.kind, itemId, -diff, actor.id, now, movement],
+      );
+      applied[itemId] = -diff;
+    }
+    if (Object.keys(applied).length) {
+      const data = isRecord(found.rows[0].data)
+        ? { ...found.rows[0].data, stock, updatedAt: now }
+        : { id: req.params.id, stock, updatedAt: now };
+      await db.query("UPDATE warehouses SET stock=$2,data=$3,updated_at=now() WHERE id=$1", [req.params.id, stock, data]);
+    }
+    await db.query("COMMIT");
+    bumpDataVersion();
+    res.json({ stock, applied, changed: Object.keys(applied).length > 0 });
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => undefined);
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudo regularizar la degustación." });
   } finally {
     db.release();
   }
@@ -5992,161 +6152,6 @@ router.delete(
       message:
         "Los canjes asociados a una venta se retiran editando la Venta. Esta ruta legado está deshabilitada para evitar borrar ventas o alterar stock fuera del flujo de Almacén.",
     });
-  },
-);
-
-// Regularizar la degustación de una jornada (cierre): Analista/Admin fija cuántos
-// Panetones de 900 g y 85 g se usaron realmente. Corrige o crea los consumos
-// de esa jornada, ajusta el Almacén solo por la diferencia y guarda el motivo.
-const TASTING_LIMITS = { PANETON_900G: 2, PANETON_85G: 8 } as const;
-router.post(
-  "/app-storage/admin/degustaciones/regularizar",
-  async (req, res): Promise<void> => {
-    const actor = await authorizedWarehouseActor(req);
-    if (!actor) {
-      res.status(403).json({ message: "Solo Admin o Analista puede regularizar degustaciones." });
-      return;
-    }
-    const input = isRecord(req.body) ? req.body : {};
-    const closureId = value(input, "closureId");
-    const reason = value(input, "reason").slice(0, 300);
-    const desired: Record<"PANETON_900G" | "PANETON_85G", number> = {
-      PANETON_900G: Number(input.paneton900g),
-      PANETON_85G: Number(input.paneton85g),
-    };
-    for (const [productId, max] of Object.entries(TASTING_LIMITS) as Array<[keyof typeof desired, number]>) {
-      const quantity = desired[productId];
-      if (!Number.isInteger(quantity) || quantity < 0 || quantity > max) {
-        res.status(400).json({
-          message: `Cantidad no válida: máximo ${TASTING_LIMITS.PANETON_900G} Panetones de 900 g y ${TASTING_LIMITS.PANETON_85G} de 85 g por jornada.`,
-        });
-        return;
-      }
-    }
-    if (!closureId || !reason) {
-      res.status(400).json({ message: "Selecciona la jornada y escribe el motivo de la regularización." });
-      return;
-    }
-    const db = await pool.connect();
-    try {
-      await db.query("BEGIN");
-      await lockInventoryLedger(db as unknown as QueryClient);
-      const closureResult = await db.query(
-        "SELECT id,promoter_id,market_id,client_id,closure_date,data FROM session_closures WHERE id=$1 FOR UPDATE",
-        [closureId],
-      );
-      const closure = closureResult.rows[0];
-      if (!closure) throw new Error("La jornada seleccionada ya no existe.");
-      const promoterId = String(closure.promoter_id || "");
-      const marketId = String(closure.market_id || "");
-      const closureDate = new Date(String(closure.closure_date)).toISOString();
-      // Mismo criterio que el cálculo de contactos del cierre (±1 minuto).
-      const found = await db.query(
-        `SELECT id,quantity,movement_date,data
-           FROM inventory_movements
-          WHERE kind='DEGUSTACION'
-            AND market_id=$1
-            AND COALESCE(data->>'promoterId',data->>'actorId','')=$2
-            AND movement_date BETWEEN $3::timestamptz - interval '1 minute'
-                                  AND $3::timestamptz + interval '1 minute'
-          ORDER BY id
-          FOR UPDATE`,
-        [marketId, promoterId, closureDate],
-      );
-      const productOf = (data: StoredRecord) =>
-        value(data, "degustacionProductId") === "PANETON_85G" ? "PANETON_85G" : "PANETON_900G";
-      const before = { PANETON_900G: 0, PANETON_85G: 0 };
-      for (const row of found.rows) {
-        const data = isRecord(row.data) ? row.data : {};
-        before[productOf(data)] += Math.max(0, Math.floor(Number(row.quantity) || 0));
-      }
-      const updatedAt = new Date().toISOString();
-      const regularization = {
-        at: updatedAt,
-        byId: actor.id,
-        byName: value(actor as unknown as StoredRecord, "name") || actor.id,
-        reason,
-        before: { paneton900g: before.PANETON_900G, paneton85g: before.PANETON_85G },
-        after: { paneton900g: desired.PANETON_900G, paneton85g: desired.PANETON_85G },
-      };
-      const changed: string[] = [];
-      for (const productId of ["PANETON_900G", "PANETON_85G"] as const) {
-        const rows = found.rows.filter((row) => productOf(isRecord(row.data) ? row.data : {}) === productId);
-        if (before[productId] === desired[productId] && rows.length <= 1) continue;
-        // Se deja un solo consumo por producto con la cantidad real.
-        for (const row of rows) {
-          await restoreWarehouseStockMovements(db as unknown as QueryClient, `DEGUSTACION:${row.id}`, actor.id);
-        }
-        const label = productId === "PANETON_85G" ? "Panetón 85 g" : "Panetón 900 g";
-        const primary = rows[0];
-        const primaryId = primary
-          ? String(primary.id)
-          : `DEG-REG-${closureId}-${productId === "PANETON_85G" ? "85G" : "900G"}`;
-        for (const row of rows.slice(1)) {
-          const data = isRecord(row.data) ? row.data : {};
-          await db.query(
-            "UPDATE inventory_movements SET quantity=0,data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-            [row.id, { ...data, quantity: 0, regularization, updatedAt }, updatedAt],
-          );
-        }
-        if (desired[productId] > 0)
-          await applyWarehouseStockMovement(
-            db as unknown as QueryClient,
-            marketId,
-            { [productId]: desired[productId] },
-            "DEGUSTACION",
-            promoterId,
-            `DEGUSTACION:${primaryId}`,
-          );
-        const primaryData = primary && isRecord(primary.data) ? primary.data : {};
-        const nextRecord = {
-          ...primaryData,
-          id: primaryId,
-          marketId,
-          kind: "DEGUSTACION",
-          quantity: desired[productId],
-          actorId: value(primaryData, "actorId") || promoterId,
-          promoterId,
-          closureId,
-          degustacionProductId: productId,
-          degustacionProductLabel: label,
-          date: primary ? new Date(String(primary.movement_date)).toISOString() : closureDate,
-          status: "SINCRONIZADA",
-          regularization,
-          updatedAt,
-        };
-        if (primary)
-          await db.query(
-            `UPDATE inventory_movements
-                SET quantity=$2,item_id=NULL,data=$3,record_updated_at=$4,updated_at=now()
-              WHERE id=$1`,
-            [primaryId, desired[productId], nextRecord, updatedAt],
-          );
-        else await upsertRecord(db as unknown as QueryClient, "movements", nextRecord);
-        changed.push(productId);
-      }
-      if (changed.length) {
-        await recalculateDegustacionClosure(db as unknown as QueryClient, promoterId, marketId, closureDate);
-        const closureData = await db.query("SELECT data FROM session_closures WHERE id=$1", [closureId]);
-        const currentData = isRecord(closureData.rows[0]?.data) ? closureData.rows[0].data : {};
-        const history = Array.isArray(currentData.tastingRegularizations) ? currentData.tastingRegularizations : [];
-        await db.query(
-          "UPDATE session_closures SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
-          [closureId, { ...currentData, tastingRegularizations: [...history, regularization].slice(-20), updatedAt }, updatedAt],
-        );
-      }
-      await db.query("COMMIT");
-      bumpDataVersion();
-      res.json({ changed: changed.length > 0, regularization, snapshot: await readSnapshot() });
-    } catch (error) {
-      await db.query("ROLLBACK").catch(() => undefined);
-      req.log.error({ err: error }, "Unable to regularize degustacion");
-      res.status(409).json({
-        message: error instanceof Error ? error.message : "No se pudo regularizar la degustación.",
-      });
-    } finally {
-      db.release();
-    }
   },
 );
 
