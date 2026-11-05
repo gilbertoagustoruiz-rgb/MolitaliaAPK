@@ -5995,6 +5995,161 @@ router.delete(
   },
 );
 
+// Regularizar la degustación de una jornada (cierre): Analista/Admin fija cuántos
+// Panetones de 900 g y 85 g se usaron realmente. Corrige o crea los consumos
+// de esa jornada, ajusta el Almacén solo por la diferencia y guarda el motivo.
+const TASTING_LIMITS = { PANETON_900G: 2, PANETON_85G: 8 } as const;
+router.post(
+  "/app-storage/admin/degustaciones/regularizar",
+  async (req, res): Promise<void> => {
+    const actor = await authorizedWarehouseActor(req);
+    if (!actor) {
+      res.status(403).json({ message: "Solo Admin o Analista puede regularizar degustaciones." });
+      return;
+    }
+    const input = isRecord(req.body) ? req.body : {};
+    const closureId = value(input, "closureId");
+    const reason = value(input, "reason").slice(0, 300);
+    const desired: Record<"PANETON_900G" | "PANETON_85G", number> = {
+      PANETON_900G: Number(input.paneton900g),
+      PANETON_85G: Number(input.paneton85g),
+    };
+    for (const [productId, max] of Object.entries(TASTING_LIMITS) as Array<[keyof typeof desired, number]>) {
+      const quantity = desired[productId];
+      if (!Number.isInteger(quantity) || quantity < 0 || quantity > max) {
+        res.status(400).json({
+          message: `Cantidad no válida: máximo ${TASTING_LIMITS.PANETON_900G} Panetones de 900 g y ${TASTING_LIMITS.PANETON_85G} de 85 g por jornada.`,
+        });
+        return;
+      }
+    }
+    if (!closureId || !reason) {
+      res.status(400).json({ message: "Selecciona la jornada y escribe el motivo de la regularización." });
+      return;
+    }
+    const db = await pool.connect();
+    try {
+      await db.query("BEGIN");
+      await lockInventoryLedger(db as unknown as QueryClient);
+      const closureResult = await db.query(
+        "SELECT id,promoter_id,market_id,client_id,closure_date,data FROM session_closures WHERE id=$1 FOR UPDATE",
+        [closureId],
+      );
+      const closure = closureResult.rows[0];
+      if (!closure) throw new Error("La jornada seleccionada ya no existe.");
+      const promoterId = String(closure.promoter_id || "");
+      const marketId = String(closure.market_id || "");
+      const closureDate = new Date(String(closure.closure_date)).toISOString();
+      // Mismo criterio que el cálculo de contactos del cierre (±1 minuto).
+      const found = await db.query(
+        `SELECT id,quantity,movement_date,data
+           FROM inventory_movements
+          WHERE kind='DEGUSTACION'
+            AND market_id=$1
+            AND COALESCE(data->>'promoterId',data->>'actorId','')=$2
+            AND movement_date BETWEEN $3::timestamptz - interval '1 minute'
+                                  AND $3::timestamptz + interval '1 minute'
+          ORDER BY id
+          FOR UPDATE`,
+        [marketId, promoterId, closureDate],
+      );
+      const productOf = (data: StoredRecord) =>
+        value(data, "degustacionProductId") === "PANETON_85G" ? "PANETON_85G" : "PANETON_900G";
+      const before = { PANETON_900G: 0, PANETON_85G: 0 };
+      for (const row of found.rows) {
+        const data = isRecord(row.data) ? row.data : {};
+        before[productOf(data)] += Math.max(0, Math.floor(Number(row.quantity) || 0));
+      }
+      const updatedAt = new Date().toISOString();
+      const regularization = {
+        at: updatedAt,
+        byId: actor.id,
+        byName: value(actor as unknown as StoredRecord, "name") || actor.id,
+        reason,
+        before: { paneton900g: before.PANETON_900G, paneton85g: before.PANETON_85G },
+        after: { paneton900g: desired.PANETON_900G, paneton85g: desired.PANETON_85G },
+      };
+      const changed: string[] = [];
+      for (const productId of ["PANETON_900G", "PANETON_85G"] as const) {
+        const rows = found.rows.filter((row) => productOf(isRecord(row.data) ? row.data : {}) === productId);
+        if (before[productId] === desired[productId] && rows.length <= 1) continue;
+        // Se deja un solo consumo por producto con la cantidad real.
+        for (const row of rows) {
+          await restoreWarehouseStockMovements(db as unknown as QueryClient, `DEGUSTACION:${row.id}`, actor.id);
+        }
+        const label = productId === "PANETON_85G" ? "Panetón 85 g" : "Panetón 900 g";
+        const primary = rows[0];
+        const primaryId = primary
+          ? String(primary.id)
+          : `DEG-REG-${closureId}-${productId === "PANETON_85G" ? "85G" : "900G"}`;
+        for (const row of rows.slice(1)) {
+          const data = isRecord(row.data) ? row.data : {};
+          await db.query(
+            "UPDATE inventory_movements SET quantity=0,data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+            [row.id, { ...data, quantity: 0, regularization, updatedAt }, updatedAt],
+          );
+        }
+        if (desired[productId] > 0)
+          await applyWarehouseStockMovement(
+            db as unknown as QueryClient,
+            marketId,
+            { [productId]: desired[productId] },
+            "DEGUSTACION",
+            promoterId,
+            `DEGUSTACION:${primaryId}`,
+          );
+        const primaryData = primary && isRecord(primary.data) ? primary.data : {};
+        const nextRecord = {
+          ...primaryData,
+          id: primaryId,
+          marketId,
+          kind: "DEGUSTACION",
+          quantity: desired[productId],
+          actorId: value(primaryData, "actorId") || promoterId,
+          promoterId,
+          closureId,
+          degustacionProductId: productId,
+          degustacionProductLabel: label,
+          date: primary ? new Date(String(primary.movement_date)).toISOString() : closureDate,
+          status: "SINCRONIZADA",
+          regularization,
+          updatedAt,
+        };
+        if (primary)
+          await db.query(
+            `UPDATE inventory_movements
+                SET quantity=$2,item_id=NULL,data=$3,record_updated_at=$4,updated_at=now()
+              WHERE id=$1`,
+            [primaryId, desired[productId], nextRecord, updatedAt],
+          );
+        else await upsertRecord(db as unknown as QueryClient, "movements", nextRecord);
+        changed.push(productId);
+      }
+      if (changed.length) {
+        await recalculateDegustacionClosure(db as unknown as QueryClient, promoterId, marketId, closureDate);
+        const closureData = await db.query("SELECT data FROM session_closures WHERE id=$1", [closureId]);
+        const currentData = isRecord(closureData.rows[0]?.data) ? closureData.rows[0].data : {};
+        const history = Array.isArray(currentData.tastingRegularizations) ? currentData.tastingRegularizations : [];
+        await db.query(
+          "UPDATE session_closures SET data=$2,record_updated_at=$3,updated_at=now() WHERE id=$1",
+          [closureId, { ...currentData, tastingRegularizations: [...history, regularization].slice(-20), updatedAt }, updatedAt],
+        );
+      }
+      await db.query("COMMIT");
+      bumpDataVersion();
+      res.json({ changed: changed.length > 0, regularization, snapshot: await readSnapshot() });
+    } catch (error) {
+      await db.query("ROLLBACK").catch(() => undefined);
+      req.log.error({ err: error }, "Unable to regularize degustacion");
+      res.status(409).json({
+        message: error instanceof Error ? error.message : "No se pudo regularizar la degustación.",
+      });
+    } finally {
+      db.release();
+    }
+  },
+);
+
 router.put(
   "/app-storage/admin/degustaciones/movement/:id",
   async (req, res): Promise<void> => {

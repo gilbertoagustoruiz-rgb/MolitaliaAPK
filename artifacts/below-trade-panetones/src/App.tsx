@@ -6704,6 +6704,216 @@ function DegustacionEditModal({
   );
 }
 
+// Regularizar la degustación de una jornada: cuántos Panetones de 900 g y 85 g
+// se usaron realmente. El servidor corrige o crea los consumos y ajusta el Almacén.
+type TastingRegularization = {
+  closureId: string;
+  paneton900g: number;
+  paneton85g: number;
+  reason: string;
+};
+function stockChangeLabel(diff900: number, diff85: number) {
+  const part = (diff: number, label: string) =>
+    diff > 0 ? `se descuentan ${diff} de ${label}` : diff < 0 ? `se devuelven ${-diff} de ${label}` : "";
+  return [part(diff900, "900 g"), part(diff85, "85 g")].filter(Boolean).join(" y ");
+}
+function TastingRegularizeModal({
+  closures,
+  consumos,
+  users,
+  marketMap,
+  clients,
+  warehouses,
+  onSave,
+  close,
+}: {
+  closures: SessionClosure[];
+  consumos: InventoryMovement[];
+  users: AppUser[];
+  marketMap: Record<string, Market>;
+  clients: Client[];
+  warehouses: Warehouse[];
+  onSave: (input: TastingRegularization) => Promise<boolean>;
+  close: () => void;
+}) {
+  const [day, setDay] = useState(() => attendanceDay());
+  const [promoterId, setPromoterId] = useState("");
+  const [closureId, setClosureId] = useState("");
+  const [qty900, setQty900] = useState("0");
+  const [qty85, setQty85] = useState("0");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const dayClosures = closures
+    .filter((closure) => closure.date && attendanceDay(closure.date) === day)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const promoterIds = [...new Set(dayClosures.map((closure) => closure.promoterId))];
+  const userName = (id: string) => users.find((item) => item.id === id)?.name || id;
+  const promoterClosures = dayClosures.filter((closure) => closure.promoterId === promoterId);
+  const closure = promoterClosures.find((item) => item.id === closureId);
+  // Lo declarado en esa jornada (mismo criterio que el servidor: ±1 minuto del cierre).
+  const declared = (productId: "PANETON_900G" | "PANETON_85G") => {
+    if (!closure) return 0;
+    const at = new Date(closure.date).getTime();
+    return consumos
+      .filter(
+        (item) =>
+          item.marketId === closure.marketId &&
+          (item.promoterId || item.actorId) === closure.promoterId &&
+          Math.abs(new Date(item.date).getTime() - at) <= 60_000 &&
+          (item.degustacionProductId === "PANETON_85G" ? "PANETON_85G" : "PANETON_900G") === productId,
+      )
+      .reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0), 0);
+  };
+  const declared900 = declared("PANETON_900G");
+  const declared85 = declared("PANETON_85G");
+  useEffect(() => {
+    setQty900(String(declared900));
+    setQty85(String(declared85));
+  }, [closureId, declared900, declared85]);
+  const warehouse = closure
+    ? warehouses.find(
+        (item) =>
+          item.id === marketMap[closure.marketId]?.warehouseId ||
+          item.marketIds?.includes(closure.marketId),
+      )
+    : undefined;
+  // Disponible para esta jornada = stock actual + lo que ya tenía descontado.
+  const available900 = Math.max(0, Number(warehouse?.stock?.PANETON_900G) || 0) + declared900;
+  const available85 = Math.max(0, Number(warehouse?.stock?.PANETON_85G) || 0) + declared85;
+  const n900 = Number(qty900);
+  const n85 = Number(qty85);
+  const valid900 = Number.isInteger(n900) && n900 >= 0 && n900 <= 2;
+  const valid85 = Number.isInteger(n85) && n85 >= 0 && n85 <= 8;
+  const stockOk = !warehouse || (n900 <= available900 && n85 <= available85);
+  const changed = n900 !== declared900 || n85 !== declared85;
+  const canSave = Boolean(closure) && valid900 && valid85 && stockOk && changed && reason.trim().length > 0 && !saving;
+  const contacts = (valid900 ? n900 : 0) * 80 + (valid85 ? n85 : 0) * 10;
+  return (
+    <Modal
+      title="Regularizar degustación"
+      detail="Corrige cuántos Panetones de 900 g y 85 g se usaron realmente en una jornada. El Almacén se ajusta solo por la diferencia."
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="Fecha de la jornada *">
+          <input
+            className="input"
+            type="date"
+            value={day}
+            max={attendanceDay()}
+            onChange={(event) => {
+              setDay(event.target.value);
+              setPromoterId("");
+              setClosureId("");
+            }}
+            data-testid="input-regularize-day"
+          />
+        </Field>
+        <SelectField
+          label="Promotor *"
+          value={promoterId}
+          onChange={(value) => {
+            setPromoterId(value);
+            const own = dayClosures.filter((item) => item.promoterId === value);
+            setClosureId(own.length === 1 ? own[0].id : "");
+          }}
+          placeholder={promoterIds.length ? "Seleccionar" : "Sin jornadas cerradas ese día"}
+          items={promoterIds.map((id) => ({ value: id, label: userName(id) }))}
+        />
+        <div className="grid-full">
+        <SelectField
+          label="Jornada (cierre) *"
+          value={closureId}
+          onChange={setClosureId}
+          placeholder={promoterId ? "Seleccionar" : "Elige primero el promotor"}
+          items={promoterClosures.map((item) => ({
+            value: item.id,
+            label: `${marketMap[item.marketId]?.name || item.marketId} · ${
+              clients.find((client) => client.id === item.clientId)?.name || "Sin cliente"
+            } · ${limaTime(item.date)}${item.automatic || item.closureType === "AUTOMATICO" ? " · cierre automático" : ""}`,
+          }))}
+        />
+        </div>
+      </div>
+      {closure && (
+        <>
+          <div className="tasting-reg-summary" data-testid="regularize-declared">
+            <div>
+              <span>Declarado</span>
+              <strong>900 g: {declared900} · 85 g: {declared85}</strong>
+            </div>
+            <div>
+              <span>Almacén {warehouse ? warehouse.name : "no asignado"}</span>
+              <strong>
+                900 g: {Math.max(0, Number(warehouse?.stock?.PANETON_900G) || 0)} · 85 g: {Math.max(0, Number(warehouse?.stock?.PANETON_85G) || 0)}
+              </strong>
+            </div>
+          </div>
+          <div className="form-grid">
+            <Field label="Panetón 900 g usados (máx. 2) *">
+              <Input type="number" min={0} max={2} step={1} value={qty900} onChange={setQty900} testId="input-regularize-900" />
+            </Field>
+            <Field label="Panetón 85 g usados (máx. 8) *">
+              <Input type="number" min={0} max={8} step={1} value={qty85} onChange={setQty85} testId="input-regularize-85" />
+            </Field>
+            <Field label="Motivo de la regularización *" className="full-field">
+              <textarea
+                className="input textarea"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                maxLength={300}
+                rows={3}
+                placeholder="Ej.: El promotor usó 1 panetón de 900 g y olvidó declararlo al cerrar."
+                data-testid="input-regularize-reason"
+              />
+            </Field>
+          </div>
+          <p className="tasting-reg-note" data-testid="regularize-note">
+            Contactos de la jornada: {contacts} (900 g = 80 · 85 g = 10)
+            {changed && valid900 && valid85 ? ` · Almacén: ${stockChangeLabel(n900 - declared900, n85 - declared85)}` : ""}
+          </p>
+          {(!valid900 || !valid85) && (
+            <div className="stock-warning">
+              <AlertTriangle /> Máximo 2 Panetones de 900 g y 8 de 85 g por jornada.
+            </div>
+          )}
+          {valid900 && valid85 && !stockOk && (
+            <div className="stock-warning">
+              <PackageCheck /> No hay stock suficiente en el Almacén para esa cantidad.
+            </div>
+          )}
+        </>
+      )}
+      <div className="modal-actions">
+        <Btn variant="outline" disabled={saving} onClick={close}>
+          Cancelar
+        </Btn>
+        <Btn
+          disabled={!canSave}
+          testId="button-save-regularize"
+          onClick={async () => {
+            if (!closure) return;
+            setSaving(true);
+            try {
+              const saved = await onSave({
+                closureId: closure.id,
+                paneton900g: n900,
+                paneton85g: n85,
+                reason: reason.trim(),
+              });
+              if (saved) close();
+            } finally {
+              setSaving(false);
+            }
+          }}
+        >
+          {saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}
+          {saving ? "Guardando..." : "Guardar regularización"}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
 function AdminDegustacionesModule({
   onEdit,
   consumos,
@@ -6711,7 +6921,9 @@ function AdminDegustacionesModule({
   marketMap,
   closures,
   onDeleteConsumo,
+  onRegularize,
 }: {
+  onRegularize?: () => void;
   onEdit: (record: InventoryMovement) => void;
   consumos: InventoryMovement[];
   users: AppUser[];
@@ -6778,6 +6990,11 @@ function AdminDegustacionesModule({
             <h2>{consumos.length} consumos registrados</h2>
             <p>Ordenados desde el más reciente hasta el más antiguo.</p>
           </div>
+          {onRegularize && (
+            <Btn onClick={onRegularize} testId="button-regularize-tasting">
+              <Pencil /> Regularizar degustación
+            </Btn>
+          )}
         </div>
         <div className="panel-body sales-panel-body">
           <TableSearch
@@ -9103,14 +9320,17 @@ function AnalystApp({
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
   const tradeApprovalsRequestInFlight = useRef(false);
   const [marketWarehouses, setMarketWarehouses] = useState<Warehouse[]>([]);
-  useEffect(() => {
-    void fetch("/api/app-storage/warehouses")
+  const [regularizingTasting, setRegularizingTasting] = useState(false);
+  const loadMarketWarehouses = () =>
+    fetch("/api/app-storage/warehouses")
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.message || "No se pudieron cargar los almacenes.");
         setMarketWarehouses(Array.isArray(payload.warehouses) ? payload.warehouses : []);
       })
       .catch(() => setMarketWarehouses([]));
+  useEffect(() => {
+    void loadMarketWarehouses();
   }, []);
   const marketWarehouseMap = Object.fromEntries(marketWarehouses.map((warehouse) => [warehouse.id, warehouse.name]));
   const loadTradeApprovals = async () => {
@@ -10470,6 +10690,21 @@ function AnalystApp({
       );
     }
   };
+  const regularizeTasting = async (input: TastingRegularization) => {
+    try {
+      await adminRequest("/degustaciones/regularizar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      await loadMarketWarehouses();
+      notify("Degustación regularizada y Almacén ajustado");
+      return true;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo regularizar la degustación", true);
+      return false;
+    }
+  };
   const saveTastingConsumption = async (record: InventoryMovement) => {
     try {
       await adminRequest(
@@ -11294,6 +11529,14 @@ function AnalystApp({
           marketMap={marketMap}
           closures={closures}
           onDeleteConsumo={(record) => void deleteTastingConsumption(record)}
+          onRegularize={
+            ["ADMIN", "ANALISTA"].includes(user.role)
+              ? () => {
+                  setRegularizingTasting(true);
+                  void loadMarketWarehouses();
+                }
+              : undefined
+          }
         />
       )}
       {tab === "asignaciones" && (
@@ -11900,6 +12143,18 @@ function AnalystApp({
           warehouses={marketWarehouses}
           onSave={saveSaleEdit}
           close={() => setEditingSale(null)}
+        />
+      )}
+      {regularizingTasting && (
+        <TastingRegularizeModal
+          closures={closures}
+          consumos={tastingConsumptions}
+          users={users}
+          marketMap={marketMap}
+          clients={clients}
+          warehouses={marketWarehouses}
+          onSave={regularizeTasting}
+          close={() => setRegularizingTasting(false)}
         />
       )}
       {editingDegustacion && (
