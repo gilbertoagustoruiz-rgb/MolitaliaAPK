@@ -97,6 +97,16 @@ app.use("/api", async (req, res, next) => {
     }
   }
   if (valid || req.method === "OPTIONS" || !isProtectedPath(req)) return next();
+  // Acción de Analista/Admin sin pase válido ni clave: nunca podría autorizarse.
+  // Se responde 401 para que la app pida ingresar de nuevo (antes daba 403 y el
+  // usuario veía "Solo Admin o Analista..." sin saber que debía reingresar).
+  if (req.get("x-admin-dni") && !req.get("x-admin-key")) {
+    res.status(401).json({
+      code: token ? "SESSION_INVALID" : "SESSION_REQUIRED",
+      message: "Tu sesión venció. Ingresa de nuevo con tu DNI y clave.",
+    });
+    return;
+  }
   if (authMode === "enforce") {
     res.status(401).json({
       code: token ? "SESSION_INVALID" : "SESSION_REQUIRED",

@@ -4675,9 +4675,14 @@ router.all(
         if (name === "users")
           await db.query("DELETE FROM assignments WHERE promoter_id=$1", [id]);
       } else if (name === "users") {
-        const passwordHash = value(next, "password")
-          ? await hashPassword(value(next, "password"))
-          : null;
+        // Solo se recalcula si la clave cambió: rehacer el hash con la misma clave
+        // anulaba los pases de sesión de esa persona.
+        const currentHash = await db.query("SELECT password_hash FROM users WHERE id=$1", [id]);
+        const storedHash = String(currentHash.rows[0]?.password_hash || "");
+        const passwordHash =
+          value(next, "password") && !(await passwordMatchesStored(value(next, "password"), storedHash))
+            ? await hashPassword(value(next, "password"))
+            : null;
         delete next.password;
         await db.query(
           "UPDATE users SET dni=$2,name=$3,role=$4,status=$5,password_hash=COALESCE($6,password_hash),data=$7,record_updated_at=$8,updated_at=now() WHERE id=$1",
