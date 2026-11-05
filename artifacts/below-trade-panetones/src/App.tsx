@@ -534,10 +534,15 @@ const APP_STORAGE_RECORD_PHOTO = "/api/app-storage/records/photo";
 // API (encabezado Authorization). El usuario no vuelve a escribir su clave; el
 // servidor lo renueva mientras la app se use.
 const SESSION_TOKEN_KEY = "bt-session-token";
+// El pase también vive en memoria: si el almacenamiento del navegador está lleno
+// (analistas con miles de registros guardados), no se puede escribir y cada
+// petición viajaría sin pase ("Tu sesión venció").
+let memorySessionToken = "";
 function readSessionToken() {
-  return safeStorageGet(SESSION_TOKEN_KEY) || "";
+  return memorySessionToken || safeStorageGet(SESSION_TOKEN_KEY) || "";
 }
 function writeSessionToken(token: string) {
+  memorySessionToken = token;
   if (token) safeStorageSet(SESSION_TOKEN_KEY, token);
   else safeStorageRemove(SESSION_TOKEN_KEY);
 }
@@ -15782,9 +15787,14 @@ export default function App() {
 
   // Pase vencido o revocado: volver a la pantalla de ingreso. Las ventas y
   // marcaciones pendientes se quedan en el dispositivo y se envían al reingresar.
+  const loggedInRef = useRef(false);
+  loggedInRef.current = Boolean(user);
   useEffect(() => {
     const onExpired = () => {
-      if (!readStore<AppUser | null>("bt-session", null)) return;
+      // Se usa el estado en pantalla: si el navegador no pudo guardar la sesión
+      // (almacenamiento lleno), igual hay que pedir el reingreso.
+      if (!loggedInRef.current && !readStore<AppUser | null>("bt-session", null)) return;
+      loggedInRef.current = false;
       safeStorageRemove("bt-session");
       writeSessionToken("");
       setPromoterSession({ marketId: "", clientId: "" });
