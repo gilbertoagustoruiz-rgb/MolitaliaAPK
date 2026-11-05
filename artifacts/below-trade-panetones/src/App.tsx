@@ -2869,6 +2869,7 @@ function Btn({
   type = "button",
   className = "",
   testId,
+  title,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -2877,6 +2878,7 @@ function Btn({
   type?: "button" | "submit";
   className?: string;
   testId?: string;
+  title?: string;
 }) {
   return (
     <button
@@ -2885,6 +2887,8 @@ function Btn({
       onClick={onClick}
       className={`btn btn-${variant} ${className}`}
       data-testid={testId}
+      title={title}
+      aria-label={title}
     >
       {children}
     </button>
@@ -4057,6 +4061,8 @@ function WarehouseCatalog({
   const [edit,setEdit]=useState<Warehouse|null>(null);
   const [recharge,setRecharge]=useState<Warehouse|null>(null);
   const [subtract,setSubtract]=useState<Warehouse|null>(null);
+  const [tasting,setTasting]=useState<Warehouse|null>(null);
+  const [warehouseSearch,setWarehouseSearch]=useState("");
   const [initialStockEdit,setInitialStockEdit]=useState<{warehouse:Warehouse;quantities:Partial<WarehouseStock>}|null>(null);
   const [regularizeOpen,setRegularizeOpen]=useState(false);
   const [regularizing,setRegularizing]=useState(false);
@@ -4066,6 +4072,9 @@ function WarehouseCatalog({
   const visibleWarehouses = allowedWarehouseIds?.length
     ? warehouses.filter((warehouse) => allowedWarehouseIds.includes(warehouse.id))
     : warehouses;
+  const shownWarehouses = visibleWarehouses.filter((warehouse) =>
+    matchesTableSearch(warehouseSearch, [warehouse.name, warehouse.id, warehouse.region, warehouse.department, warehouse.province, warehouse.district, warehouse.status]),
+  );
 
   const load=async()=>{
     try{
@@ -4269,7 +4278,7 @@ function WarehouseCatalog({
 
   return (
     <section className="panel">
-      <div className="panel-header">
+      <div className="panel-header wh-header">
         <div>
           <h2>Almacén</h2>
           <p>{readOnly ? "Consulta de stock de almacenes. Este perfil no puede abastecer ni modificar." : "Administra cada almacén, sus datos y el saldo disponible. Los reabastecimientos se suman al stock actual."}</p>
@@ -4287,39 +4296,73 @@ function WarehouseCatalog({
       </div>
       <div className="panel-body">
         {visibleWarehouses.length ? (
-          <div className="module-table-wrap">
-            <div className="module-table">
-              <div className={`module-table-row module-table-header ${readOnly ? "cols-6" : "cols-7"}`}>
-                <span>Almacén</span><span>Ubicación</span><span>Panetón 900 g</span><span>Panetón 85 g</span><span>Canjes</span><span>Estado</span>
-                {!readOnly && <span>Acciones</span>}
+          <>
+            <div className="wh-toolbar">
+              <div className="wh-search">
+                <Search />
+                <Input value={warehouseSearch} onChange={setWarehouseSearch} placeholder="Buscar almacén, región o ciudad" testId="input-search-warehouses" />
               </div>
-              {visibleWarehouses.map(w=>(
-                <article className={`module-table-row ${readOnly ? "cols-6" : "cols-7"}`} key={w.id}>
-                  <span><strong>{w.name}</strong><small>{w.id}</small></span>
-                  <span><strong>{w.department}</strong><small>{[w.region,w.province,w.district].filter(Boolean).join(" · ")}</small></span>
-                  <span><strong>{w.stock?.PANETON_900G||0}</strong></span>
-                  <span><strong>{w.stock?.PANETON_85G||0}</strong></span>
-                  <span><strong>Avena {w.stock?.AVENA||0} · Batea {w.stock?.BATEA||0}</strong><small>Mandil {w.stock?.MANDIL||0} · Spaghetti {w.stock?.SPAGHETTI||0}</small></span>
-                  <span><StatusPill status={w.status}/></span>
+              <div className="wh-totals" data-testid="warehouse-totals">
+                <span><strong>{shownWarehouses.length}</strong> almacenes</span>
+                <span>Panetón 900 g <strong>{shownWarehouses.reduce((sum,w)=>sum+(Number(w.stock?.PANETON_900G)||0),0)}</strong></span>
+                <span>Panetón 85 g <strong>{shownWarehouses.reduce((sum,w)=>sum+(Number(w.stock?.PANETON_85G)||0),0)}</strong></span>
+                <span>Avena <strong>{shownWarehouses.reduce((sum,w)=>sum+(Number(w.stock?.AVENA)||0),0)}</strong></span>
+              </div>
+            </div>
+            <div className="wh-grid">
+              {shownWarehouses.map(w=>(
+                <article className="wh-card" key={w.id} data-testid={`warehouse-card-${w.id}`}>
+                  <header className="wh-card-head">
+                    <div>
+                      <strong>{w.name}</strong>
+                      <small>{[w.region,w.department,w.province,w.district].filter(Boolean).join(" · ")}</small>
+                    </div>
+                    <StatusPill status={w.status}/>
+                  </header>
+                  <div className="wh-group">
+                    <span className="wh-group-label">Panetones para degustación</span>
+                    <div className="wh-tiles wh-tiles-main">
+                      {([["PANETON_900G","900 g"],["PANETON_85G","85 g"]] as const).map(([id,label])=>(
+                        <div key={id} className={`wh-tile${(Number(w.stock?.[id])||0)===0?" is-empty":""}`}>
+                          <span>Panetón {label}</span><strong>{Number(w.stock?.[id])||0}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="wh-group">
+                    <span className="wh-group-label">Productos de canje</span>
+                    <div className="wh-tiles">
+                      {([["AVENA","Avena"],["SPAGHETTI","Spaghetti"],["BATEA","Batea"],["MANDIL","Mandil"]] as const).map(([id,label])=>(
+                        <div key={id} className={`wh-tile wh-tile-sm${(Number(w.stock?.[id])||0)===0?" is-empty":""}`}>
+                          <span>{label}</span><strong>{Number(w.stock?.[id])||0}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                   {!readOnly && (
-                    <span className="module-table-actions">
-                      <Btn variant="outline" onClick={()=>setEdit(w)}><Pencil/> Editar</Btn>
-                      <Btn variant="outline" onClick={()=>void openInitialStock(w)}><Pencil/> Stock inicial</Btn>
-                      <Btn onClick={()=>setRecharge(w)}><Plus/> Reabastecer</Btn>
+                    <footer className="wh-actions">
+                      <Btn onClick={()=>setRecharge(w)} testId={`button-recharge-${w.id}`}><Plus/> Reabastecer</Btn>
+                      <Btn variant="outline" onClick={()=>setTasting(w)} testId={`button-tasting-${w.id}`}><PackageCheck/> Regularizar degustación</Btn>
                       <Btn variant="outline" onClick={()=>setSubtract(w)}><Minus/> Restar stock</Btn>
-                      <Btn variant="danger" onClick={()=>void remove(w)}><Trash2/> Eliminar</Btn>
-                    </span>
+                      <Btn variant="outline" onClick={()=>void openInitialStock(w)}><Pencil/> Stock inicial</Btn>
+                      <span className="wh-icon-actions">
+                        <Btn variant="outline" className="wh-icon" title="Editar almacén" onClick={()=>setEdit(w)}><Pencil/></Btn>
+                        <Btn variant="outline" className="wh-icon wh-delete" title="Eliminar almacén" onClick={()=>void remove(w)}><Trash2/></Btn>
+                      </span>
+                    </footer>
                   )}
                 </article>
               ))}
             </div>
-          </div>
+            {!shownWarehouses.length && <Empty title="Sin resultados" detail="Ningún almacén coincide con la búsqueda." />}
+          </>
         ) : <Empty title="Sin almacenes" detail="No hay almacenes visibles para este perfil." />}
       </div>
       {!readOnly && modal&&<WarehouseCreateModal onSave={async(warehouse,quantities)=>{const saved=await save(warehouse,true);if(!saved)return false;const hasStock=Object.values(quantities).some(v=>Number(v)>0);if(hasStock){const stockSaved=await loadStock(warehouse,quantities,true,true);if(!stockSaved)return false;}void load();notify(hasStock?"Almacén y stock inicial guardados.":"Almacén guardado.");return true;}} close={()=>setModal(false)}/>}
       {!readOnly && edit&&<WarehouseEditModal warehouse={edit} onSave={async w=>{const ok=await save(w);if(ok)setEdit(null);return ok;}} close={()=>setEdit(null)}/>}
       {!readOnly && recharge&&<WarehouseRechargeModal warehouse={recharge} onSave={async(w,q)=>{const ok=await loadStock(w,q,false);if(ok)setRecharge(null);return ok;}} close={()=>setRecharge(null)}/>}
       {!readOnly && initialStockEdit&&<WarehouseInitialStockModal warehouse={initialStockEdit.warehouse} initialQuantities={initialStockEdit.quantities} onSave={async(w,q,note)=>{const ok=await saveInitialStock(w,q,note);if(ok)setInitialStockEdit(null);return ok;}} close={()=>setInitialStockEdit(null)}/>}
+      {!readOnly && tasting&&<WarehouseTastingModal warehouse={tasting} user={user} onSaved={async()=>{await load();setTasting(null);notify("Degustación regularizada y stock del almacén ajustado.");}} notify={notify} close={()=>setTasting(null)}/>}
       {!readOnly && subtract&&<WarehouseSubtractModal warehouse={subtract} onSave={async(w,q,note)=>{const ok=await subtractStock(w,q,note);if(ok)setSubtract(null);return ok;}} close={()=>setSubtract(null)}/>}
       {!readOnly && regularizeOpen&&<Modal title="Regularizar consumos" detail="Descontará del Almacén los Canjes y Degustaciones históricos que todavía no tengan movimiento de almacén." close={()=>{if(!regularizing)setRegularizeOpen(false);}}><div className="notice"><strong>Esta operación no vuelve a descontar registros ya regularizados.</strong><p>Si existe un Mercado sin Almacén, stock insuficiente o un registro histórico incompleto, se mostrará el error y no se aplicarán descuentos parciales.</p>{regularizeResult&&<p><strong>{regularizeResult}</strong></p>}</div><div className="modal-actions"><Btn variant="outline" disabled={regularizing} onClick={()=>setRegularizeOpen(false)}>Cerrar</Btn><Btn disabled={regularizing} onClick={()=>void regularize()}>{regularizing?"Procesando...":"Confirmar regularización"}</Btn></div></Modal>}
     </section>
@@ -4707,6 +4750,166 @@ function WarehouseTransferModal({
   );
 }
 
+// Regularizar degustación por Almacén: cuántos Panetones de 900 g y 85 g se
+// usaron realmente en un período, frente a lo que declararon los promotores.
+function WarehouseTastingModal({
+  warehouse,
+  user,
+  onSaved,
+  notify,
+  close,
+}: {
+  warehouse: Warehouse;
+  user: AppUser;
+  onSaved: () => Promise<void>;
+  notify: (message: string, error?: boolean) => void;
+  close: () => void;
+}) {
+  const today = attendanceDay();
+  const [from, setFrom] = useState(`${today.slice(0, 8)}01`);
+  const [to, setTo] = useState(today);
+  type Summary = {
+    declared: Record<"PANETON_900G" | "PANETON_85G", number>;
+    adjusted: Record<"PANETON_900G" | "PANETON_85G", number>;
+    registered: Record<"PANETON_900G" | "PANETON_85G", number>;
+    records: number;
+    stock: Partial<WarehouseStock>;
+    history: Array<{ id: string; itemId: string; quantity: number; date: string; reason: string; actorName: string }>;
+  };
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [real900, setReal900] = useState("");
+  const [real85, setReal85] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const headers = { "x-admin-dni": user.dni, "x-admin-key": user.password || "" };
+  useEffect(() => {
+    if (!from || !to || from > to) return;
+    let cancelled = false;
+    setLoading(true);
+    void fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/tasting-summary?from=${from}&to=${to}`, { headers })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || "No se pudo consultar la degustación.");
+        if (cancelled) return;
+        setSummary(payload);
+        setReal900(String(payload.registered?.PANETON_900G ?? 0));
+        setReal85(String(payload.registered?.PANETON_85G ?? 0));
+      })
+      .catch((error) => !cancelled && notify(error instanceof Error ? error.message : "No se pudo consultar la degustación.", true))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [from, to, warehouse.id]);
+  const n900 = Number(real900);
+  const n85 = Number(real85);
+  const valid = Number.isInteger(n900) && n900 >= 0 && Number.isInteger(n85) && n85 >= 0;
+  const diff900 = summary && valid ? n900 - summary.registered.PANETON_900G : 0;
+  const diff85 = summary && valid ? n85 - summary.registered.PANETON_85G : 0;
+  const stock900 = Number(summary?.stock?.PANETON_900G ?? warehouse.stock?.PANETON_900G) || 0;
+  const stock85 = Number(summary?.stock?.PANETON_85G ?? warehouse.stock?.PANETON_85G) || 0;
+  const stockOk = diff900 <= stock900 && diff85 <= stock85;
+  const changed = diff900 !== 0 || diff85 !== 0;
+  const canSave = Boolean(summary) && valid && stockOk && changed && note.trim().length > 0 && !saving && !loading;
+  const rows: Array<["PANETON_900G" | "PANETON_85G", string, string, (v: string) => void, number, number]> = [
+    ["PANETON_900G", "900 g", real900, setReal900, diff900, stock900],
+    ["PANETON_85G", "85 g", real85, setReal85, diff85, stock85],
+  ];
+  const save = async () => {
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/tasting-regularize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ from, to, paneton900g: n900, paneton85g: n85, note: note.trim() }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || "No se pudo regularizar la degustación.");
+      await onSaved();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo regularizar la degustación.", true);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Modal
+      title="Regularizar degustación"
+      detail={`${warehouse.name} · Indica cuántos Panetones se usaron realmente en degustación. El stock se ajusta solo por la diferencia.`}
+      close={close}
+    >
+      <div className="form-grid">
+        <Field label="Desde *">
+          <input className="input" type="date" value={from} max={to || today} onChange={(event) => setFrom(event.target.value)} data-testid="input-tasting-from" />
+        </Field>
+        <Field label="Hasta *">
+          <input className="input" type="date" value={to} min={from} max={today} onChange={(event) => setTo(event.target.value)} data-testid="input-tasting-to" />
+        </Field>
+      </div>
+      <div className="wh-reg-table" data-testid="tasting-summary">
+        <div className="wh-reg-row wh-reg-head">
+          <span>Panetón</span><span>Declarado por promotores</span><span>Usado realmente</span><span>Ajuste de stock</span><span>Stock actual</span>
+        </div>
+        {rows.map(([id, label, valueText, setValue, diff, current]) => (
+          <div className="wh-reg-row" key={id}>
+            <span><strong>{label}</strong></span>
+            <span>
+              <strong>{loading || !summary ? "…" : summary.registered[id]}</strong>
+              {summary && summary.adjusted[id] !== 0 && (
+                <small>{summary.declared[id]} declarado {summary.adjusted[id] > 0 ? "+" : "−"} {Math.abs(summary.adjusted[id])} ya regularizado</small>
+              )}
+            </span>
+            <span>
+              <Input type="number" min={0} step={1} value={valueText} onChange={setValue} testId={`input-tasting-real-${id === "PANETON_900G" ? "900" : "85"}`} />
+            </span>
+            <span className={diff > 0 ? "wh-diff-out" : diff < 0 ? "wh-diff-in" : ""}>
+              {!valid ? "—" : diff > 0 ? `Se descuentan ${diff}` : diff < 0 ? `Se devuelven ${-diff}` : "Sin cambio"}
+            </span>
+            <span>
+              {current}
+              {valid && diff !== 0 && <small> → {current - diff}</small>}
+            </span>
+          </div>
+        ))}
+      </div>
+      {summary && (
+        <p className="wh-reg-hint">
+          {summary.records} registro(s) de degustación de promotores en el período. Lo declarado ya se descontó del almacén; aquí solo se corrige la diferencia.
+        </p>
+      )}
+      {valid && !stockOk && (
+        <div className="stock-warning">
+          <PackageCheck /> No hay stock suficiente en el almacén para descontar esa diferencia.
+        </div>
+      )}
+      <div className="form-grid">
+        <Field label="Motivo de la regularización *" className="full-field">
+          <textarea className="input textarea" value={note} onChange={(event) => setNote(event.target.value)} maxLength={300} rows={3}
+            placeholder="Ej.: Conteo físico del almacén: se usaron 4 panetones de 900 g en degustación, los promotores declararon 2."
+            data-testid="input-tasting-note" />
+        </Field>
+      </div>
+      {summary && summary.history.length > 0 && (
+        <div className="wh-reg-history">
+          <span className="wh-group-label">Regularizaciones del período</span>
+          {summary.history.slice(0, 6).map((item) => (
+            <p key={item.id}>
+              {formatDate(item.date)} · {item.itemId === "PANETON_85G" ? "85 g" : "900 g"}: {item.quantity < 0 ? `descontó ${-item.quantity}` : `devolvió ${item.quantity}`} · {item.actorName} · {item.reason}
+            </p>
+          ))}
+        </div>
+      )}
+      <div className="modal-actions">
+        <Btn variant="outline" disabled={saving} onClick={close}>Cancelar</Btn>
+        <Btn disabled={!canSave} onClick={() => void save()} testId="button-save-tasting">
+          {saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}
+          {saving ? "Guardando..." : "Guardar regularización"}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
 function WarehouseCreateModal({onSave,close}:{onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState("");const [region,setRegion]=useState("");const [department,setDepartment]=useState("");const [province,setProvince]=useState("");const [district,setDistrict]=useState("");const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});const [saving,setSaving]=useState(false);const saveModal=async()=>{if(saving)return;if(!name.trim()||!region.trim()||!department.trim()||!province.trim()||!district.trim())return;const warehouse:Warehouse={id:`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status:"ACTIVO",marketIds:[],stock:{},updatedAt:new Date().toISOString()};const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;setSaving(true);try{if(await onSave(warehouse,quantities))close();}finally{setSaving(false);}};return <Modal title="Nuevo almacén" detail="Registra el almacén y su stock inicial." close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field>{items.map(([id,label])=><Field key={id} label={`Stock inicial - ${label}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={saving} onClick={saveModal}>{saving?"Guardando...":"Guardar almacén"}</Btn></div></Modal>}
 function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,updatedAt:new Date().toISOString()})}>Guardar cambios</Btn></div></Modal>}
 function WarehouseRechargeModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});return <Modal title="Reabastecer almacén" detail={`${warehouse.name} · Las cantidades se sumarán al saldo actual.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(!Object.values(quantities).some(v=>Number(v)>0))return;await onSave(warehouse,quantities);}}><Plus/> Reabastecer</Btn></div></Modal>}
@@ -6704,216 +6907,6 @@ function DegustacionEditModal({
   );
 }
 
-// Regularizar la degustación de una jornada: cuántos Panetones de 900 g y 85 g
-// se usaron realmente. El servidor corrige o crea los consumos y ajusta el Almacén.
-type TastingRegularization = {
-  closureId: string;
-  paneton900g: number;
-  paneton85g: number;
-  reason: string;
-};
-function stockChangeLabel(diff900: number, diff85: number) {
-  const part = (diff: number, label: string) =>
-    diff > 0 ? `se descuentan ${diff} de ${label}` : diff < 0 ? `se devuelven ${-diff} de ${label}` : "";
-  return [part(diff900, "900 g"), part(diff85, "85 g")].filter(Boolean).join(" y ");
-}
-function TastingRegularizeModal({
-  closures,
-  consumos,
-  users,
-  marketMap,
-  clients,
-  warehouses,
-  onSave,
-  close,
-}: {
-  closures: SessionClosure[];
-  consumos: InventoryMovement[];
-  users: AppUser[];
-  marketMap: Record<string, Market>;
-  clients: Client[];
-  warehouses: Warehouse[];
-  onSave: (input: TastingRegularization) => Promise<boolean>;
-  close: () => void;
-}) {
-  const [day, setDay] = useState(() => attendanceDay());
-  const [promoterId, setPromoterId] = useState("");
-  const [closureId, setClosureId] = useState("");
-  const [qty900, setQty900] = useState("0");
-  const [qty85, setQty85] = useState("0");
-  const [reason, setReason] = useState("");
-  const [saving, setSaving] = useState(false);
-  const dayClosures = closures
-    .filter((closure) => closure.date && attendanceDay(closure.date) === day)
-    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const promoterIds = [...new Set(dayClosures.map((closure) => closure.promoterId))];
-  const userName = (id: string) => users.find((item) => item.id === id)?.name || id;
-  const promoterClosures = dayClosures.filter((closure) => closure.promoterId === promoterId);
-  const closure = promoterClosures.find((item) => item.id === closureId);
-  // Lo declarado en esa jornada (mismo criterio que el servidor: ±1 minuto del cierre).
-  const declared = (productId: "PANETON_900G" | "PANETON_85G") => {
-    if (!closure) return 0;
-    const at = new Date(closure.date).getTime();
-    return consumos
-      .filter(
-        (item) =>
-          item.marketId === closure.marketId &&
-          (item.promoterId || item.actorId) === closure.promoterId &&
-          Math.abs(new Date(item.date).getTime() - at) <= 60_000 &&
-          (item.degustacionProductId === "PANETON_85G" ? "PANETON_85G" : "PANETON_900G") === productId,
-      )
-      .reduce((sum, item) => sum + Math.max(0, Number(item.quantity) || 0), 0);
-  };
-  const declared900 = declared("PANETON_900G");
-  const declared85 = declared("PANETON_85G");
-  useEffect(() => {
-    setQty900(String(declared900));
-    setQty85(String(declared85));
-  }, [closureId, declared900, declared85]);
-  const warehouse = closure
-    ? warehouses.find(
-        (item) =>
-          item.id === marketMap[closure.marketId]?.warehouseId ||
-          item.marketIds?.includes(closure.marketId),
-      )
-    : undefined;
-  // Disponible para esta jornada = stock actual + lo que ya tenía descontado.
-  const available900 = Math.max(0, Number(warehouse?.stock?.PANETON_900G) || 0) + declared900;
-  const available85 = Math.max(0, Number(warehouse?.stock?.PANETON_85G) || 0) + declared85;
-  const n900 = Number(qty900);
-  const n85 = Number(qty85);
-  const valid900 = Number.isInteger(n900) && n900 >= 0 && n900 <= 2;
-  const valid85 = Number.isInteger(n85) && n85 >= 0 && n85 <= 8;
-  const stockOk = !warehouse || (n900 <= available900 && n85 <= available85);
-  const changed = n900 !== declared900 || n85 !== declared85;
-  const canSave = Boolean(closure) && valid900 && valid85 && stockOk && changed && reason.trim().length > 0 && !saving;
-  const contacts = (valid900 ? n900 : 0) * 80 + (valid85 ? n85 : 0) * 10;
-  return (
-    <Modal
-      title="Regularizar degustación"
-      detail="Corrige cuántos Panetones de 900 g y 85 g se usaron realmente en una jornada. El Almacén se ajusta solo por la diferencia."
-      close={close}
-    >
-      <div className="form-grid">
-        <Field label="Fecha de la jornada *">
-          <input
-            className="input"
-            type="date"
-            value={day}
-            max={attendanceDay()}
-            onChange={(event) => {
-              setDay(event.target.value);
-              setPromoterId("");
-              setClosureId("");
-            }}
-            data-testid="input-regularize-day"
-          />
-        </Field>
-        <SelectField
-          label="Promotor *"
-          value={promoterId}
-          onChange={(value) => {
-            setPromoterId(value);
-            const own = dayClosures.filter((item) => item.promoterId === value);
-            setClosureId(own.length === 1 ? own[0].id : "");
-          }}
-          placeholder={promoterIds.length ? "Seleccionar" : "Sin jornadas cerradas ese día"}
-          items={promoterIds.map((id) => ({ value: id, label: userName(id) }))}
-        />
-        <div className="grid-full">
-        <SelectField
-          label="Jornada (cierre) *"
-          value={closureId}
-          onChange={setClosureId}
-          placeholder={promoterId ? "Seleccionar" : "Elige primero el promotor"}
-          items={promoterClosures.map((item) => ({
-            value: item.id,
-            label: `${marketMap[item.marketId]?.name || item.marketId} · ${
-              clients.find((client) => client.id === item.clientId)?.name || "Sin cliente"
-            } · ${limaTime(item.date)}${item.automatic || item.closureType === "AUTOMATICO" ? " · cierre automático" : ""}`,
-          }))}
-        />
-        </div>
-      </div>
-      {closure && (
-        <>
-          <div className="tasting-reg-summary" data-testid="regularize-declared">
-            <div>
-              <span>Declarado</span>
-              <strong>900 g: {declared900} · 85 g: {declared85}</strong>
-            </div>
-            <div>
-              <span>Almacén {warehouse ? warehouse.name : "no asignado"}</span>
-              <strong>
-                900 g: {Math.max(0, Number(warehouse?.stock?.PANETON_900G) || 0)} · 85 g: {Math.max(0, Number(warehouse?.stock?.PANETON_85G) || 0)}
-              </strong>
-            </div>
-          </div>
-          <div className="form-grid">
-            <Field label="Panetón 900 g usados (máx. 2) *">
-              <Input type="number" min={0} max={2} step={1} value={qty900} onChange={setQty900} testId="input-regularize-900" />
-            </Field>
-            <Field label="Panetón 85 g usados (máx. 8) *">
-              <Input type="number" min={0} max={8} step={1} value={qty85} onChange={setQty85} testId="input-regularize-85" />
-            </Field>
-            <Field label="Motivo de la regularización *" className="full-field">
-              <textarea
-                className="input textarea"
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                maxLength={300}
-                rows={3}
-                placeholder="Ej.: El promotor usó 1 panetón de 900 g y olvidó declararlo al cerrar."
-                data-testid="input-regularize-reason"
-              />
-            </Field>
-          </div>
-          <p className="tasting-reg-note" data-testid="regularize-note">
-            Contactos de la jornada: {contacts} (900 g = 80 · 85 g = 10)
-            {changed && valid900 && valid85 ? ` · Almacén: ${stockChangeLabel(n900 - declared900, n85 - declared85)}` : ""}
-          </p>
-          {(!valid900 || !valid85) && (
-            <div className="stock-warning">
-              <AlertTriangle /> Máximo 2 Panetones de 900 g y 8 de 85 g por jornada.
-            </div>
-          )}
-          {valid900 && valid85 && !stockOk && (
-            <div className="stock-warning">
-              <PackageCheck /> No hay stock suficiente en el Almacén para esa cantidad.
-            </div>
-          )}
-        </>
-      )}
-      <div className="modal-actions">
-        <Btn variant="outline" disabled={saving} onClick={close}>
-          Cancelar
-        </Btn>
-        <Btn
-          disabled={!canSave}
-          testId="button-save-regularize"
-          onClick={async () => {
-            if (!closure) return;
-            setSaving(true);
-            try {
-              const saved = await onSave({
-                closureId: closure.id,
-                paneton900g: n900,
-                paneton85g: n85,
-                reason: reason.trim(),
-              });
-              if (saved) close();
-            } finally {
-              setSaving(false);
-            }
-          }}
-        >
-          {saving ? <RefreshCw className="spin" /> : <CheckCircle2 />}
-          {saving ? "Guardando..." : "Guardar regularización"}
-        </Btn>
-      </div>
-    </Modal>
-  );
-}
 function AdminDegustacionesModule({
   onEdit,
   consumos,
@@ -6921,9 +6914,7 @@ function AdminDegustacionesModule({
   marketMap,
   closures,
   onDeleteConsumo,
-  onRegularize,
 }: {
-  onRegularize?: () => void;
   onEdit: (record: InventoryMovement) => void;
   consumos: InventoryMovement[];
   users: AppUser[];
@@ -6990,11 +6981,7 @@ function AdminDegustacionesModule({
             <h2>{consumos.length} consumos registrados</h2>
             <p>Ordenados desde el más reciente hasta el más antiguo.</p>
           </div>
-          {onRegularize && (
-            <Btn onClick={onRegularize} testId="button-regularize-tasting">
-              <Pencil /> Regularizar degustación
-            </Btn>
-          )}
+
         </div>
         <div className="panel-body sales-panel-body">
           <TableSearch
@@ -9320,7 +9307,6 @@ function AnalystApp({
   const [tradeApprovalsLoading, setTradeApprovalsLoading] = useState(false);
   const tradeApprovalsRequestInFlight = useRef(false);
   const [marketWarehouses, setMarketWarehouses] = useState<Warehouse[]>([]);
-  const [regularizingTasting, setRegularizingTasting] = useState(false);
   const loadMarketWarehouses = () =>
     fetch("/api/app-storage/warehouses")
       .then(async (response) => {
@@ -10690,21 +10676,6 @@ function AnalystApp({
       );
     }
   };
-  const regularizeTasting = async (input: TastingRegularization) => {
-    try {
-      await adminRequest("/degustaciones/regularizar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      await loadMarketWarehouses();
-      notify("Degustación regularizada y Almacén ajustado");
-      return true;
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "No se pudo regularizar la degustación", true);
-      return false;
-    }
-  };
   const saveTastingConsumption = async (record: InventoryMovement) => {
     try {
       await adminRequest(
@@ -11529,14 +11500,6 @@ function AnalystApp({
           marketMap={marketMap}
           closures={closures}
           onDeleteConsumo={(record) => void deleteTastingConsumption(record)}
-          onRegularize={
-            ["ADMIN", "ANALISTA"].includes(user.role)
-              ? () => {
-                  setRegularizingTasting(true);
-                  void loadMarketWarehouses();
-                }
-              : undefined
-          }
         />
       )}
       {tab === "asignaciones" && (
@@ -12143,18 +12106,6 @@ function AnalystApp({
           warehouses={marketWarehouses}
           onSave={saveSaleEdit}
           close={() => setEditingSale(null)}
-        />
-      )}
-      {regularizingTasting && (
-        <TastingRegularizeModal
-          closures={closures}
-          consumos={tastingConsumptions}
-          users={users}
-          marketMap={marketMap}
-          clients={clients}
-          warehouses={marketWarehouses}
-          onSave={regularizeTasting}
-          close={() => setRegularizingTasting(false)}
         />
       )}
       {editingDegustacion && (
