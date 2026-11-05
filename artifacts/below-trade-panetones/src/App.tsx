@@ -4104,7 +4104,7 @@ function WarehouseCatalog({
   const save=async(warehouse:Warehouse,quiet=false)=>{
     if(readOnly)return false;
     try{
-      const r=await fetch("/api/app-storage/warehouses",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({warehouse})});
+      const r=await fetch("/api/app-storage/warehouses",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)},body:JSON.stringify({warehouse})});
       const p=await r.json();
       if(!r.ok)throw new Error(p.message||"No se pudo guardar el almacén.");
       if(!quiet){await load();notify("Almacén actualizado.");}
@@ -4117,7 +4117,7 @@ function WarehouseCatalog({
   const loadStock=async(warehouse:Warehouse,quantities:Partial<WarehouseStock>,initial=false,quiet=false)=>{
     if(readOnly)return false;
     try{
-      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/recharge`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities,initial})});
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/recharge`,{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)},body:JSON.stringify({quantities,initial})});
       const p=await r.json();
       if(!r.ok)throw new Error(p.message||"No se pudo cargar el stock.");
       if(!quiet){await load();notify(initial?"Stock inicial cargado.":"Almacén reabastecido correctamente.");}
@@ -4131,7 +4131,7 @@ function WarehouseCatalog({
     if(readOnly)return;
     try{
       const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/initial-stock`,{
-        headers:{"x-admin-dni":user.dni,"x-admin-key":user.password||""},
+        headers:{"x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)},
       });
       const p=await r.json();
       if(!r.ok)throw new Error(p.message||"No se pudo consultar el stock inicial.");
@@ -4145,7 +4145,7 @@ function WarehouseCatalog({
     try{
       const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/initial-stock`,{
         method:"PUT",
-        headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},
+        headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)},
         body:JSON.stringify({quantities,note}),
       });
       const p=await r.json();
@@ -4163,7 +4163,7 @@ function WarehouseCatalog({
     try{
       const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/subtract-stock`,{
         method:"POST",
-        headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},
+        headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)},
         body:JSON.stringify({quantities,note}),
       });
       const p=await r.json();
@@ -4180,7 +4180,7 @@ function WarehouseCatalog({
     if(readOnly)return;
     if(!window.confirm(`¿Eliminar el almacén ${warehouse.name}? Solo será posible si no tiene mercados, stock ni historial.`))return;
     try{
-      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}`,{method:"DELETE",headers:{"x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}`,{method:"DELETE",headers:{"x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)}});
       const p=await r.json().catch(()=>({}));
       if(!r.ok)throw new Error(p.message||"No se pudo eliminar el almacén.");
       await load();
@@ -4206,7 +4206,7 @@ function WarehouseCatalog({
         if(!ok)throw new Error(`No se pudo importar ${name}.`);
         const quantities={PANETON_900G:number(["paneton900gr","paneton900g","paneton900"]),PANETON_85G:number(["paneton85gr","paneton85g","paneton85"]),AVENA:number(["avena"]),BATEA:number(["batea"]),MANDIL:number(["mandil"]),SPAGHETTI:number(["spaghetti","espagueti"])};
         if(existing){
-          const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/import-stock`,{method:"PUT",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""},body:JSON.stringify({quantities})});
+          const r=await fetch(`/api/app-storage/warehouses/${encodeURIComponent(warehouse.id)}/import-stock`,{method:"PUT",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)},body:JSON.stringify({quantities})});
           const p=await r.json();
           if(!r.ok)throw new Error(p.message||`No se pudo actualizar stock de ${name}.`);
           updated++;
@@ -4230,7 +4230,7 @@ function WarehouseCatalog({
     if(readOnly)return;
     setRegularizing(true);setRegularizeResult("Procesando consumos históricos...");
     try{
-      const r=await fetch("/api/app-storage/warehouses/regularize-history",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const r=await fetch("/api/app-storage/warehouses/regularize-history",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
       if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar.`);
@@ -4248,7 +4248,7 @@ function WarehouseCatalog({
     if(!confirmed)return;
     setPunoRegularizing(true);
     try{
-      const r=await fetch("/api/app-storage/warehouses/regularize-puno-without-canje",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const r=await fetch("/api/app-storage/warehouses/regularize-puno-without-canje",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
       if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Juliaca.`);
@@ -4264,7 +4264,7 @@ function WarehouseCatalog({
     if(!confirmed)return;
     setSeptemberRegularizing(true);
     try{
-      const r=await fetch("/api/app-storage/warehouses/regularize-september-zero-closures",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":user.password||""}});
+      const r=await fetch("/api/app-storage/warehouses/regularize-september-zero-closures",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
       if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar cierres.`);
@@ -4782,7 +4782,7 @@ function WarehouseTastingModal({
   const [real85, setReal85] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  const headers = { "x-admin-dni": user.dni, "x-admin-key": user.password || "" };
+  const headers = { "x-admin-dni": user.dni, "x-admin-key": sessionAdminKey(user) };
   useEffect(() => {
     if (!from || !to || from > to) return;
     let cancelled = false;
@@ -6198,7 +6198,7 @@ function RedemptionRulesModule({
   const authHeaders = {
     "Content-Type": "application/json",
     "x-admin-dni": user.dni,
-    "x-admin-key": user.password || "",
+    "x-admin-key": sessionAdminKey(user),
   };
 
   const load = async () => {
