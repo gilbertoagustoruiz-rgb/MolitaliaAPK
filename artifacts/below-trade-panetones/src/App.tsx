@@ -116,21 +116,42 @@ function peruDateKey(date = new Date()) {
 }
 
 
-// Zona sin canje: solo Juliaca (provincia San Román, Puno). Todas las demás
-// ciudades —incluida Puno ciudad— muestran y registran canje según la Tabla Canjes.
-// Debe coincidir con isNoCanjeLocation del servidor (api-server/src/routes/app-storage.ts).
-const NO_CANJE_DISTRICTS = new Set(["JULIACA"]);
-const NO_CANJE_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
-const NO_CANJE_NAME_KEYWORD = "JULIACA";
-function isNoCanjeLocation(location: { name?: string; province?: string; district?: string }) {
+// Ventas sin canje: zona Juliaca (provincia San Román), zona Puno (provincia o
+// distrito Puno) y el cliente VEGA - BELAUNDE. Todo lo demás registra canje
+// según la Tabla Canjes.
+// Debe coincidir con noCanjeLocationZone / saleNoCanjeZone del servidor (api-server/src/routes/app-storage.ts).
+type NoCanjeZone = "JULIACA" | "PUNO" | "CLIENTE";
+const JULIACA_DISTRICTS = new Set(["JULIACA"]);
+const JULIACA_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
+const PUNO_DISTRICTS = new Set(["PUNO"]);
+const PUNO_PROVINCES = new Set(["PUNO"]);
+const NO_CANJE_CLIENT_KEYS = ["VEGABELAUNDE"];
+function noCanjeLocationZone(location: { name?: string; province?: string; district?: string }): "JULIACA" | "PUNO" | null {
   const district = normalizeLocationValue(location.district);
   const province = normalizeLocationValue(location.province);
   const name = normalizeLocationValue(location.name);
-  return (
-    NO_CANJE_DISTRICTS.has(district) ||
-    NO_CANJE_PROVINCES.has(province) ||
-    name.includes(NO_CANJE_NAME_KEYWORD)
-  );
+  if (JULIACA_DISTRICTS.has(district) || JULIACA_PROVINCES.has(province) || name.includes("JULIACA")) return "JULIACA";
+  if (PUNO_DISTRICTS.has(district) || PUNO_PROVINCES.has(province) || name.includes("PUNO")) return "PUNO";
+  return null;
+}
+function isNoCanjeLocation(location: { name?: string; province?: string; district?: string }) {
+  return noCanjeLocationZone(location) !== null;
+}
+function isNoCanjeClient(client?: { name?: string } | null) {
+  const name = normalizeLocationValue(client?.name).replace(/[^A-Z0-9]/g, "");
+  return Boolean(name) && NO_CANJE_CLIENT_KEYS.some((key) => name.includes(key));
+}
+function noCanjeZoneOf(
+  market?: Pick<Market, "name" | "province" | "district"> | null,
+  client?: { name?: string } | null,
+): NoCanjeZone | null {
+  return (market ? noCanjeLocationZone(market) : null) || (isNoCanjeClient(client) ? "CLIENTE" : null);
+}
+function noCanjeZoneTitle(zone: NoCanjeZone | null, clientName = "") {
+  if (zone === "JULIACA") return "Zona Juliaca";
+  if (zone === "PUNO") return "Zona Puno";
+  if (zone === "CLIENTE") return `Cliente ${clientName || "VEGA - BELAUNDE"}`;
+  return "";
 }
 // Canje en ventas por unidad: los minis (Todinnito 85 g, Mini Costa Minions 80 g
 // y Mini Costa Jurassic 80 g) no llevan canje. Todos los demás productos sí.
@@ -5407,7 +5428,13 @@ function SaleEditModal({
         originalCount,
       );
   const saleMarket = markets.find((market) => market.id === sale.marketId);
-  const punoWithoutCanje = isNoCanjeMarket(saleMarket);
+  const editClient = clients.find((client) => client.id === sale.clientId);
+  const editZone = noCanjeZoneOf(saleMarket, editClient);
+  // Juliaca: siempre sin canje. Puno y VEGA - BELAUNDE: si la venta ya tenía canje
+  // (registrada antes de esta regla) lo conserva.
+  const punoWithoutCanje =
+    editZone === "JULIACA" || (editZone !== null && originalCount === 0 && !sale.bonus);
+  const editZoneTitle = noCanjeZoneTitle(editZone, editClient?.name);
   // Minis vendidos por unidad: no se les puede agregar canje
   // (si ya tenían uno registrado antes de esta regla, se conserva).
   const editSaleSku = Object.keys(sale.unitPrices || {})[0] || "";
@@ -5670,12 +5697,12 @@ function SaleEditModal({
   return (
     <Modal
       title="Editar venta"
-      detail={punoWithoutCanje ? `${sale.id} · Zona Juliaca: esta venta debe permanecer sin canje.` : `${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
+      detail={punoWithoutCanje ? `${sale.id} · ${editZoneTitle}: esta venta debe permanecer sin canje.` : `${sale.id} · Puedes corregir el canje y reemplazar sus evidencias.`}
       close={close}
     >
       {punoWithoutCanje && (
         <div className="notice">
-          <strong>Zona Juliaca: venta sin canje</strong>
+          <strong>{editZoneTitle}: venta sin canje</strong>
           <p>No se pueden agregar bonificaciones a esta venta.</p>
         </div>
       )}
@@ -9178,7 +9205,7 @@ function AnalystToday({
         <div>
           <span>Ventas con canje</span>
           <strong>{withCanje}</strong>
-          <small>{noCanjeToday ? `${noCanjeToday} en zona sin canje (Juliaca)` : `de ${todaySales.length} hoy`}</small>
+          <small>{noCanjeToday ? `${noCanjeToday} sin canje (Juliaca, Puno o VEGA - BELAUNDE)` : `de ${todaySales.length} hoy`}</small>
         </div>
         <div>
           <span>En jornada ahora</span>
@@ -12240,7 +12267,7 @@ function PromoterHome({
   pendingCount: number;
   syncBusy: boolean;
   syncMessage: string;
-  noCanjeZone: boolean;
+  noCanjeZone: string;
   onSync: () => void;
   onNewSale: () => void;
   onAttendance: () => void;
@@ -12293,7 +12320,7 @@ function PromoterHome({
       </button>
       {noCanjeZone && (
         <p className="ph-zone">
-          <MapPin /> Zona Juliaca: tus ventas aquí no llevan canje.
+          <MapPin /> {noCanjeZone}: tus ventas aquí no llevan canje.
         </p>
       )}
 
@@ -12804,7 +12831,10 @@ function PromoterApp({
     PANETON_85G: Math.max(0, Number(selectedWarehouse?.stock?.PANETON_85G) || 0),
   };
   const redemptionTotal = sumRedemptionStock(warehouseRedemptionStock);
-  const punoWithoutCanje = isNoCanjeMarket(selectedMarket);
+  const saleClient = clients.find((client) => client.id === clientId);
+  const saleNoCanjeZone = noCanjeZoneOf(selectedMarket, saleClient);
+  const saleNoCanjeTitle = noCanjeZoneTitle(saleNoCanjeZone, saleClient?.name);
+  const punoWithoutCanje = Boolean(saleNoCanjeZone);
   // Venta por unidad de un mini (Todinnito 85 g, Minions 80 g, Jurassic 80 g): sin canje.
   const unitProductWithoutCanje =
     mode === "UNIDADES" &&
@@ -14114,9 +14144,13 @@ function PromoterApp({
           </div>
         )}
         {punoWithoutCanje && (
-          <div className="notice">
-            <strong>Zona Juliaca: venta sin canje</strong>
-            <p>Las ventas en Juliaca no generan bonificaciones ni descuentan productos de canje del Almacén.</p>
+          <div className="notice" data-testid="notice-zone-no-canje">
+            <strong>{saleNoCanjeTitle}: venta sin canje</strong>
+            <p>
+              {saleNoCanjeZone === "CLIENTE"
+                ? "Las ventas a este cliente no generan bonificaciones ni descuentan productos de canje del Almacén."
+                : `Las ventas en ${saleNoCanjeZone === "PUNO" ? "Puno" : "Juliaca"} no generan bonificaciones ni descuentan productos de canje del Almacén.`}
+            </p>
           </div>
         )}
         {!saleWithoutCanje && bonus && mode === "PLANCHAS" && (
@@ -14345,7 +14379,10 @@ function PromoterApp({
               pendingCount={homePending}
               syncBusy={manualSyncBusy}
               syncMessage={manualSyncMessage}
-              noCanjeZone={punoWithoutCanje}
+              noCanjeZone={noCanjeZoneTitle(
+                noCanjeZoneOf(selectedMarket, clients.find((client) => client.id === selectedClientId)),
+                clients.find((client) => client.id === selectedClientId)?.name,
+              )}
               onSync={requestManualSync}
               onNewSale={() => {
                 setModule("VENTAS");

@@ -126,26 +126,65 @@ function normalizeLocationValue(input: unknown) {
     .toUpperCase();
 }
 
-// Zona sin canje: solo Juliaca (provincia San Román, Puno). Todas las demás
-// ciudades —incluida Puno ciudad— registran canje según la Tabla Canjes.
-// Debe coincidir con isNoCanjeLocation de la app (below-trade-panetones/src/App.tsx).
-const NO_CANJE_DISTRICTS = new Set(["JULIACA"]);
-const NO_CANJE_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
-const NO_CANJE_NAME_KEYWORD = "JULIACA";
+// Ventas sin canje: zona Juliaca (provincia San Román), zona Puno (provincia o
+// distrito Puno) y el cliente VEGA - BELAUNDE. Todo lo demás registra canje
+// según la Tabla Canjes.
+// Debe coincidir con noCanjeZoneOf de la app (below-trade-panetones/src/App.tsx).
+type NoCanjeZone = "JULIACA" | "PUNO" | "CLIENTE";
+const JULIACA_DISTRICTS = new Set(["JULIACA"]);
+const JULIACA_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
+const PUNO_DISTRICTS = new Set(["PUNO"]);
+const PUNO_PROVINCES = new Set(["PUNO"]);
+const NO_CANJE_CLIENT_KEYS = ["VEGABELAUNDE"];
 
-function isNoCanjeLocation(location: {
+function compactKey(text: unknown) {
+  return normalizeLocationValue(text).replace(/[^A-Z0-9]/g, "");
+}
+
+function noCanjeLocationZone(location: {
   name?: unknown;
   province?: unknown;
   district?: unknown;
-}) {
+}): "JULIACA" | "PUNO" | null {
   const district = normalizeLocationValue(location.district);
   const province = normalizeLocationValue(location.province);
   const name = normalizeLocationValue(location.name);
-  return (
-    NO_CANJE_DISTRICTS.has(district) ||
-    NO_CANJE_PROVINCES.has(province) ||
-    name.includes(NO_CANJE_NAME_KEYWORD)
-  );
+  if (JULIACA_DISTRICTS.has(district) || JULIACA_PROVINCES.has(province) || name.includes("JULIACA"))
+    return "JULIACA";
+  if (PUNO_DISTRICTS.has(district) || PUNO_PROVINCES.has(province) || name.includes("PUNO"))
+    return "PUNO";
+  return null;
+}
+
+function isNoCanjeLocation(location: { name?: unknown; province?: unknown; district?: unknown }) {
+  return noCanjeLocationZone(location) !== null;
+}
+
+function isNoCanjeClientData(client: StoredRecord | null | undefined) {
+  if (!client) return false;
+  const name = compactKey(client.name);
+  return NO_CANJE_CLIENT_KEYS.some((key) => name.includes(key));
+}
+
+/** Zona sin canje de una venta, con el mercado y el cliente guardados en la base. */
+async function saleNoCanjeZone(
+  db: QueryClient,
+  record: StoredRecord,
+  marketData?: StoredRecord | null,
+): Promise<NoCanjeZone | null> {
+  let market = marketData;
+  if (market === undefined) {
+    const found = await db.query("SELECT data FROM markets WHERE id=$1 LIMIT 1", [value(record, "marketId")]);
+    market = isRecord(found.rows[0]?.data) ? found.rows[0].data : null;
+  }
+  const zone = market
+    ? noCanjeLocationZone(market)
+    : noCanjeLocationZone({ name: record.marketName, province: record.marketProvince, district: record.marketDistrict });
+  if (zone) return zone;
+  const clientFound = await db.query("SELECT data FROM clients WHERE id=$1 LIMIT 1", [value(record, "clientId")]);
+  const clientData = isRecord(clientFound.rows[0]?.data) ? clientFound.rows[0].data : null;
+  if (isNoCanjeClientData(clientData) || isNoCanjeClientData({ name: record.clientName })) return "CLIENTE";
+  return null;
 }
 
 /** Datos de un mercado (tabla markets). */
@@ -233,7 +272,7 @@ function legacyUnitAvenas(units: number) {
 
 function stripCanjeFromSale(
   record: StoredRecord,
-  reason: "JULIACA" | CanjeExclusion = "JULIACA",
+  reason: NoCanjeZone | CanjeExclusion = "JULIACA",
 ): StoredRecord {
   const {
     bonus: _bonus,
@@ -252,11 +291,11 @@ function stripCanjeFromSale(
     redemptionCount: 0,
     planchaAccessory: value(record, "mode") === "PLANCHAS" ? "NINGUNO" : undefined,
     planchaMultiplier: value(record, "mode") === "PLANCHAS" ? 1 : undefined,
-    ...(reason === "JULIACA"
+    ...(reason === "JULIACA" || reason === "PUNO" || reason === "CLIENTE"
       ? {
           // Nombre histórico de la marca: se conserva para reportes y ventas anteriores.
           punoWithoutCanje: true,
-          noCanjeZone: "JULIACA",
+          noCanjeZone: reason === "CLIENTE" ? "CLIENTE VEGA - BELAUNDE" : reason,
         }
       : {
           noCanjeReason:
@@ -267,7 +306,7 @@ function stripCanjeFromSale(
 
 function enforceSaleWithoutCanje(
   record: StoredRecord,
-  reason: "JULIACA" | CanjeExclusion = "JULIACA",
+  reason: NoCanjeZone | CanjeExclusion = "JULIACA",
 ) {
   const clean = stripCanjeFromSale(record, reason);
   delete record.bonus;
@@ -1456,8 +1495,8 @@ async function syncSnapshot(
               [value(record, "marketId")],
             );
             const saleMarketData = isRecord(saleMarket.rows[0]?.data) ? saleMarket.rows[0].data : null;
-            if (saleMarketData ? isNoCanjeMarketData(saleMarketData) : isNoCanjeSaleRecord(record))
-              enforceSaleWithoutCanje(record);
+            const zone = await saleNoCanjeZone(client as unknown as QueryClient, record, saleMarketData);
+            if (zone) enforceSaleWithoutCanje(record, zone);
             else {
               const exclusion = await productCanjeExclusion(client as unknown as QueryClient, record);
               if (exclusion) enforceSaleWithoutCanje(record, exclusion);
@@ -2279,7 +2318,8 @@ router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req,
 
     const marketsResult = await db.query("SELECT id,data FROM markets");
     const punoMarketIds = marketsResult.rows
-      .filter((row) => isRecord(row.data) && isNoCanjeMarketData(row.data))
+      // Solo Juliaca: las ventas anteriores de Puno y VEGA - BELAUNDE conservan su canje.
+      .filter((row) => isRecord(row.data) && noCanjeLocationZone(row.data) === "JULIACA")
       .map((row) => String(row.id));
     if (!punoMarketIds.length) {
       await db.query("COMMIT");
@@ -5435,16 +5475,17 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (!customer.rows.length || !market.rows.length)
       throw new Error("Selecciona un cliente activo del mercado elegido.");
     const marketData = isRecord(market.rows[0].data) ? market.rows[0].data : {};
-    const juliacaWithoutCanje = isNoCanjeMarketData(marketData);
+    const zoneWithoutCanje = await saleNoCanjeZone(db as unknown as QueryClient, input, marketData);
+    const juliacaWithoutCanje = Boolean(zoneWithoutCanje);
     const productExclusion = juliacaWithoutCanje
       ? null
       : await productCanjeExclusion(db as unknown as QueryClient, input);
     // Variable con nombre histórico: aquí significa "esta venta va sin canje".
     const punoWithoutCanje = juliacaWithoutCanje || Boolean(productExclusion);
-    if (juliacaWithoutCanje) {
+    if (zoneWithoutCanje) {
       input.marketRegion = value(marketData, "region");
       input.marketDepartment = value(marketData, "department");
-      enforceSaleWithoutCanje(input);
+      enforceSaleWithoutCanje(input, zoneWithoutCanje);
     } else if (productExclusion) {
       enforceSaleWithoutCanje(input, productExclusion);
     } else {
@@ -5768,7 +5809,16 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     const currentMarketData = isRecord(currentMarketResult.rows[0]?.data)
       ? currentMarketResult.rows[0].data
       : {};
-    const punoWithoutCanje = isNoCanjeMarketData(currentMarketData);
+    const currentZone = await saleNoCanjeZone(
+      client as unknown as QueryClient,
+      isRecord(currentSale.data) ? currentSale.data : {},
+      isRecord(currentMarketResult.rows[0]?.data) ? currentMarketData : null,
+    );
+    // Juliaca: siempre sin canje. Puno y VEGA - BELAUNDE: las ventas que ya tenían
+    // canje antes de esta regla lo conservan al editarlas.
+    const punoWithoutCanje =
+      currentZone === "JULIACA" ||
+      (currentZone !== null && !hasRedemptionConsumption(isRecord(currentSale.data) ? currentSale.data : {}));
     const hasCanjeEditedFlag = Object.prototype.hasOwnProperty.call(
       input,
       "canjeEdited",
@@ -5776,7 +5826,7 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
     const canjeEdited = input.canjeEdited === true;
     delete input.canjeEdited;
     if (punoWithoutCanje) {
-      enforceSaleWithoutCanje(input);
+      enforceSaleWithoutCanje(input, currentZone || "JULIACA");
     } else {
       try {
         requireFinalClientForCanje(input);
