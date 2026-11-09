@@ -481,6 +481,18 @@ export async function ensureDatabaseSchema() {
       )
     ON CONFLICT (id) DO NOTHING;
 
+    -- Planchas solo de minis (Todinnito 85 g, Mini Costa Minions 80 g, Mini Costa
+    -- Jurassic 80 g): desde 1 plancha, 4 Avenas fijas (no se multiplica).
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES (
+      'RR-ESC-MINI-1','ESCALA_MINIS','Escala Minis · 1 plancha o más','PLANCHAS','PLANCHAS',1,null,false,
+      false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"AVENA":4}'::jsonb,5,'ACTIVO',
+      '{"description":"Solo minis 80/85 g: 1 plancha o más = 4 Avenas (1/2 plancha = Escala 1)"}'::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING;
+
     -- Ventas por unidad de 3 a 5 unidades: 2 Avenas (no se repite por unidad).
     INSERT INTO redemption_rules (
       id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,

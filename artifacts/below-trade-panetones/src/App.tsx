@@ -402,6 +402,24 @@ function isMiniHalfPlanchaProduct(sku?: string, label?: string) {
     /MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)
   );
 }
+// Planchas solo de minis: 1/2 plancha (24 und) = 2 Avenas; 1 plancha o más
+// (48 und por plancha) = 4 Avenas fijas.
+const MINI_UNITS_PER_PLANCHA = 48;
+const MINI_PLANCHA_AVENAS = 4;
+/** SKU de referencia de un mini (las escalas usan estos códigos), aunque el catálogo use otro. */
+function canonicalMiniSku(sku: string, label = "") {
+  if (MINI_HALF_PLANCHA_SKUS.has(sku)) return sku;
+  const normalized = `${sku} ${label}`
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+  if (/TODINNITO\s*85(?:G|GR)?\b/.test(normalized)) return "TODINNITO-85";
+  if (/MINI\s*COSTA\s*MINIONS\s*80(?:G|GR)?\b/.test(normalized)) return "MINI-COSTA-MINIONS-80";
+  if (/MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)) return "MINI-COSTA-JURASSIC-80";
+  return sku;
+}
 const DEFAULT_PRODUCT_PRESENTATION_BY_SKU: Record<string, "CAJA" | "BOLSA" | "LATA"> = {
   "COSTA-800": "CAJA",
   "COSTA-BOLSA-800": "BOLSA",
@@ -980,10 +998,10 @@ function normalizedProducts(
         DEFAULT_PRODUCT_PRESENTATION_BY_SKU[item.sku] ||
         ("BOLSA" as const),
       unitMeasure: Math.max(1, Math.floor(Number(item.unitMeasure) || 1)),
-      unitsPerPlancha: Math.max(
-        1,
-        Math.floor(Number(item.unitsPerPlancha) || PLANCHA_UNITS_BY_SKU[item.sku] || 6),
-      ),
+      // Los minis siempre van de 48 und por plancha, diga lo que diga el catálogo.
+      unitsPerPlancha: isMiniHalfPlanchaProduct(item.sku, item.product)
+        ? MINI_UNITS_PER_PLANCHA
+        : Math.max(1, Math.floor(Number(item.unitsPerPlancha) || PLANCHA_UNITS_BY_SKU[item.sku] || 6)),
       status: item.status || ("ACTIVO" as Status),
     };
   });
@@ -5447,15 +5465,7 @@ function SaleEditModal({
         UNIT_SALE_PRODUCTS.find((item) => item.sku === editSaleSku)?.label ||
         "",
     );
-  // Minis desde 2 planchas sin canje: tampoco se les puede agregar.
-  const editPlanchaLines = (sale.planchaLines || []).filter((line) => Number(line.units) > 0);
-  const miniPlanchaEditWithoutCanje =
-    sale.mode === "PLANCHAS" &&
-    originalCount === 0 &&
-    (Number(sale.planchas) || 0) > 1 &&
-    editPlanchaLines.length > 0 &&
-    editPlanchaLines.every((line) => isMiniHalfPlanchaProduct(line.sku, line.product));
-  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje || miniPlanchaEditWithoutCanje;
+  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje;
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -5546,6 +5556,8 @@ function SaleEditModal({
     sale.mode === "PLANCHAS" &&
     saleMiniOnly &&
     saleMiniEligibleUnits === 24;
+  const saleMiniPlanchas =
+    sale.mode === "PLANCHAS" && saleMiniOnly && (Number(sale.planchas) || 0) >= 1;
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
@@ -5555,6 +5567,8 @@ function SaleEditModal({
       : sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+        : saleMiniPlanchas
+          ? ({ AVENA: MINI_PLANCHA_AVENAS } as Partial<RedemptionStock>)
         : planchaCanjeRequirements(
             sale.planchas || 0,
             parsedDate,
@@ -5704,12 +5718,6 @@ function SaleEditModal({
         <div className="notice">
           <strong>{editZoneTitle}: venta sin canje</strong>
           <p>No se pueden agregar bonificaciones a esta venta.</p>
-        </div>
-      )}
-      {!punoWithoutCanje && miniPlanchaEditWithoutCanje && (
-        <div className="notice">
-          <strong>Minis desde 2 planchas: venta sin canje</strong>
-          <p>Los minis 80/85 g solo tienen canje en 1/2 plancha (24 und) y 1 plancha (48 und).</p>
         </div>
       )}
       {!punoWithoutCanje && weightWithoutCanje && (
@@ -12841,12 +12849,13 @@ function PromoterApp({
     Boolean(selectedProduct) &&
     !unitProductAllowsCanje(selectedProduct?.sku, selectedProduct?.label);
   // Minis por planchas: canje solo en 1/2 plancha y 1 plancha; desde 2 planchas, sin canje.
-  const miniPlanchaWithoutCanje = mode === "PLANCHAS" && miniOnlyPlancha && planchas > 1;
-  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje || miniPlanchaWithoutCanje;
+  // Planchas solo de minis desde 1 plancha: 4 Avenas fijas.
+  const miniPlanchaCanje = mode === "PLANCHAS" && miniOnlyPlancha && planchas >= 1;
+  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje;
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
-  const availablePlanchaAccessories = planchas >= 10
+  const availablePlanchaAccessories = planchas >= 10 && !miniOnlyPlancha
     ? (["MANDIL" as const, "BATEA" as const, "NINGUNO" as const])
     : (["NINGUNO" as const]);
   useEffect(() => {
@@ -12885,7 +12894,7 @@ function PromoterApp({
               ? [selectedProduct?.sku].filter(
                   (value): value is string => Boolean(value),
                 )
-              : normalizedPlanchaLines.map((line) => line.sku),
+              : normalizedPlanchaLines.map((line) => canonicalMiniSku(line.sku, line.product?.label)),
           accessory:
             mode === "PLANCHAS" ? effectivePlanchaAccessory : "NINGUNO",
           date: saleDate,
@@ -12923,7 +12932,9 @@ function PromoterApp({
         : 0;
   const legacyPlanchaRequirements = miniHalfPlanchaCanje
     ? ({ AVENA: 2 } as Partial<RedemptionStock>)
-    : planchaCanjeRequirements(
+    : miniPlanchaCanje
+      ? ({ AVENA: MINI_PLANCHA_AVENAS } as Partial<RedemptionStock>)
+      : planchaCanjeRequirements(
         planchas,
         saleDate,
         effectivePlanchaAccessory,
@@ -12934,6 +12945,8 @@ function PromoterApp({
       ? ({} as Partial<RedemptionStock>)
       : miniHalfPlanchaCanje
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
+        : miniPlanchaCanje
+          ? ({ AVENA: MINI_PLANCHA_AVENAS } as Partial<RedemptionStock>)
         : masterRuleMatch
           ? masterRuleMatch.items
           : redemptionRulesLoaded
@@ -12944,6 +12957,17 @@ function PromoterApp({
                   selectedBonusProduct?.components || {},
                   canjeCount,
                 );
+  // Minis: se envía la escala solo si da exactamente su canje (2 o 4 Avenas);
+  // si no, va sin escala y el servidor valida la dinámica de minis.
+  const saleRuleMatch =
+    (miniHalfPlanchaCanje || miniPlanchaCanje) && !saleWithoutCanje
+      ? masterRuleMatch &&
+        redemptionItems.every(
+          (item) => (Number(masterRuleMatch.items[item.id]) || 0) === (Number(requiredRedemptions[item.id]) || 0),
+        )
+        ? masterRuleMatch
+        : null
+      : masterRuleMatch;
   const bonus =
     requiredRedemptionEntries(requiredRedemptions).length
       ? canjeRequirementsLabel(requiredRedemptions)
@@ -13304,16 +13328,16 @@ function PromoterApp({
         mode === "PLANCHAS"
           ? Object.fromEntries(normalizedPlanchaLines.map((line) => [line.product.label, line.units]))
           : { [selectedProduct.brand]: unitQty },
-      redemptionRuleId: masterRuleMatch?.rule.id,
-      redemptionRuleCode: masterRuleMatch?.rule.code,
-      redemptionRuleName: masterRuleMatch?.rule.name,
-      redemptionRuleSnapshot: masterRuleMatch
+      redemptionRuleId: saleRuleMatch?.rule.id,
+      redemptionRuleCode: saleRuleMatch?.rule.code,
+      redemptionRuleName: saleRuleMatch?.rule.name,
+      redemptionRuleSnapshot: saleRuleMatch
         ? {
-            code: masterRuleMatch.rule.code,
-            name: masterRuleMatch.rule.name,
-            items: masterRuleMatch.items,
-            accessory: masterRuleMatch.rule.accessory,
-            appliedFactor: masterRuleMatch.appliedFactor,
+            code: saleRuleMatch.rule.code,
+            name: saleRuleMatch.rule.name,
+            items: saleRuleMatch.items,
+            accessory: saleRuleMatch.rule.accessory,
+            appliedFactor: saleRuleMatch.appliedFactor,
           }
         : undefined,
       bonus,
@@ -13328,7 +13352,7 @@ function PromoterApp({
             : effectivePlanchaAccessory
           : undefined,
       planchaMultiplier:
-        mode === "PLANCHAS" ? (saleWithoutCanje ? 1 : planchaMultiplier) : undefined,
+        mode === "PLANCHAS" ? (saleWithoutCanje || miniOnlyPlancha ? 1 : planchaMultiplier) : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
@@ -13991,7 +14015,7 @@ function PromoterApp({
                   <p className="formula">
                     {product.label} · {unitsPerPlancha} unidades por plancha
                     {isMiniHalfPlanchaProduct(line.sku, product?.label)
-                      ? " · 24 und (1/2 plancha) = 2 Avenas · 48 und (1 plancha) = 3 Avenas + 1 Spaghetti · desde 2 planchas sin canje"
+                      ? " · 24 und (1/2 plancha) = 2 Avenas · 1 plancha (48 und) o más = 4 Avenas"
                       : ""}
                   </p>
                   {planchaType === "MIX" && planchaLines.length > 2 && (
@@ -14130,12 +14154,6 @@ function PromoterApp({
               <option value={4}>x4 · requiere aprobación Trade</option>
             </select>
           </Field>
-        )}
-        {!punoWithoutCanje && miniPlanchaWithoutCanje && (
-          <div className="notice" data-testid="notice-mini-plancha-no-canje">
-            <strong>Minis desde 2 planchas: venta sin canje</strong>
-            <p>Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g solo tienen canje en 1/2 plancha (24 und) y 1 plancha (48 und).</p>
-          </div>
         )}
         {!punoWithoutCanje && unitProductWithoutCanje && (
           <div className="notice" data-testid="notice-unit-no-canje">
