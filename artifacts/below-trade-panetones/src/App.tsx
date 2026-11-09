@@ -116,16 +116,17 @@ function peruDateKey(date = new Date()) {
 }
 
 
-// Ventas sin canje: zona Juliaca (provincia San Román), zona Puno (provincia o
-// distrito Puno) y el cliente VEGA - BELAUNDE. Todo lo demás registra canje
-// según la Tabla Canjes.
+// Ventas sin canje: zona Juliaca (provincia San Román) y zona Puno (provincia o
+// distrito Puno). Todo lo demás registra canje según la Tabla Canjes.
 // Debe coincidir con noCanjeLocationZone / saleNoCanjeZone del servidor (api-server/src/routes/app-storage.ts).
 type NoCanjeZone = "JULIACA" | "PUNO" | "CLIENTE";
 const JULIACA_DISTRICTS = new Set(["JULIACA"]);
 const JULIACA_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
 const PUNO_DISTRICTS = new Set(["PUNO"]);
 const PUNO_PROVINCES = new Set(["PUNO"]);
-const NO_CANJE_CLIENT_KEYS = ["VEGABELAUNDE"];
+// Clientes sin canje (código compacto, sin espacios ni guiones). VEGA - BELAUNDE
+// volvió a tener canje; se deja la lista por si se necesita otro cliente.
+const NO_CANJE_CLIENT_KEYS: string[] = [];
 function noCanjeLocationZone(location: { name?: string; province?: string; district?: string }): "JULIACA" | "PUNO" | null {
   const district = normalizeLocationValue(location.district);
   const province = normalizeLocationValue(location.province);
@@ -9213,7 +9214,7 @@ function AnalystToday({
         <div>
           <span>Ventas con canje</span>
           <strong>{withCanje}</strong>
-          <small>{noCanjeToday ? `${noCanjeToday} sin canje (Juliaca, Puno o VEGA - BELAUNDE)` : `de ${todaySales.length} hoy`}</small>
+          <small>{noCanjeToday ? `${noCanjeToday} sin canje (Juliaca o Puno)` : `de ${todaySales.length} hoy`}</small>
         </div>
         <div>
           <span>En jornada ahora</span>
