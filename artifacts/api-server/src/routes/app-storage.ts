@@ -126,16 +126,17 @@ function normalizeLocationValue(input: unknown) {
     .toUpperCase();
 }
 
-// Ventas sin canje: zona Juliaca (provincia San Román), zona Puno (provincia o
-// distrito Puno) y el cliente VEGA - BELAUNDE. Todo lo demás registra canje
-// según la Tabla Canjes.
+// Ventas sin canje: zona Juliaca (provincia San Román) y zona Puno (provincia o
+// distrito Puno). Todo lo demás registra canje según la Tabla Canjes.
 // Debe coincidir con noCanjeZoneOf de la app (below-trade-panetones/src/App.tsx).
 type NoCanjeZone = "JULIACA" | "PUNO" | "CLIENTE";
 const JULIACA_DISTRICTS = new Set(["JULIACA"]);
 const JULIACA_PROVINCES = new Set(["SAN ROMAN", "JULIACA"]);
 const PUNO_DISTRICTS = new Set(["PUNO"]);
 const PUNO_PROVINCES = new Set(["PUNO"]);
-const NO_CANJE_CLIENT_KEYS = ["VEGABELAUNDE"];
+// Clientes sin canje (código compacto, sin espacios ni guiones). VEGA - BELAUNDE
+// volvió a tener canje; se deja la lista por si se necesita otro cliente.
+const NO_CANJE_CLIENT_KEYS: string[] = [];
 
 function compactKey(text: unknown) {
   return normalizeLocationValue(text).replace(/[^A-Z0-9]/g, "");
