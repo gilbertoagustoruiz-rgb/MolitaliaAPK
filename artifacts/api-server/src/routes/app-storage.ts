@@ -194,15 +194,29 @@ function isNoCanjeMarketData(record: StoredRecord) {
 
 // Minis (Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g):
 // - por unidad: sin canje;
-// - por planchas (solo minis): canje en 1/2 plancha (24 und) y 1 plancha (48 und);
-//   desde 2 planchas, sin canje. Mezclas con otros productos: escala normal.
-type CanjeExclusion = "MINI_UNIDAD" | "MINI_PLANCHAS";
+// - por planchas (solo minis): 1/2 plancha (24 und) = 2 Avenas; 1 plancha o más
+//   (48 und por plancha) = 4 Avenas fijas. Mezclas con otros productos: escala normal.
+type CanjeExclusion = "MINI_UNIDAD";
 const CANJE_EXCLUSION_MESSAGE: Record<CanjeExclusion, string> = {
   MINI_UNIDAD:
     "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.",
-  MINI_PLANCHAS:
-    "Los minis 80/85 g solo tienen canje en 1/2 plancha (24 und) y 1 plancha (48 und). Desde 2 planchas la venta va sin canje.",
 };
+const MINI_UNITS_PER_PLANCHA = 48;
+const MINI_PLANCHA_AVENAS = 4;
+/** SKU de referencia de un mini (las escalas usan estos códigos), aunque el catálogo use otro. */
+function canonicalMiniSku(sku: string, product = "") {
+  if (miniHalfPlanchaSkus.has(sku)) return sku;
+  const normalized = `${sku} ${product}`
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+  if (/TODINNITO\s*85(?:G|GR)?\b/.test(normalized)) return "TODINNITO-85";
+  if (/MINI\s*COSTA\s*MINIONS\s*80(?:G|GR)?\b/.test(normalized)) return "MINI-COSTA-MINIONS-80";
+  if (/MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)) return "MINI-COSTA-JURASSIC-80";
+  return sku;
+}
 
 async function catalogProductsBySku(db: QueryClient, skus: string[]) {
   const wanted = [...new Set(skus.map((sku) => sku.trim().toUpperCase()).filter(Boolean))];
@@ -218,7 +232,10 @@ async function catalogProductsBySku(db: QueryClient, skus: string[]) {
         String(row.sku),
         {
           product: String(row.product || ""),
-          unitsPerPlancha: Math.floor(Number(data.unitsPerPlancha) || 0),
+          // Los minis siempre van de 48 und por plancha, diga lo que diga el catálogo.
+          unitsPerPlancha: isMiniHalfPlanchaLine({ sku: String(row.sku), product: String(row.product || "") })
+            ? MINI_UNITS_PER_PLANCHA
+            : Math.floor(Number(data.unitsPerPlancha) || 0),
         },
       ];
     }),
@@ -248,15 +265,6 @@ async function productCanjeExclusion(
     if (!sku) return null;
     const catalog = await catalogProductsBySku(db, [sku]);
     return (await isMiniLine({ sku }, catalog)) ? "MINI_UNIDAD" : null;
-  }
-  if (mode === "PLANCHAS") {
-    const lines = Array.isArray(record.planchaLines)
-      ? record.planchaLines.filter(isRecord).filter((line) => numeric(line, "units") > 0)
-      : [];
-    if (!lines.length || !(numeric(record, "planchas") > 1)) return null;
-    const catalog = await catalogProductsBySku(db, lines.map((line) => value(line, "sku")));
-    for (const line of lines) if (!(await isMiniLine(line, catalog))) return null;
-    return "MINI_PLANCHAS";
   }
   return null;
 }
@@ -298,8 +306,7 @@ function stripCanjeFromSale(
           noCanjeZone: reason === "CLIENTE" ? "CLIENTE VEGA - BELAUNDE" : reason,
         }
       : {
-          noCanjeReason:
-            reason === "MINI_UNIDAD" ? "MINI_POR_UNIDAD" : "MINI_MAS_DE_1_PLANCHA",
+          noCanjeReason: "MINI_POR_UNIDAD",
         }),
   };
 }
@@ -1697,7 +1704,18 @@ async function validateSubmittedRedemptionRule(
   if (maxQuantity !== null && quantity > maxQuantity)
     throw new Error("La compra supera la cantidad máxima de esta escala.");
 
-  const saleSkus = saleItemDrafts(sale).map((item) => item.sku);
+  // Los minis se reconocen por nombre aunque el catálogo use otro código.
+  const lineProducts = new Map(
+    (Array.isArray(sale.planchaLines) ? sale.planchaLines.filter(isRecord) : []).map((line) => [
+      value(line, "sku"),
+      value(line, "product"),
+    ]),
+  );
+  const draftSkus = saleItemDrafts(sale).map((item) => item.sku);
+  const draftCatalog = await catalogProductsBySku(client, draftSkus);
+  const saleSkus = draftSkus.map((sku) =>
+    canonicalMiniSku(sku, lineProducts.get(sku) || draftCatalog.get(sku.toUpperCase())?.product || ""),
+  );
   const eligibleSkus = Array.isArray(rule.eligible_skus)
     ? rule.eligible_skus.map((sku: unknown) => String(sku))
     : [];
@@ -1716,7 +1734,9 @@ async function validateSubmittedRedemptionRule(
     if (step <= 0) throw new Error("La escala repetible no tiene un paso válido.");
     factor = Math.max(1, Math.floor(quantity / step));
   }
-  if (value(sale, "mode") === "PLANCHAS" && numeric(sale, "planchas") >= 80) {
+  const miniOnlyRule =
+    eligibleSkus.length > 0 && eligibleSkus.every((sku: string) => miniHalfPlanchaSkus.has(sku));
+  if (value(sale, "mode") === "PLANCHAS" && numeric(sale, "planchas") >= 80 && !miniOnlyRule) {
     factor *= Math.max(1, Math.min(4, Math.floor(numeric(sale, "planchaMultiplier") || 1)));
   }
 
@@ -5521,6 +5541,14 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       miniEligibleUnits === 48 &&
       units === 48 &&
       planchas === 1;
+    // 1 plancha o más solo de minis (48 und por plancha): 4 Avenas fijas.
+    const miniPlanchasCanje =
+      mode === "PLANCHAS" &&
+      miniOnlyPlancha &&
+      Number.isInteger(planchas) &&
+      planchas >= 1 &&
+      units === planchas * 48 &&
+      miniEligibleUnits === units;
     if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
       throw new Error("La fecha de venta no puede estar vacía ni ser futura.");
     if (
@@ -5662,6 +5690,17 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         )
           throw new Error(
             "Para 24 unidades de minis corresponde 2 Avena Clásica.",
+          );
+      } else if (miniPlanchasCanje) {
+        if (
+          (bonus && count !== 1) ||
+          (bonus && requested.AVENA !== MINI_PLANCHA_AVENAS) ||
+          requested.SPAGHETTI ||
+          requested.MANDIL ||
+          requested.BATEA
+        )
+          throw new Error(
+            "Para planchas de minis (1 plancha o más) corresponde 4 Avena Clásica.",
           );
       } else {
         const eligible =
