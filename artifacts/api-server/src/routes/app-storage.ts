@@ -270,6 +270,36 @@ async function productCanjeExclusion(
   return null;
 }
 
+// Canje EXCEPCIONAL (solo Spaghetti): para almacenes sin Avena (Productores y La
+// Parada, o los que el admin active). El promotor elige Tradicional o Excepcional.
+// Debe coincidir con exceptionalCanjeItems de la app.
+type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL";
+function canjeProgramOf(record: StoredRecord): CanjeProgram {
+  return value(record, "canjeProgram") === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL";
+}
+function warehouseAllowsExceptionalCanje(data: StoredRecord | null | undefined) {
+  if (!data) return false;
+  if (typeof data.exceptionalCanje === "boolean") return data.exceptionalCanje;
+  const name = normalizeLocationValue(data.name);
+  return name.includes("PRODUCTORES") || name.includes("LA PARADA");
+}
+function exceptionalCanjeItems(
+  mode: string,
+  units: number,
+  planchas: number,
+  miniOnly: boolean,
+): Record<string, number> {
+  const none = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
+  if (mode === "UNIDADES") return { ...none, SPAGHETTI: units >= 1 && units <= 5 ? units : 0 };
+  if (miniOnly) {
+    if (planchas === 0.5 && units === 24) return { ...none, SPAGHETTI: 1 };
+    return { ...none, SPAGHETTI: planchas >= 1 ? 2 : 0 };
+  }
+  const spaghetti =
+    planchas >= 80 ? 160 : planchas >= 30 ? 65 : planchas >= 10 ? 20 : planchas >= 4 ? 8 : planchas >= 1 ? 2 : 0;
+  return { ...none, SPAGHETTI: spaghetti };
+}
+
 // Escala de Unidades cuando la venta no trae una Escala de Canje (respaldo):
 // 1 und = 1 Avena, 2 und = 2 Avenas, de 3 a 5 und = 2 Avenas.
 function legacyUnitCanjeCount(units: number) {
@@ -1504,7 +1534,10 @@ async function syncSnapshot(
             );
             const saleMarketData = isRecord(saleMarket.rows[0]?.data) ? saleMarket.rows[0].data : null;
             const zone = await saleNoCanjeZone(client as unknown as QueryClient, record, saleMarketData);
-            if (zone) enforceSaleWithoutCanje(record, zone);
+            if (zone) {
+              enforceSaleWithoutCanje(record, zone);
+              record.canjeProgram = "TRADICIONAL";
+            }
             else {
               const exclusion = await productCanjeExclusion(client as unknown as QueryClient, record);
               if (exclusion) enforceSaleWithoutCanje(record, exclusion);
@@ -1665,7 +1698,7 @@ async function validateSubmittedRedemptionRule(
   const result = await client.query(
     `SELECT id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,
             min_exclusive,repeatable,step_quantity,eligible_skus,accessory,
-            items,valid_from,valid_to,priority,status
+            items,valid_from,valid_to,priority,status,data
      FROM redemption_rules
      WHERE id=$1 AND status='ACTIVO'
      LIMIT 1`,
@@ -1673,6 +1706,14 @@ async function validateSubmittedRedemptionRule(
   );
   const rule = result.rows[0];
   if (!rule) throw new Error("La Escala de Canje seleccionada ya no está activa.");
+  const ruleProgram: CanjeProgram =
+    isRecord(rule.data) && value(rule.data, "program") === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL";
+  if (ruleProgram !== canjeProgramOf(sale))
+    throw new Error(
+      ruleProgram === "EXCEPCIONAL"
+        ? "Esta Escala es Excepcional: marca la venta como canje Excepcional."
+        : "Esta Escala es Tradicional: la venta está marcada como canje Excepcional.",
+    );
 
   if (String(rule.sale_mode) !== value(sale, "mode"))
     throw new Error("La Escala de Canje no corresponde al tipo de venta.");
@@ -1737,7 +1778,12 @@ async function validateSubmittedRedemptionRule(
   }
   const miniOnlyRule =
     eligibleSkus.length > 0 && eligibleSkus.every((sku: string) => miniHalfPlanchaSkus.has(sku));
-  if (value(sale, "mode") === "PLANCHAS" && numeric(sale, "planchas") >= 80 && !miniOnlyRule) {
+  if (
+    value(sale, "mode") === "PLANCHAS" &&
+    numeric(sale, "planchas") >= 80 &&
+    !miniOnlyRule &&
+    ruleProgram !== "EXCEPCIONAL"
+  ) {
     factor *= Math.max(1, Math.min(4, Math.floor(numeric(sale, "planchaMultiplier") || 1)));
   }
 
@@ -5512,6 +5558,15 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     } else {
       requireFinalClientForCanje(input);
     }
+    if (punoWithoutCanje) input.canjeProgram = "TRADICIONAL";
+    const exceptionalProgram = canjeProgramOf(input) === "EXCEPCIONAL";
+    if (exceptionalProgram) {
+      const saleWarehouse = await db.query("SELECT data FROM warehouses WHERE id=$1 LIMIT 1", [
+        value(marketData, "warehouseId"),
+      ]);
+      if (!warehouseAllowsExceptionalCanje(isRecord(saleWarehouse.rows[0]?.data) ? saleWarehouse.rows[0].data : null))
+        throw new Error("El canje Excepcional solo está habilitado en los almacenes autorizados (Productores y La Parada).");
+    }
     const date = new Date(value(input, "date"));
     const units = Number(input.units);
     const planchas = Number(input.planchas);
@@ -5620,6 +5675,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       (bonus && (!Number.isInteger(count) || count < 1 || count > 3)) ||
       (!bonus && count !== 0) ||
       (!punoWithoutCanje &&
+        !exceptionalProgram &&
         mode === "UNIDADES" &&
         bonus &&
         !value(input, "redemptionRuleId") &&
@@ -5661,8 +5717,24 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         appliedFactor: validatedRule.appliedFactor,
       };
     }
+    if (!validatedRule && exceptionalProgram && bonus) {
+      // Excepcional sin escala (respaldo): se valida con la dinámica fija.
+      const expected = exceptionalCanjeItems(
+        mode,
+        units,
+        planchas,
+        mode === "PLANCHAS" &&
+          inputPlanchaLines.length > 0 &&
+          inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
+      );
+      if (redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
+        throw new Error(
+          `Canje Excepcional: para esta venta corresponde ${expected.SPAGHETTI} Spaghetti.`,
+        );
+    }
     if (
       !validatedRule &&
+      !exceptionalProgram &&
       mode === "UNIDADES" &&
       bonus &&
       (requested.AVENA !== legacyUnitAvenas(units) ||
@@ -5673,7 +5745,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error(
         "En unidades: 1 und = 1 Avena, 2 und = 2 Avenas y de 3 a 5 und = 2 Avenas.",
       );
-    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje) {
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && !exceptionalProgram) {
       const month = Number(
         new Intl.DateTimeFormat("en-US", {
           timeZone: "America/Lima",
