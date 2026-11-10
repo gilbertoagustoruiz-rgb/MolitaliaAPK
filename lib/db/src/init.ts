@@ -481,6 +481,22 @@ export async function ensureDatabaseSchema() {
       )
     ON CONFLICT (id) DO NOTHING;
 
+    -- Escala EXCEPCIONAL (solo Spaghetti), para almacenes sin Avena (p. ej.
+    -- Productores y La Parada): el promotor elige Tradicional o Excepcional.
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES
+      ('RR-EXC-MINI-HALF','EXC_MINI_MEDIA','Excepcional · Minis 1/2 plancha','PLANCHAS','UNITS',24,24,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"SPAGHETTI":1}'::jsonb,10,'ACTIVO','{"program":"EXCEPCIONAL","description":"Minis: 1/2 plancha (24 und) = 1 Spaghetti"}'::jsonb),
+      ('RR-EXC-MINI-1','EXC_MINI_PLANCHAS','Excepcional · Minis 1 plancha o más','PLANCHAS','PLANCHAS',1,null,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"SPAGHETTI":2}'::jsonb,5,'ACTIVO','{"program":"EXCEPCIONAL","description":"Minis: 1 plancha o más = 2 Spaghetti fijo"}'::jsonb),
+      ('RR-EXC-UNI','EXC_UNIDADES','Excepcional · Unidades','UNIDADES','UNITS',1,5,false,true,1,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":1}'::jsonb,20,'ACTIVO','{"program":"EXCEPCIONAL","description":"1 Spaghetti por unidad (1 a 5 und)"}'::jsonb),
+      ('RR-EXC-P1','EXC_PLANCHAS_1','Excepcional · 1 a 3 planchas','PLANCHAS','PLANCHAS',1,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":2}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"1 a 3 planchas = 2 Spaghetti"}'::jsonb),
+      ('RR-EXC-P4','EXC_PLANCHAS_4','Excepcional · 4 a 9 planchas','PLANCHAS','PLANCHAS',4,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":8}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"4 a 9 planchas = 8 Spaghetti"}'::jsonb),
+      ('RR-EXC-P10','EXC_PLANCHAS_10','Excepcional · 10 a 29 planchas','PLANCHAS','PLANCHAS',10,29,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":20}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"10 a 29 planchas = 20 Spaghetti"}'::jsonb),
+      ('RR-EXC-P30','EXC_PLANCHAS_30','Excepcional · 30 a 79 planchas','PLANCHAS','PLANCHAS',30,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":65}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"30 a 79 planchas = 65 Spaghetti"}'::jsonb),
+      ('RR-EXC-P80','EXC_PLANCHAS_80','Excepcional · 80 planchas o más','PLANCHAS','PLANCHAS',80,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":160}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"80 planchas o más = 160 Spaghetti"}'::jsonb)
+    ON CONFLICT (id) DO NOTHING;
+
     -- Planchas solo de minis (Todinnito 85 g, Mini Costa Minions 80 g, Mini Costa
     -- Jurassic 80 g): desde 1 plancha, 4 Avenas fijas (no se multiplica).
     INSERT INTO redemption_rules (
