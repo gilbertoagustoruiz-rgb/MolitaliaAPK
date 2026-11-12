@@ -492,8 +492,7 @@ export async function ensureDatabaseSchema() {
       ('RR-EXC-UNI','EXC_UNIDADES','Excepcional · Unidades','UNIDADES','UNITS',1,5,false,true,1,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":1}'::jsonb,20,'ACTIVO','{"program":"EXCEPCIONAL","description":"1 Spaghetti por unidad (1 a 5 und)"}'::jsonb),
       ('RR-EXC-P1','EXC_PLANCHAS_1','Excepcional · 1 a 3 planchas','PLANCHAS','PLANCHAS',1,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":2}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"1 a 3 planchas = 2 Spaghetti"}'::jsonb),
       ('RR-EXC-P4','EXC_PLANCHAS_4','Excepcional · 4 a 9 planchas','PLANCHAS','PLANCHAS',4,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":8}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"4 a 9 planchas = 8 Spaghetti"}'::jsonb),
-      ('RR-EXC-P10','EXC_PLANCHAS_10','Excepcional · 10 a 29 planchas','PLANCHAS','PLANCHAS',10,29,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":20}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"10 a 29 planchas = 20 Spaghetti"}'::jsonb),
-      ('RR-EXC-P30','EXC_PLANCHAS_30','Excepcional · 30 a 79 planchas','PLANCHAS','PLANCHAS',30,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":65}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"30 a 79 planchas = 65 Spaghetti"}'::jsonb),
+      ('RR-EXC-P10','EXC_PLANCHAS_10','Excepcional · 10 a 79 planchas','PLANCHAS','PLANCHAS',10,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":20}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"10 a 79 planchas = 20 Spaghetti"}'::jsonb),
       ('RR-EXC-P80','EXC_PLANCHAS_80','Excepcional · 80 planchas o más','PLANCHAS','PLANCHAS',80,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":160}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"80 planchas o más = 160 Spaghetti"}'::jsonb)
     ON CONFLICT (id) DO NOTHING;
 
@@ -519,6 +518,15 @@ export async function ensureDatabaseSchema() {
       '{"description":"3, 4 o 5 unidades = 2 Avenas; no aplica a minis 80/85 g"}'::jsonb
     )
     ON CONFLICT (id) DO NOTHING;
+
+    -- Canje Excepcional: se elimina el tramo de 30 planchas (65 Spaghetti); de 10 a 79 planchas = 20 Spaghetti.
+    DELETE FROM redemption_rules WHERE id='RR-EXC-P30';
+    UPDATE redemption_rules
+    SET max_quantity=79,
+        name='Excepcional · 10 a 79 planchas',
+        data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('10 a 79 planchas = 20 Spaghetti'::text),true),
+        updated_at=now()
+    WHERE id='RR-EXC-P10' AND (max_quantity IS DISTINCT FROM 79 OR name <> 'Excepcional · 10 a 79 planchas');
 
     UPDATE redemption_rules
     SET min_exclusive=false, updated_at=now()

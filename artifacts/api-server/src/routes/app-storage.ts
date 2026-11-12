@@ -296,7 +296,7 @@ function exceptionalCanjeItems(
     return { ...none, SPAGHETTI: planchas >= 1 ? 2 : 0 };
   }
   const spaghetti =
-    planchas >= 80 ? 160 : planchas >= 30 ? 65 : planchas >= 10 ? 20 : planchas >= 4 ? 8 : planchas >= 1 ? 2 : 0;
+    planchas >= 80 ? 160 : planchas >= 10 ? 20 : planchas >= 4 ? 8 : planchas >= 1 ? 2 : 0;
   return { ...none, SPAGHETTI: spaghetti };
 }
 
