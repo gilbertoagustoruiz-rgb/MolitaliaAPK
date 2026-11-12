@@ -453,7 +453,7 @@ function exceptionalCanjeItems(
     return planchas >= 1 ? { SPAGHETTI: 2 } : {};
   }
   const spaghetti =
-    planchas >= 80 ? 160 : planchas >= 30 ? 65 : planchas >= 10 ? 20 : planchas >= 4 ? 8 : planchas >= 1 ? 2 : 0;
+    planchas >= 80 ? 160 : planchas >= 10 ? 20 : planchas >= 4 ? 8 : planchas >= 1 ? 2 : 0;
   return spaghetti ? { SPAGHETTI: spaghetti } : {};
 }
 const DEFAULT_PRODUCT_PRESENTATION_BY_SKU: Record<string, "CAJA" | "BOLSA" | "LATA"> = {
