@@ -426,7 +426,7 @@ function canonicalMiniSku(sku: string, label = "") {
   if (/MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)) return "MINI-COSTA-JURASSIC-80";
   return sku;
 }
-// Canje EXCEPCIONAL (solo Spaghetti): almacenes sin Avena (Productores y La Parada,
+// Canje EXCEPCIONAL (solo Spaghetti): almacenes sin Avena (Productores, La Parada y Ayacucho,
 // o los que el admin active en Almacén). El promotor elige Tradicional o Excepcional.
 // Debe coincidir con exceptionalCanjeItems del servidor.
 function redemptionRuleProgram(rule: Pick<RedemptionRule, "program">): CanjeProgram {
@@ -434,7 +434,7 @@ function redemptionRuleProgram(rule: Pick<RedemptionRule, "program">): CanjeProg
 }
 function warehouseExceptionalDefault(warehouse?: Pick<Warehouse, "name"> | null) {
   const name = normalizeLocationValue(warehouse?.name);
-  return name.includes("PRODUCTORES") || name.includes("LA PARADA");
+  return name.includes("PRODUCTORES") || name.includes("LA PARADA") || name.includes("AYACUCHO");
 }
 function warehouseAllowsExceptionalCanje(warehouse?: Pick<Warehouse, "name" | "exceptionalCanje"> | null) {
   if (!warehouse) return false;
