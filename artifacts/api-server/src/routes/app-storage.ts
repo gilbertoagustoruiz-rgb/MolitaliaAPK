@@ -281,7 +281,7 @@ function warehouseAllowsExceptionalCanje(data: StoredRecord | null | undefined) 
   if (!data) return false;
   if (typeof data.exceptionalCanje === "boolean") return data.exceptionalCanje;
   const name = normalizeLocationValue(data.name);
-  return name.includes("PRODUCTORES") || name.includes("LA PARADA");
+  return name.includes("PRODUCTORES") || name.includes("LA PARADA") || name.includes("AYACUCHO");
 }
 function exceptionalCanjeItems(
   mode: string,
@@ -5565,7 +5565,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         value(marketData, "warehouseId"),
       ]);
       if (!warehouseAllowsExceptionalCanje(isRecord(saleWarehouse.rows[0]?.data) ? saleWarehouse.rows[0].data : null))
-        throw new Error("El canje Excepcional solo está habilitado en los almacenes autorizados (Productores y La Parada).");
+        throw new Error("El canje Excepcional solo está habilitado en los almacenes autorizados (Productores, La Parada y Ayacucho).");
     }
     const date = new Date(value(input, "date"));
     const units = Number(input.units);
