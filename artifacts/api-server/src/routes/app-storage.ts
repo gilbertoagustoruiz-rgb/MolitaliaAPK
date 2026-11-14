@@ -270,8 +270,8 @@ async function productCanjeExclusion(
   return null;
 }
 
-// Canje EXCEPCIONAL (solo Spaghetti): para almacenes sin Avena (Productores y La
-// Parada, o los que el admin active). El promotor elige Tradicional o Excepcional.
+// Canje EXCEPCIONAL (solo Spaghetti): en todos los mercados salvo zonas sin canje.
+// El promotor elige Tradicional, Solo Avena o Excepcional.
 // Debe coincidir con exceptionalCanjeItems de la app.
 // Canje SOLO AVENA: disponible en todos los almacenes; el promotor lo elige en cada venta.
 type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA";
@@ -285,12 +285,6 @@ function normalizeCanjeProgram(raw: unknown): CanjeProgram {
 }
 function canjeProgramOf(record: StoredRecord): CanjeProgram {
   return normalizeCanjeProgram(value(record, "canjeProgram"));
-}
-function warehouseAllowsExceptionalCanje(data: StoredRecord | null | undefined) {
-  if (!data) return false;
-  if (typeof data.exceptionalCanje === "boolean") return data.exceptionalCanje;
-  const name = normalizeLocationValue(data.name);
-  return name.includes("PRODUCTORES") || name.includes("LA PARADA") || name.includes("AYACUCHO");
 }
 function exceptionalCanjeItems(
   mode: string,
@@ -5588,13 +5582,6 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     }
     if (punoWithoutCanje) input.canjeProgram = "TRADICIONAL";
     const exceptionalProgram = canjeProgramOf(input) === "EXCEPCIONAL";
-    if (exceptionalProgram) {
-      const saleWarehouse = await db.query("SELECT data FROM warehouses WHERE id=$1 LIMIT 1", [
-        value(marketData, "warehouseId"),
-      ]);
-      if (!warehouseAllowsExceptionalCanje(isRecord(saleWarehouse.rows[0]?.data) ? saleWarehouse.rows[0].data : null))
-        throw new Error("El canje Excepcional solo está habilitado en los almacenes autorizados (Productores, La Parada y Ayacucho).");
-    }
     const date = new Date(value(input, "date"));
     const units = Number(input.units);
     const planchas = Number(input.planchas);

@@ -434,8 +434,7 @@ function canonicalMiniSku(sku: string, label = "") {
   if (/MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)) return "MINI-COSTA-JURASSIC-80";
   return sku;
 }
-// Canje EXCEPCIONAL (solo Spaghetti): almacenes sin Avena (Productores, La Parada y Ayacucho,
-// o los que el admin active en Almacén). El promotor elige Tradicional o Excepcional.
+// Canje EXCEPCIONAL (solo Spaghetti): en todos los mercados, salvo zonas sin canje (Juliaca y Puno).
 // Debe coincidir con exceptionalCanjeItems del servidor.
 function redemptionRuleProgram(rule: Pick<RedemptionRule, "program">): CanjeProgram {
   return normalizeCanjeProgram(rule.program);
@@ -459,15 +458,6 @@ function soloAvenaCanjeItems(
   if (planchas >= 80) return batea ? { AVENA: 408, BATEA: 4 } : { AVENA: 432 };
   if (planchas >= 10) return batea ? { AVENA: 50, BATEA: 1 } : { AVENA: 60 };
   return planchas >= 4 ? { AVENA: 24 } : planchas >= 1 ? { AVENA: 6 } : {};
-}
-function warehouseExceptionalDefault(warehouse?: Pick<Warehouse, "name"> | null) {
-  const name = normalizeLocationValue(warehouse?.name);
-  return name.includes("PRODUCTORES") || name.includes("LA PARADA") || name.includes("AYACUCHO");
-}
-function warehouseAllowsExceptionalCanje(warehouse?: Pick<Warehouse, "name" | "exceptionalCanje"> | null) {
-  if (!warehouse) return false;
-  if (typeof warehouse.exceptionalCanje === "boolean") return warehouse.exceptionalCanje;
-  return warehouseExceptionalDefault(warehouse);
 }
 function exceptionalCanjeItems(
   mode: "UNIDADES" | "PLANCHAS",
@@ -4426,7 +4416,7 @@ function WarehouseCatalog({
                       <small>{[w.region,w.department,w.province,w.district].filter(Boolean).join(" · ")}</small>
                     </div>
                     <span className="wh-head-badges">
-                      {warehouseAllowsExceptionalCanje(w) && <span className="wh-badge-exc" title="El promotor puede elegir canje Tradicional o Excepcional (solo Spaghetti)">Canje excepcional</span>}
+                      
                       <StatusPill status={w.status}/>
                     </span>
                   </header>
@@ -5022,7 +5012,7 @@ function WarehouseTastingModal({
   );
 }
 function WarehouseCreateModal({onSave,close}:{onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState("");const [region,setRegion]=useState("");const [department,setDepartment]=useState("");const [province,setProvince]=useState("");const [district,setDistrict]=useState("");const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});const [saving,setSaving]=useState(false);const saveModal=async()=>{if(saving)return;if(!name.trim()||!region.trim()||!department.trim()||!province.trim()||!district.trim())return;const warehouse:Warehouse={id:`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status:"ACTIVO",marketIds:[],stock:{},updatedAt:new Date().toISOString()};const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;setSaving(true);try{if(await onSave(warehouse,quantities))close();}finally{setSaving(false);}};return <Modal title="Nuevo almacén" detail="Registra el almacén y su stock inicial." close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field>{items.map(([id,label])=><Field key={id} label={`Stock inicial - ${label}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={saving} onClick={saveModal}>{saving?"Guardando...":"Guardar almacén"}</Btn></div></Modal>}
-function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);const [exceptional,setExceptional]=useState(warehouseAllowsExceptionalCanje(warehouse));return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/><SelectField label="Canje excepcional (solo Spaghetti)" value={exceptional?"SI":"NO"} onChange={v=>setExceptional(v==="SI")} items={[{value:"NO",label:"No: solo escala Tradicional"},{value:"SI",label:"Sí: el promotor elige Tradicional o Excepcional"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,exceptionalCanje:exceptional,updatedAt:new Date().toISOString()})} testId="button-save-warehouse-edit">Guardar cambios</Btn></div></Modal>}
+function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,updatedAt:new Date().toISOString()})} testId="button-save-warehouse-edit">Guardar cambios</Btn></div></Modal>}
 function WarehouseRechargeModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});return <Modal title="Reabastecer almacén" detail={`${warehouse.name} · Las cantidades se sumarán al saldo actual.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(!Object.values(quantities).some(v=>Number(v)>0))return;await onSave(warehouse,quantities);}}><Plus/> Reabastecer</Btn></div></Modal>}
 
 function WarehouseInitialStockModal({warehouse,initialQuantities,onSave,close}:{warehouse:Warehouse;initialQuantities:Partial<WarehouseStock>;onSave:(w:Warehouse,q:Partial<WarehouseStock>,note:string)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>(()=>Object.fromEntries(items.map(([id])=>[id,String(Math.max(0,Number(initialQuantities[id])||0))])));const [note,setNote]=useState("");const [saving,setSaving]=useState(false);const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;const changed=items.some(([id])=>(Number(quantities[id])||0)!==(Number(initialQuantities[id])||0));return <Modal title="Modificar stock inicial" detail={`${warehouse.name} · Corrige únicamente las cantidades con las que inició el almacén.`} close={close}><div className="notice"><strong>Se conservarán ventas, canjes, degustaciones, recargas, traslados y demás movimientos.</strong><p>El saldo actual se ajustará solo por la diferencia entre el stock inicial anterior y el nuevo. La corrección quedará registrada para futuras regularizaciones.</p></div><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · inicial actual: ${Number(initialQuantities[id])||0}`}><Input type="number" min={0} step={1} value={q[id]||"0"} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}<Field label="Motivo de la corrección *" className="full-field"><textarea className="input textarea" value={note} onChange={e=>setNote(e.target.value)} maxLength={300} rows={3} placeholder="Ej.: El stock inicial de Avena fue registrado como 500 y debía ser 450."/></Field></div><div className="modal-actions"><Btn variant="outline" disabled={saving} onClick={close}>Cancelar</Btn><Btn disabled={!changed||!note.trim()||saving} onClick={async()=>{setSaving(true);try{await onSave(warehouse,quantities,note.trim());}finally{setSaving(false);}}}><Pencil/> {saving?"Guardando...":"Guardar stock inicial"}</Btn></div></Modal>}
@@ -6543,7 +6533,7 @@ function RedemptionRulesModule({
               items={[
                 { value: "TRADICIONAL", label: "Tradicional" },
                 { value: "SOLO_AVENA", label: "Solo Avena (todos los almacenes)" },
-                { value: "EXCEPCIONAL", label: "Excepcional (almacenes autorizados)" },
+                { value: "EXCEPCIONAL", label: "Excepcional (solo Spaghetti)" },
               ]}
             />
             <SelectField
@@ -12967,16 +12957,8 @@ function PromoterApp({
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
-  // Canje Excepcional: solo en almacenes autorizados y si la venta lleva canje.
-  const exceptionalAllowed =
-    !saleWithoutCanje &&
-    warehouseAllowsExceptionalCanje(
-      warehouses.find(
-        (warehouse) =>
-          warehouse.id === selectedMarket?.warehouseId ||
-          warehouse.marketIds?.includes(selectedMarketId),
-      ),
-    );
+  // Canje Excepcional y Solo Avena: en todos los mercados, salvo zonas sin canje (Juliaca y Puno).
+  const exceptionalAllowed = !saleWithoutCanje;
   const effectiveCanjeProgram: CanjeProgram =
     saleWithoutCanje || (canjeProgram === "EXCEPCIONAL" && !exceptionalAllowed) ? "TRADICIONAL" : canjeProgram;
   const exceptionalCanje = effectiveCanjeProgram === "EXCEPCIONAL";
