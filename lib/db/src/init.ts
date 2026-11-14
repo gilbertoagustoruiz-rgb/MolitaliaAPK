@@ -481,6 +481,23 @@ export async function ensureDatabaseSchema() {
       )
     ON CONFLICT (id) DO NOTHING;
 
+    -- Escala SOLO AVENA: en todos los almacenes, el promotor la elige en cada venta.
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES
+      ('RR-SAV-MINI-HALF','SAV_MINI_MEDIA','Solo Avena · Minis 1/2 plancha','PLANCHAS','UNITS',24,24,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"AVENA":2}'::jsonb,10,'ACTIVO','{"program":"SOLO_AVENA","description":"Minis: 1/2 plancha (24 und) = 2 Avenas"}'::jsonb),
+      ('RR-SAV-MINI-1','SAV_MINI_1','Solo Avena · Minis 1 plancha o más','PLANCHAS','PLANCHAS',1,null,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"AVENA":4}'::jsonb,5,'ACTIVO','{"program":"SOLO_AVENA","description":"Minis: 1 plancha o más = 4 Avenas"}'::jsonb),
+      ('RR-SAV-UNI-1-2','SAV_UNI_1_2','Solo Avena · 1 a 2 unidades','UNIDADES','UNITS',1,2,false,true,1,ARRAY[]::text[],'NINGUNO','{"AVENA":1}'::jsonb,20,'ACTIVO','{"program":"SOLO_AVENA","description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas"}'::jsonb),
+      ('RR-SAV-UNI-3-5','SAV_UNI_3_5','Solo Avena · 3 a 5 unidades','UNIDADES','UNITS',3,5,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":2}'::jsonb,21,'ACTIVO','{"program":"SOLO_AVENA","description":"3 a 5 unidades = 2 Avenas"}'::jsonb),
+      ('RR-SAV-P1','SAV_PLANCHAS_1','Solo Avena · 1 a 3 planchas','PLANCHAS','PLANCHAS',1,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":6}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"1 a 3 planchas = 6 Avenas"}'::jsonb),
+      ('RR-SAV-P4','SAV_PLANCHAS_4','Solo Avena · 4 a 9 planchas','PLANCHAS','PLANCHAS',4,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":24}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"4 a 9 planchas = 24 Avenas"}'::jsonb),
+      ('RR-SAV-P10','SAV_PLANCHAS_10','Solo Avena · 10 a 79 planchas','PLANCHAS','PLANCHAS',10,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":60}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"10 a 79 planchas = 60 Avenas"}'::jsonb),
+      ('RR-SAV-P10-B','SAV_PLANCHAS_10_B','Solo Avena · 10 a 79 planchas + Batea','PLANCHAS','PLANCHAS',10,79,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":50,"BATEA":1}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"10 a 79 planchas = 50 Avenas + 1 Batea"}'::jsonb),
+      ('RR-SAV-P80','SAV_PLANCHAS_80','Solo Avena · 80 planchas o más','PLANCHAS','PLANCHAS',80,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":432}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas o más = 432 Avenas"}'::jsonb),
+      ('RR-SAV-P80-B','SAV_PLANCHAS_80_B','Solo Avena · 80 planchas o más + Batea','PLANCHAS','PLANCHAS',80,null,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":408,"BATEA":4}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas o más = 408 Avenas (17 fardos) + 4 Bateas"}'::jsonb)
+    ON CONFLICT (id) DO NOTHING;
+
     -- Escala EXCEPCIONAL (solo Spaghetti), para almacenes sin Avena (p. ej.
     -- Productores y La Parada): el promotor elige Tradicional o Excepcional.
     INSERT INTO redemption_rules (

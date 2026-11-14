@@ -239,7 +239,15 @@ type ProductPrice = {
   status?: Status;
   updatedAt: string;
 };
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL";
+type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA";
+const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
+  TRADICIONAL: "Tradicional",
+  EXCEPCIONAL: "Excepcional",
+  SOLO_AVENA: "Solo Avena",
+};
+function normalizeCanjeProgram(raw: unknown): CanjeProgram {
+  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" ? raw : "TRADICIONAL";
+}
 type Sale = {
   id: string;
   /** Escala elegida en almacenes con canje Excepcional (solo Spaghetti). */
@@ -426,20 +434,30 @@ function canonicalMiniSku(sku: string, label = "") {
   if (/MINI\s*COSTA\s*JURASSIC\s*80(?:G|GR)?\b/.test(normalized)) return "MINI-COSTA-JURASSIC-80";
   return sku;
 }
-// Canje EXCEPCIONAL (solo Spaghetti): almacenes sin Avena (Productores, La Parada y Ayacucho,
-// o los que el admin active en Almacén). El promotor elige Tradicional o Excepcional.
+// Canje EXCEPCIONAL (solo Spaghetti): en todos los mercados, salvo zonas sin canje (Juliaca y Puno).
 // Debe coincidir con exceptionalCanjeItems del servidor.
 function redemptionRuleProgram(rule: Pick<RedemptionRule, "program">): CanjeProgram {
-  return rule.program === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL";
+  return normalizeCanjeProgram(rule.program);
 }
-function warehouseExceptionalDefault(warehouse?: Pick<Warehouse, "name"> | null) {
-  const name = normalizeLocationValue(warehouse?.name);
-  return name.includes("PRODUCTORES") || name.includes("LA PARADA") || name.includes("AYACUCHO");
-}
-function warehouseAllowsExceptionalCanje(warehouse?: Pick<Warehouse, "name" | "exceptionalCanje"> | null) {
-  if (!warehouse) return false;
-  if (typeof warehouse.exceptionalCanje === "boolean") return warehouse.exceptionalCanje;
-  return warehouseExceptionalDefault(warehouse);
+// Canje SOLO AVENA (todos los almacenes). Debe coincidir con soloAvenaCanjeItems del servidor.
+// Unidades: igual que Tradicional. Minis: ½ plancha = 2, 1 plancha o más = 4.
+// Planchas: 1-3 = 6, 4-9 = 24, 10-79 = 60 (o 50 + 1 Batea), 80+ = 432 (o 408 + 4 Bateas).
+function soloAvenaCanjeItems(
+  mode: "UNIDADES" | "PLANCHAS",
+  units: number,
+  planchas: number,
+  miniOnly: boolean,
+  batea: boolean,
+): Partial<RedemptionStock> {
+  if (mode === "UNIDADES")
+    return units >= 1 && units <= 5 ? { AVENA: units <= 2 ? units : 2 } : {};
+  if (miniOnly) {
+    if (planchas === 0.5 && units === 24) return { AVENA: 2 };
+    return planchas >= 1 ? { AVENA: MINI_PLANCHA_AVENAS } : {};
+  }
+  if (planchas >= 80) return batea ? { AVENA: 408, BATEA: 4 } : { AVENA: 432 };
+  if (planchas >= 10) return batea ? { AVENA: 50, BATEA: 1 } : { AVENA: 60 };
+  return planchas >= 4 ? { AVENA: 24 } : planchas >= 1 ? { AVENA: 6 } : {};
 }
 function exceptionalCanjeItems(
   mode: "UNIDADES" | "PLANCHAS",
@@ -4398,7 +4416,7 @@ function WarehouseCatalog({
                       <small>{[w.region,w.department,w.province,w.district].filter(Boolean).join(" · ")}</small>
                     </div>
                     <span className="wh-head-badges">
-                      {warehouseAllowsExceptionalCanje(w) && <span className="wh-badge-exc" title="El promotor puede elegir canje Tradicional o Excepcional (solo Spaghetti)">Canje excepcional</span>}
+                      
                       <StatusPill status={w.status}/>
                     </span>
                   </header>
@@ -4994,7 +5012,7 @@ function WarehouseTastingModal({
   );
 }
 function WarehouseCreateModal({onSave,close}:{onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState("");const [region,setRegion]=useState("");const [department,setDepartment]=useState("");const [province,setProvince]=useState("");const [district,setDistrict]=useState("");const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});const [saving,setSaving]=useState(false);const saveModal=async()=>{if(saving)return;if(!name.trim()||!region.trim()||!department.trim()||!province.trim()||!district.trim())return;const warehouse:Warehouse={id:`ALM-${Date.now()}`,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status:"ACTIVO",marketIds:[],stock:{},updatedAt:new Date().toISOString()};const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;setSaving(true);try{if(await onSave(warehouse,quantities))close();}finally{setSaving(false);}};return <Modal title="Nuevo almacén" detail="Registra el almacén y su stock inicial." close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field>{items.map(([id,label])=><Field key={id} label={`Stock inicial - ${label}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn disabled={saving} onClick={saveModal}>{saving?"Guardando...":"Guardar almacén"}</Btn></div></Modal>}
-function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);const [exceptional,setExceptional]=useState(warehouseAllowsExceptionalCanje(warehouse));return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/><SelectField label="Canje excepcional (solo Spaghetti)" value={exceptional?"SI":"NO"} onChange={v=>setExceptional(v==="SI")} items={[{value:"NO",label:"No: solo escala Tradicional"},{value:"SI",label:"Sí: el promotor elige Tradicional o Excepcional"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,exceptionalCanje:exceptional,updatedAt:new Date().toISOString()})} testId="button-save-warehouse-edit">Guardar cambios</Btn></div></Modal>}
+function WarehouseEditModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse)=>Promise<boolean>;close:()=>void}){const [name,setName]=useState(warehouse.name);const [region,setRegion]=useState(warehouse.region);const [department,setDepartment]=useState(warehouse.department);const [province,setProvince]=useState(warehouse.province);const [district,setDistrict]=useState(warehouse.district);const [status,setStatus]=useState<Status>(warehouse.status);return <Modal title="Editar almacén" detail={warehouse.name} close={close}><div className="form-grid"><Field label="Nombre de Almacén *"><Input value={name} onChange={setName}/></Field><Field label="Región *"><Input value={region} onChange={setRegion}/></Field><Field label="Departamento *"><Input value={department} onChange={setDepartment}/></Field><Field label="Provincia *"><Input value={province} onChange={setProvince}/></Field><Field label="Distrito *"><Input value={district} onChange={setDistrict}/></Field><SelectField label="Estado" value={status} onChange={v=>setStatus(v as Status)} items={[{value:"ACTIVO",label:"Activo"},{value:"INACTIVO",label:"Inactivo"}]}/></div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={()=>void onSave({...warehouse,name:name.trim().toUpperCase(),region:region.trim().toUpperCase(),department:department.trim().toUpperCase(),province:province.trim().toUpperCase(),district:district.trim().toUpperCase(),status,updatedAt:new Date().toISOString()})} testId="button-save-warehouse-edit">Guardar cambios</Btn></div></Modal>}
 function WarehouseRechargeModal({warehouse,onSave,close}:{warehouse:Warehouse;onSave:(w:Warehouse,q:Partial<WarehouseStock>)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>({});return <Modal title="Reabastecer almacén" detail={`${warehouse.name} · Las cantidades se sumarán al saldo actual.`} close={close}><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · actual: ${warehouse.stock?.[id]||0}`}><Input type="number" min={0} step={1} value={q[id]||""} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}</div><div className="modal-actions"><Btn variant="outline" onClick={close}>Cancelar</Btn><Btn onClick={async()=>{const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;if(!Object.values(quantities).some(v=>Number(v)>0))return;await onSave(warehouse,quantities);}}><Plus/> Reabastecer</Btn></div></Modal>}
 
 function WarehouseInitialStockModal({warehouse,initialQuantities,onSave,close}:{warehouse:Warehouse;initialQuantities:Partial<WarehouseStock>;onSave:(w:Warehouse,q:Partial<WarehouseStock>,note:string)=>Promise<boolean>;close:()=>void}){const items:[keyof WarehouseStock,string][]=[["PANETON_900G","Panetón 900 g"],["PANETON_85G","Panetón 85 g"],["AVENA","Avena"],["BATEA","Batea"],["MANDIL","Mandil"],["SPAGHETTI","Spaghetti"]];const [q,setQ]=useState<Record<string,string>>(()=>Object.fromEntries(items.map(([id])=>[id,String(Math.max(0,Number(initialQuantities[id])||0))])));const [note,setNote]=useState("");const [saving,setSaving]=useState(false);const quantities=Object.fromEntries(items.map(([id])=>[id,Math.max(0,Math.floor(Number(q[id])||0))])) as Partial<WarehouseStock>;const changed=items.some(([id])=>(Number(quantities[id])||0)!==(Number(initialQuantities[id])||0));return <Modal title="Modificar stock inicial" detail={`${warehouse.name} · Corrige únicamente las cantidades con las que inició el almacén.`} close={close}><div className="notice"><strong>Se conservarán ventas, canjes, degustaciones, recargas, traslados y demás movimientos.</strong><p>El saldo actual se ajustará solo por la diferencia entre el stock inicial anterior y el nuevo. La corrección quedará registrada para futuras regularizaciones.</p></div><div className="form-grid">{items.map(([id,label])=><Field key={id} label={`${label} · inicial actual: ${Number(initialQuantities[id])||0}`}><Input type="number" min={0} step={1} value={q[id]||"0"} onChange={v=>setQ(x=>({...x,[id]:v}))}/></Field>)}<Field label="Motivo de la corrección *" className="full-field"><textarea className="input textarea" value={note} onChange={e=>setNote(e.target.value)} maxLength={300} rows={3} placeholder="Ej.: El stock inicial de Avena fue registrado como 500 y debía ser 450."/></Field></div><div className="modal-actions"><Btn variant="outline" disabled={saving} onClick={close}>Cancelar</Btn><Btn disabled={!changed||!note.trim()||saving} onClick={async()=>{setSaving(true);try{await onSave(warehouse,quantities,note.trim());}finally{setSaving(false);}}}><Pencil/> {saving?"Guardando...":"Guardar stock inicial"}</Btn></div></Modal>}
@@ -5599,6 +5617,8 @@ function SaleEditModal({
     sale.mode === "PLANCHAS" && saleMiniOnly && (Number(sale.planchas) || 0) >= 1;
   // Venta con canje Excepcional: su canje sigue la escala de solo Spaghetti.
   const editExceptional = sale.canjeProgram === "EXCEPCIONAL";
+  // Venta con canje Solo Avena en planchas: su canje sigue la escala Solo Avena.
+  const editSoloAvenaPlanchas = sale.canjeProgram === "SOLO_AVENA" && sale.mode === "PLANCHAS";
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
@@ -5607,6 +5627,8 @@ function SaleEditModal({
       ? zeroRedemptionStock()
       : editExceptional
       ? exceptionalCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly)
+      : editSoloAvenaPlanchas
+      ? soloAvenaCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, planchaAccessory === "BATEA")
       : sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
@@ -5844,14 +5866,21 @@ function SaleEditModal({
                   setCanjeEdited(true);
                   setManualCanje(null);
                 }}
-                items={[
-                  { value: "NINGUNO", label: "Sin Mandil / Batea" },
-                  { value: "MANDIL", label: "Con Mandil" },
-                  { value: "BATEA", label: "Con Batea" },
-                ]}
+                items={
+                  editSoloAvenaPlanchas
+                    ? [
+                        { value: "NINGUNO", label: "Solo Avena" },
+                        { value: "BATEA", label: "Avena + Batea" },
+                      ]
+                    : [
+                        { value: "NINGUNO", label: "Sin Mandil / Batea" },
+                        { value: "MANDIL", label: "Con Mandil" },
+                        { value: "BATEA", label: "Con Batea" },
+                      ]
+                }
               />
             )}
-            {(sale.planchas || 0) >= 80 && (
+            {(sale.planchas || 0) >= 80 && !editExceptional && !editSoloAvenaPlanchas && (
               <Field label="Multiplicador de canje *">
                 <select
                   className="select"
@@ -6429,7 +6458,11 @@ function RedemptionRulesModule({
                     <span>
                       <strong>{rule.name}</strong>
                       <small>
-                        {redemptionRuleProgram(rule) === "EXCEPCIONAL" ? "Excepcional (solo Spaghetti) · " : "Tradicional · "}
+                        {redemptionRuleProgram(rule) === "EXCEPCIONAL"
+                          ? "Excepcional (solo Spaghetti) · "
+                          : redemptionRuleProgram(rule) === "SOLO_AVENA"
+                            ? "Solo Avena · "
+                            : "Tradicional · "}
                         {rule.accessory === "NINGUNO" ? "Sin accesorio" : rule.accessory}
                       </small>
                     </span>
@@ -6499,7 +6532,8 @@ function RedemptionRulesModule({
               onChange={(value) => setEditing({ ...editing, program: value as CanjeProgram })}
               items={[
                 { value: "TRADICIONAL", label: "Tradicional" },
-                { value: "EXCEPCIONAL", label: "Excepcional (almacenes autorizados)" },
+                { value: "SOLO_AVENA", label: "Solo Avena (todos los almacenes)" },
+                { value: "EXCEPCIONAL", label: "Excepcional (solo Spaghetti)" },
               ]}
             />
             <SelectField
@@ -9628,7 +9662,7 @@ function AnalystApp({
           (sale.amountSoles ?? 0).toFixed(2),
           sale.redemptionRuleName || "",
           sale.redemptionRuleCode || "",
-          sale.canjeProgram === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL",
+          normalizeCanjeProgram(sale.canjeProgram),
           effectiveSaleBonus(sale) || "Sin canje",
           effectiveSaleRedemptionCount(sale),
           sale.comment || "",
@@ -11788,7 +11822,9 @@ function AnalystApp({
                               ? `${effectiveSaleRedemptionCount(sale) || 1} · ${effectiveSaleBonus(sale)}`
                               : "Sin canje"}
                           </small>
-                          {sale.canjeProgram === "EXCEPCIONAL" && <small className="sales-canje-exc">Excepcional</small>}
+                          {normalizeCanjeProgram(sale.canjeProgram) !== "TRADICIONAL" && (
+                            <small className="sales-canje-exc">{CANJE_PROGRAM_LABEL[normalizeCanjeProgram(sale.canjeProgram)]}</small>
+                          )}
                         </span>
                         <span className="sales-evidence">
                           <PhotoThumbnail
@@ -12921,20 +12957,16 @@ function PromoterApp({
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
-  // Canje Excepcional: solo en almacenes autorizados y si la venta lleva canje.
-  const exceptionalAllowed =
-    !saleWithoutCanje &&
-    warehouseAllowsExceptionalCanje(
-      warehouses.find(
-        (warehouse) =>
-          warehouse.id === selectedMarket?.warehouseId ||
-          warehouse.marketIds?.includes(selectedMarketId),
-      ),
-    );
-  const effectiveCanjeProgram: CanjeProgram = exceptionalAllowed ? canjeProgram : "TRADICIONAL";
+  // Canje Excepcional y Solo Avena: en todos los mercados, salvo zonas sin canje (Juliaca y Puno).
+  const exceptionalAllowed = !saleWithoutCanje;
+  const effectiveCanjeProgram: CanjeProgram =
+    saleWithoutCanje || (canjeProgram === "EXCEPCIONAL" && !exceptionalAllowed) ? "TRADICIONAL" : canjeProgram;
   const exceptionalCanje = effectiveCanjeProgram === "EXCEPCIONAL";
+  const soloAvenaCanje = effectiveCanjeProgram === "SOLO_AVENA";
   const availablePlanchaAccessories = planchas >= 10 && !miniOnlyPlancha && !exceptionalCanje
-    ? (["MANDIL" as const, "BATEA" as const, "NINGUNO" as const])
+    ? soloAvenaCanje
+      ? (["NINGUNO" as const, "BATEA" as const])
+      : (["MANDIL" as const, "BATEA" as const, "NINGUNO" as const])
     : (["NINGUNO" as const]);
   useEffect(() => {
     if (planchas < 10) {
@@ -12943,7 +12975,9 @@ function PromoterApp({
     }
     const month = saleDate.getMonth() + 1;
     const preferred =
-      (month === 9 || month === 10) && availablePlanchaAccessories.includes("MANDIL")
+      soloAvenaCanje
+        ? "NINGUNO"
+        : (month === 9 || month === 10) && availablePlanchaAccessories.includes("MANDIL")
         ? "MANDIL"
         : month === 11 && availablePlanchaAccessories.includes("BATEA")
           ? "BATEA"
@@ -12953,6 +12987,7 @@ function PromoterApp({
     selectedWarehouse?.id,
     planchas >= 10,
     saleDate.getMonth(),
+    soloAvenaCanje,
   ]);
   const effectivePlanchaAccessory = availablePlanchaAccessories.includes(planchaAccessory)
     ? planchaAccessory
@@ -12978,12 +13013,12 @@ function PromoterApp({
           accessory:
             mode === "PLANCHAS" ? effectivePlanchaAccessory : "NINGUNO",
           date: saleDate,
-          multiplier: exceptionalCanje ? 1 : planchaMultiplier,
+          multiplier: exceptionalCanje || soloAvenaCanje ? 1 : planchaMultiplier,
         })
       : null;
 
   const bonusProducts =
-    saleWithoutCanje || redemptionRulesLoaded || exceptionalCanje
+    saleWithoutCanje || redemptionRulesLoaded || exceptionalCanje || soloAvenaCanje
       ? []
       : bonusProductsFor(
           mode,
@@ -13003,6 +13038,10 @@ function PromoterApp({
         : 0;
   const canjeCount = exceptionalCanje
     ? 1
+    : soloAvenaCanje && !masterRuleMatch
+    ? mode === "UNIDADES"
+      ? automaticUnitCanjeCount
+      : 1
     : masterRuleMatch
     ? mode === "UNIDADES"
       ? masterRuleMatch.appliedFactor
@@ -13033,6 +13072,8 @@ function PromoterApp({
           ? masterRuleMatch.items
           : exceptionalCanje && !redemptionRulesLoaded
             ? exceptionalCanjeItems(mode, total, planchas, miniOnlyPlancha)
+          : soloAvenaCanje && !redemptionRulesLoaded
+            ? soloAvenaCanjeItems(mode, total, planchas, miniOnlyPlancha, effectivePlanchaAccessory === "BATEA")
           : redemptionRulesLoaded
             ? ({} as Partial<RedemptionStock>)
             : mode === "PLANCHAS"
@@ -13437,7 +13478,7 @@ function PromoterApp({
             : effectivePlanchaAccessory
           : undefined,
       planchaMultiplier:
-        mode === "PLANCHAS" ? (saleWithoutCanje || miniOnlyPlancha || exceptionalCanje ? 1 : planchaMultiplier) : undefined,
+        mode === "PLANCHAS" ? (saleWithoutCanje || miniOnlyPlancha || exceptionalCanje || soloAvenaCanje ? 1 : planchaMultiplier) : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
@@ -14215,7 +14256,11 @@ function PromoterApp({
             >
               {availablePlanchaAccessories.map((accessory) => (
                 <option value={accessory} key={accessory}>
-                  {accessory === "MANDIL"
+                  {soloAvenaCanje
+                    ? accessory === "BATEA"
+                      ? "Avena + Batea"
+                      : "Solo Avena"
+                    : accessory === "MANDIL"
                     ? "Con Mandil"
                     : accessory === "BATEA"
                       ? "Con Batea"
@@ -14225,7 +14270,7 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && (
+        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && !exceptionalCanje && !soloAvenaCanje && !miniOnlyPlancha && (
           <Field label="Multiplicador solicitado *">
             <select
               className="select"
@@ -14246,22 +14291,23 @@ function PromoterApp({
             <p>{UNIT_NO_CANJE_DETAIL}</p>
           </div>
         )}
-        {exceptionalAllowed && (
+        {!saleWithoutCanje && (
           <div className="canje-program" data-testid="canje-program">
             <span className="canje-program-label">Tipo de canje</span>
             <div className="canje-program-options" role="radiogroup" aria-label="Tipo de canje">
               {([
                 ["TRADICIONAL", "Tradicional", "Escala actual (Avena, Spaghetti…)"],
-                ["EXCEPCIONAL", "Excepcional", "Solo Spaghetti"],
+                ["SOLO_AVENA", "Solo Avena", "Avena Clásica (desde 10 planchas, opción con Batea)"],
+                ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional", "Solo Spaghetti"]] as const) : []),
               ] as const).map(([value, label, detail]) => (
                 <button
                   key={value}
                   type="button"
                   role="radio"
-                  aria-checked={canjeProgram === value}
-                  className={`canje-program-option${canjeProgram === value ? " is-active" : ""}`}
+                  aria-checked={effectiveCanjeProgram === value}
+                  className={`canje-program-option${effectiveCanjeProgram === value ? " is-active" : ""}`}
                   onClick={() => setCanjeProgram(value)}
-                  data-testid={`button-canje-${value.toLowerCase()}`}
+                  data-testid={`button-canje-${value.toLowerCase().replace("_", "-")}`}
                 >
                   <strong>{label}</strong>
                   <small>{detail}</small>
