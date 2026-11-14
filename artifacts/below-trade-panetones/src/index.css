@@ -5872,7 +5872,7 @@ select:focus-visible,
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-.canje-program-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.canje-program-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
 .canje-program-option {
   display: flex;
   flex-direction: column;

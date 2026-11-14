@@ -273,9 +273,18 @@ async function productCanjeExclusion(
 // Canje EXCEPCIONAL (solo Spaghetti): para almacenes sin Avena (Productores y La
 // Parada, o los que el admin active). El promotor elige Tradicional o Excepcional.
 // Debe coincidir con exceptionalCanjeItems de la app.
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL";
+// Canje SOLO AVENA: disponible en todos los almacenes; el promotor lo elige en cada venta.
+type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA";
+const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
+  TRADICIONAL: "Tradicional",
+  EXCEPCIONAL: "Excepcional",
+  SOLO_AVENA: "Solo Avena",
+};
+function normalizeCanjeProgram(raw: unknown): CanjeProgram {
+  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" ? raw : "TRADICIONAL";
+}
 function canjeProgramOf(record: StoredRecord): CanjeProgram {
-  return value(record, "canjeProgram") === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL";
+  return normalizeCanjeProgram(value(record, "canjeProgram"));
 }
 function warehouseAllowsExceptionalCanje(data: StoredRecord | null | undefined) {
   if (!data) return false;
@@ -298,6 +307,27 @@ function exceptionalCanjeItems(
   const spaghetti =
     planchas >= 80 ? 160 : planchas >= 10 ? 20 : planchas >= 4 ? 8 : planchas >= 1 ? 2 : 0;
   return { ...none, SPAGHETTI: spaghetti };
+}
+
+// Canje SOLO AVENA (debe coincidir con soloAvenaCanjeItems de la app).
+// Unidades: igual que Tradicional. Minis: ½ plancha = 2, 1 plancha o más = 4.
+// Planchas: 1-3 = 6, 4-9 = 24, 10-79 = 60 (o 50 + 1 Batea), 80+ = 432 (o 408 + 4 Bateas).
+function soloAvenaCanjeItems(
+  mode: string,
+  units: number,
+  planchas: number,
+  miniOnly: boolean,
+  batea: boolean,
+): Record<string, number> {
+  const none = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
+  if (mode === "UNIDADES") return { ...none, AVENA: units >= 1 && units <= 5 ? legacyUnitAvenas(units) : 0 };
+  if (miniOnly) {
+    if (planchas === 0.5 && units === 24) return { ...none, AVENA: 2 };
+    return { ...none, AVENA: planchas >= 1 ? MINI_PLANCHA_AVENAS : 0 };
+  }
+  if (planchas >= 80) return batea ? { ...none, AVENA: 408, BATEA: 4 } : { ...none, AVENA: 432 };
+  if (planchas >= 10) return batea ? { ...none, AVENA: 50, BATEA: 1 } : { ...none, AVENA: 60 };
+  return { ...none, AVENA: planchas >= 4 ? 24 : planchas >= 1 ? 6 : 0 };
 }
 
 // Escala de Unidades cuando la venta no trae una Escala de Canje (respaldo):
@@ -1706,13 +1736,11 @@ async function validateSubmittedRedemptionRule(
   );
   const rule = result.rows[0];
   if (!rule) throw new Error("La Escala de Canje seleccionada ya no está activa.");
-  const ruleProgram: CanjeProgram =
-    isRecord(rule.data) && value(rule.data, "program") === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL";
-  if (ruleProgram !== canjeProgramOf(sale))
+  const ruleProgram = normalizeCanjeProgram(isRecord(rule.data) ? value(rule.data, "program") : "");
+  const saleProgram = canjeProgramOf(sale);
+  if (ruleProgram !== saleProgram)
     throw new Error(
-      ruleProgram === "EXCEPCIONAL"
-        ? "Esta Escala es Excepcional: marca la venta como canje Excepcional."
-        : "Esta Escala es Tradicional: la venta está marcada como canje Excepcional.",
+      `Esta Escala es ${CANJE_PROGRAM_LABEL[ruleProgram]}: la venta está marcada como canje ${CANJE_PROGRAM_LABEL[saleProgram]}.`,
     );
 
   if (String(rule.sale_mode) !== value(sale, "mode"))
@@ -1782,7 +1810,7 @@ async function validateSubmittedRedemptionRule(
     value(sale, "mode") === "PLANCHAS" &&
     numeric(sale, "planchas") >= 80 &&
     !miniOnlyRule &&
-    ruleProgram !== "EXCEPCIONAL"
+    ruleProgram === "TRADICIONAL"
   ) {
     factor *= Math.max(1, Math.min(4, Math.floor(numeric(sale, "planchaMultiplier") || 1)));
   }
@@ -5745,7 +5773,21 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error(
         "En unidades: 1 und = 1 Avena, 2 und = 2 Avenas y de 3 a 5 und = 2 Avenas.",
       );
-    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && !exceptionalProgram) {
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && canjeProgramOf(input) === "SOLO_AVENA" && bonus) {
+      // Solo Avena sin escala (respaldo): se valida con la dinámica fija.
+      const expected = soloAvenaCanjeItems(
+        mode,
+        units,
+        planchas,
+        inputPlanchaLines.length > 0 && inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
+        Number(requested.BATEA) > 0,
+      );
+      if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
+        throw new Error(
+          `Canje Solo Avena: para esta venta corresponde ${expected.AVENA} Avena${expected.BATEA ? ` + ${expected.BATEA} Batea` : ""}.`,
+        );
+    }
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && canjeProgramOf(input) === "TRADICIONAL") {
       const month = Number(
         new Intl.DateTimeFormat("en-US", {
           timeZone: "America/Lima",

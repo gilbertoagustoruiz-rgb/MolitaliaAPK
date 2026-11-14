@@ -239,7 +239,15 @@ type ProductPrice = {
   status?: Status;
   updatedAt: string;
 };
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL";
+type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA";
+const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
+  TRADICIONAL: "Tradicional",
+  EXCEPCIONAL: "Excepcional",
+  SOLO_AVENA: "Solo Avena",
+};
+function normalizeCanjeProgram(raw: unknown): CanjeProgram {
+  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" ? raw : "TRADICIONAL";
+}
 type Sale = {
   id: string;
   /** Escala elegida en almacenes con canje Excepcional (solo Spaghetti). */
@@ -430,7 +438,27 @@ function canonicalMiniSku(sku: string, label = "") {
 // o los que el admin active en Almacén). El promotor elige Tradicional o Excepcional.
 // Debe coincidir con exceptionalCanjeItems del servidor.
 function redemptionRuleProgram(rule: Pick<RedemptionRule, "program">): CanjeProgram {
-  return rule.program === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL";
+  return normalizeCanjeProgram(rule.program);
+}
+// Canje SOLO AVENA (todos los almacenes). Debe coincidir con soloAvenaCanjeItems del servidor.
+// Unidades: igual que Tradicional. Minis: ½ plancha = 2, 1 plancha o más = 4.
+// Planchas: 1-3 = 6, 4-9 = 24, 10-79 = 60 (o 50 + 1 Batea), 80+ = 432 (o 408 + 4 Bateas).
+function soloAvenaCanjeItems(
+  mode: "UNIDADES" | "PLANCHAS",
+  units: number,
+  planchas: number,
+  miniOnly: boolean,
+  batea: boolean,
+): Partial<RedemptionStock> {
+  if (mode === "UNIDADES")
+    return units >= 1 && units <= 5 ? { AVENA: units <= 2 ? units : 2 } : {};
+  if (miniOnly) {
+    if (planchas === 0.5 && units === 24) return { AVENA: 2 };
+    return planchas >= 1 ? { AVENA: MINI_PLANCHA_AVENAS } : {};
+  }
+  if (planchas >= 80) return batea ? { AVENA: 408, BATEA: 4 } : { AVENA: 432 };
+  if (planchas >= 10) return batea ? { AVENA: 50, BATEA: 1 } : { AVENA: 60 };
+  return planchas >= 4 ? { AVENA: 24 } : planchas >= 1 ? { AVENA: 6 } : {};
 }
 function warehouseExceptionalDefault(warehouse?: Pick<Warehouse, "name"> | null) {
   const name = normalizeLocationValue(warehouse?.name);
@@ -5599,6 +5627,8 @@ function SaleEditModal({
     sale.mode === "PLANCHAS" && saleMiniOnly && (Number(sale.planchas) || 0) >= 1;
   // Venta con canje Excepcional: su canje sigue la escala de solo Spaghetti.
   const editExceptional = sale.canjeProgram === "EXCEPCIONAL";
+  // Venta con canje Solo Avena en planchas: su canje sigue la escala Solo Avena.
+  const editSoloAvenaPlanchas = sale.canjeProgram === "SOLO_AVENA" && sale.mode === "PLANCHAS";
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
@@ -5607,6 +5637,8 @@ function SaleEditModal({
       ? zeroRedemptionStock()
       : editExceptional
       ? exceptionalCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly)
+      : editSoloAvenaPlanchas
+      ? soloAvenaCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, planchaAccessory === "BATEA")
       : sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
@@ -5844,14 +5876,21 @@ function SaleEditModal({
                   setCanjeEdited(true);
                   setManualCanje(null);
                 }}
-                items={[
-                  { value: "NINGUNO", label: "Sin Mandil / Batea" },
-                  { value: "MANDIL", label: "Con Mandil" },
-                  { value: "BATEA", label: "Con Batea" },
-                ]}
+                items={
+                  editSoloAvenaPlanchas
+                    ? [
+                        { value: "NINGUNO", label: "Solo Avena" },
+                        { value: "BATEA", label: "Avena + Batea" },
+                      ]
+                    : [
+                        { value: "NINGUNO", label: "Sin Mandil / Batea" },
+                        { value: "MANDIL", label: "Con Mandil" },
+                        { value: "BATEA", label: "Con Batea" },
+                      ]
+                }
               />
             )}
-            {(sale.planchas || 0) >= 80 && (
+            {(sale.planchas || 0) >= 80 && !editExceptional && !editSoloAvenaPlanchas && (
               <Field label="Multiplicador de canje *">
                 <select
                   className="select"
@@ -6429,7 +6468,11 @@ function RedemptionRulesModule({
                     <span>
                       <strong>{rule.name}</strong>
                       <small>
-                        {redemptionRuleProgram(rule) === "EXCEPCIONAL" ? "Excepcional (solo Spaghetti) · " : "Tradicional · "}
+                        {redemptionRuleProgram(rule) === "EXCEPCIONAL"
+                          ? "Excepcional (solo Spaghetti) · "
+                          : redemptionRuleProgram(rule) === "SOLO_AVENA"
+                            ? "Solo Avena · "
+                            : "Tradicional · "}
                         {rule.accessory === "NINGUNO" ? "Sin accesorio" : rule.accessory}
                       </small>
                     </span>
@@ -6499,6 +6542,7 @@ function RedemptionRulesModule({
               onChange={(value) => setEditing({ ...editing, program: value as CanjeProgram })}
               items={[
                 { value: "TRADICIONAL", label: "Tradicional" },
+                { value: "SOLO_AVENA", label: "Solo Avena (todos los almacenes)" },
                 { value: "EXCEPCIONAL", label: "Excepcional (almacenes autorizados)" },
               ]}
             />
@@ -9628,7 +9672,7 @@ function AnalystApp({
           (sale.amountSoles ?? 0).toFixed(2),
           sale.redemptionRuleName || "",
           sale.redemptionRuleCode || "",
-          sale.canjeProgram === "EXCEPCIONAL" ? "EXCEPCIONAL" : "TRADICIONAL",
+          normalizeCanjeProgram(sale.canjeProgram),
           effectiveSaleBonus(sale) || "Sin canje",
           effectiveSaleRedemptionCount(sale),
           sale.comment || "",
@@ -11788,7 +11832,9 @@ function AnalystApp({
                               ? `${effectiveSaleRedemptionCount(sale) || 1} · ${effectiveSaleBonus(sale)}`
                               : "Sin canje"}
                           </small>
-                          {sale.canjeProgram === "EXCEPCIONAL" && <small className="sales-canje-exc">Excepcional</small>}
+                          {normalizeCanjeProgram(sale.canjeProgram) !== "TRADICIONAL" && (
+                            <small className="sales-canje-exc">{CANJE_PROGRAM_LABEL[normalizeCanjeProgram(sale.canjeProgram)]}</small>
+                          )}
                         </span>
                         <span className="sales-evidence">
                           <PhotoThumbnail
@@ -12931,10 +12977,14 @@ function PromoterApp({
           warehouse.marketIds?.includes(selectedMarketId),
       ),
     );
-  const effectiveCanjeProgram: CanjeProgram = exceptionalAllowed ? canjeProgram : "TRADICIONAL";
+  const effectiveCanjeProgram: CanjeProgram =
+    saleWithoutCanje || (canjeProgram === "EXCEPCIONAL" && !exceptionalAllowed) ? "TRADICIONAL" : canjeProgram;
   const exceptionalCanje = effectiveCanjeProgram === "EXCEPCIONAL";
+  const soloAvenaCanje = effectiveCanjeProgram === "SOLO_AVENA";
   const availablePlanchaAccessories = planchas >= 10 && !miniOnlyPlancha && !exceptionalCanje
-    ? (["MANDIL" as const, "BATEA" as const, "NINGUNO" as const])
+    ? soloAvenaCanje
+      ? (["NINGUNO" as const, "BATEA" as const])
+      : (["MANDIL" as const, "BATEA" as const, "NINGUNO" as const])
     : (["NINGUNO" as const]);
   useEffect(() => {
     if (planchas < 10) {
@@ -12943,7 +12993,9 @@ function PromoterApp({
     }
     const month = saleDate.getMonth() + 1;
     const preferred =
-      (month === 9 || month === 10) && availablePlanchaAccessories.includes("MANDIL")
+      soloAvenaCanje
+        ? "NINGUNO"
+        : (month === 9 || month === 10) && availablePlanchaAccessories.includes("MANDIL")
         ? "MANDIL"
         : month === 11 && availablePlanchaAccessories.includes("BATEA")
           ? "BATEA"
@@ -12953,6 +13005,7 @@ function PromoterApp({
     selectedWarehouse?.id,
     planchas >= 10,
     saleDate.getMonth(),
+    soloAvenaCanje,
   ]);
   const effectivePlanchaAccessory = availablePlanchaAccessories.includes(planchaAccessory)
     ? planchaAccessory
@@ -12978,12 +13031,12 @@ function PromoterApp({
           accessory:
             mode === "PLANCHAS" ? effectivePlanchaAccessory : "NINGUNO",
           date: saleDate,
-          multiplier: exceptionalCanje ? 1 : planchaMultiplier,
+          multiplier: exceptionalCanje || soloAvenaCanje ? 1 : planchaMultiplier,
         })
       : null;
 
   const bonusProducts =
-    saleWithoutCanje || redemptionRulesLoaded || exceptionalCanje
+    saleWithoutCanje || redemptionRulesLoaded || exceptionalCanje || soloAvenaCanje
       ? []
       : bonusProductsFor(
           mode,
@@ -13003,6 +13056,10 @@ function PromoterApp({
         : 0;
   const canjeCount = exceptionalCanje
     ? 1
+    : soloAvenaCanje && !masterRuleMatch
+    ? mode === "UNIDADES"
+      ? automaticUnitCanjeCount
+      : 1
     : masterRuleMatch
     ? mode === "UNIDADES"
       ? masterRuleMatch.appliedFactor
@@ -13033,6 +13090,8 @@ function PromoterApp({
           ? masterRuleMatch.items
           : exceptionalCanje && !redemptionRulesLoaded
             ? exceptionalCanjeItems(mode, total, planchas, miniOnlyPlancha)
+          : soloAvenaCanje && !redemptionRulesLoaded
+            ? soloAvenaCanjeItems(mode, total, planchas, miniOnlyPlancha, effectivePlanchaAccessory === "BATEA")
           : redemptionRulesLoaded
             ? ({} as Partial<RedemptionStock>)
             : mode === "PLANCHAS"
@@ -13437,7 +13496,7 @@ function PromoterApp({
             : effectivePlanchaAccessory
           : undefined,
       planchaMultiplier:
-        mode === "PLANCHAS" ? (saleWithoutCanje || miniOnlyPlancha || exceptionalCanje ? 1 : planchaMultiplier) : undefined,
+        mode === "PLANCHAS" ? (saleWithoutCanje || miniOnlyPlancha || exceptionalCanje || soloAvenaCanje ? 1 : planchaMultiplier) : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
@@ -14215,7 +14274,11 @@ function PromoterApp({
             >
               {availablePlanchaAccessories.map((accessory) => (
                 <option value={accessory} key={accessory}>
-                  {accessory === "MANDIL"
+                  {soloAvenaCanje
+                    ? accessory === "BATEA"
+                      ? "Avena + Batea"
+                      : "Solo Avena"
+                    : accessory === "MANDIL"
                     ? "Con Mandil"
                     : accessory === "BATEA"
                       ? "Con Batea"
@@ -14225,7 +14288,7 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && (
+        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && !exceptionalCanje && !soloAvenaCanje && !miniOnlyPlancha && (
           <Field label="Multiplicador solicitado *">
             <select
               className="select"
@@ -14246,22 +14309,23 @@ function PromoterApp({
             <p>{UNIT_NO_CANJE_DETAIL}</p>
           </div>
         )}
-        {exceptionalAllowed && (
+        {!saleWithoutCanje && (
           <div className="canje-program" data-testid="canje-program">
             <span className="canje-program-label">Tipo de canje</span>
             <div className="canje-program-options" role="radiogroup" aria-label="Tipo de canje">
               {([
                 ["TRADICIONAL", "Tradicional", "Escala actual (Avena, Spaghetti…)"],
-                ["EXCEPCIONAL", "Excepcional", "Solo Spaghetti"],
+                ["SOLO_AVENA", "Solo Avena", "Avena Clásica (desde 10 planchas, opción con Batea)"],
+                ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional", "Solo Spaghetti"]] as const) : []),
               ] as const).map(([value, label, detail]) => (
                 <button
                   key={value}
                   type="button"
                   role="radio"
-                  aria-checked={canjeProgram === value}
-                  className={`canje-program-option${canjeProgram === value ? " is-active" : ""}`}
+                  aria-checked={effectiveCanjeProgram === value}
+                  className={`canje-program-option${effectiveCanjeProgram === value ? " is-active" : ""}`}
                   onClick={() => setCanjeProgram(value)}
-                  data-testid={`button-canje-${value.toLowerCase()}`}
+                  data-testid={`button-canje-${value.toLowerCase().replace("_", "-")}`}
                 >
                   <strong>{label}</strong>
                   <small>{detail}</small>
