@@ -439,31 +439,9 @@ function canonicalMiniSku(sku: string, label = "") {
 function redemptionRuleProgram(rule: Pick<RedemptionRule, "program">): CanjeProgram {
   return normalizeCanjeProgram(rule.program);
 }
-// Bloques de planchas, igual que la escala Tradicional: 2-3 = 2 × bloque de 1,
-// 5-7 = bloque de 4 + bloque de 1, 8-9 = 2 × bloque de 4, 11-13 = bloque de 10 + bloque de 1,
-// 14-19 = bloque de 10 + bloque de 4, 20-79 = 2 × bloque de 10, 80+ = bloque de 80.
-function canjePlanchaBlocks(planchas: number): number[] {
-  if (planchas >= 80) return [80];
-  if (planchas >= 20) return [10, 10];
-  if (planchas >= 14) return [10, 4];
-  if (planchas >= 11) return [10, 1];
-  if (planchas >= 10) return [10];
-  if (planchas >= 8) return [4, 4];
-  if (planchas >= 5) return [4, 1];
-  if (planchas >= 4) return [4];
-  if (planchas >= 2) return [1, 1];
-  return planchas >= 1 ? [1] : [];
-}
-const EXCEPTIONAL_BLOCK_SPAGHETTI: Record<number, number> = { 1: 2, 4: 8, 10: 20, 80: 160 };
-const SOLO_AVENA_BLOCK: Record<number, { avena: number; bateaAvena?: number; batea?: number }> = {
-  1: { avena: 6 },
-  4: { avena: 24 },
-  10: { avena: 60, bateaAvena: 50, batea: 1 },
-  80: { avena: 432, bateaAvena: 408, batea: 4 },
-};
 // Canje SOLO AVENA (todos los almacenes). Debe coincidir con soloAvenaCanjeItems del servidor.
 // Unidades: igual que Tradicional. Minis: ½ plancha = 2, 1 plancha o más = 4.
-// Planchas por bloques (como la Tradicional): bloque 1 = 6, 4 = 24, 10 = 60 (o 50 + 1 Batea), 80 = 432 (o 408 + 4 Bateas).
+// Planchas: 1-3 = 6, 4-9 = 24, 10-79 = 60 (o 50 + 1 Batea), 80+ = 432 (o 408 + 4 Bateas).
 function soloAvenaCanjeItems(
   mode: "UNIDADES" | "PLANCHAS",
   units: number,
@@ -477,14 +455,9 @@ function soloAvenaCanjeItems(
     if (planchas === 0.5 && units === 24) return { AVENA: 2 };
     return planchas >= 1 ? { AVENA: MINI_PLANCHA_AVENAS } : {};
   }
-  const result = { AVENA: 0, BATEA: 0 };
-  for (const block of canjePlanchaBlocks(planchas)) {
-    const def = SOLO_AVENA_BLOCK[block];
-    const withBatea = batea && def.batea !== undefined;
-    result.AVENA += withBatea ? def.bateaAvena || 0 : def.avena;
-    result.BATEA += withBatea ? def.batea || 0 : 0;
-  }
-  return result.BATEA ? result : result.AVENA ? { AVENA: result.AVENA } : {};
+  if (planchas >= 80) return batea ? { AVENA: 408, BATEA: 4 } : { AVENA: 432 };
+  if (planchas >= 10) return batea ? { AVENA: 50, BATEA: 1 } : { AVENA: 60 };
+  return planchas >= 4 ? { AVENA: 24 } : planchas >= 1 ? { AVENA: 6 } : {};
 }
 function exceptionalCanjeItems(
   mode: "UNIDADES" | "PLANCHAS",
@@ -498,7 +471,9 @@ function exceptionalCanjeItems(
     return planchas >= 1 ? { SPAGHETTI: 2 } : {};
   }
   const spaghetti =
-    canjePlanchaBlocks(planchas).reduce((sum, block) => sum + EXCEPTIONAL_BLOCK_SPAGHETTI[block], 0);
+    planchas >= 80 ? 140 : planchas >= 10 ? 20 : planchas >= 4 ? 8 : planchas >= 1 ? 2 : 0;
+  // 80 planchas o más también entrega 4 Bateas.
+  if (planchas >= 80) return { SPAGHETTI: spaghetti, BATEA: 4 };
   return spaghetti ? { SPAGHETTI: spaghetti } : {};
 }
 const DEFAULT_PRODUCT_PRESENTATION_BY_SKU: Record<string, "CAJA" | "BOLSA" | "LATA"> = {
@@ -14325,7 +14300,7 @@ function PromoterApp({
               {([
                 ["TRADICIONAL", "Tradicional", "Escala actual (Avena, Spaghetti…)"],
                 ["SOLO_AVENA", "Solo Avena", "Avena Clásica (desde 10 planchas, opción con Batea)"],
-                ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional", "Solo Spaghetti"]] as const) : []),
+                ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional", "Spaghetti (+ Batea desde 80 planchas)"]] as const) : []),
               ] as const).map(([value, label, detail]) => (
                 <button
                   key={value}
