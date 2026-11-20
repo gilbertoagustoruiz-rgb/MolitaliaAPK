@@ -441,8 +441,10 @@ function redemptionRuleProgram(rule: Pick<RedemptionRule, "program">): CanjeProg
 }
 // Bloques de planchas, igual que la escala Tradicional: 2-3 = 2 × bloque de 1,
 // 5-7 = bloque de 4 + bloque de 1, 8-9 = 2 × bloque de 4, 11-13 = bloque de 10 + bloque de 1,
-// 14-19 = bloque de 10 + bloque de 4, 20-79 = 2 × bloque de 10, 80+ = bloque de 80.
+// 14-19 = bloque de 10 + bloque de 4, 20-79 = 2 × bloque de 10, 80 = bloque de 80,
+// 81 o más = bloque de 80 + bloque de 10. El multiplicador (x2-x4) se aplica aparte, sobre todo el canje.
 function canjePlanchaBlocks(planchas: number): number[] {
+  if (planchas >= 81) return [80, 10];
   if (planchas >= 80) return [80];
   if (planchas >= 20) return [10, 10];
   if (planchas >= 14) return [10, 4];
@@ -487,6 +489,12 @@ function soloAvenaCanjeItems(
     result.BATEA += withBatea ? def.batea || 0 : 0;
   }
   return result.BATEA ? result : result.AVENA ? { AVENA: result.AVENA } : {};
+}
+function scaleCanjeItems(items: Partial<RedemptionStock>, factor: number): Partial<RedemptionStock> {
+  if (factor <= 1) return items;
+  return Object.fromEntries(
+    Object.entries(items).map(([key, qty]) => [key, (Number(qty) || 0) * factor]),
+  ) as Partial<RedemptionStock>;
 }
 function exceptionalCanjeItems(
   mode: "UNIDADES" | "PLANCHAS",
@@ -2876,7 +2884,12 @@ function planchaCanjeRequirements(
   let avena = 0;
   let spaghetti = 0;
   let accessoryQty = 0;
-  if (planchas >= 80) {
+  if (planchas >= 81) {
+    // 81 o más = dinámica de 80 + dinámica de 10.
+    avena = 144 + m10Avena;
+    spaghetti = 110;
+    accessoryQty = 5;
+  } else if (planchas >= 80) {
     avena = 144;
     spaghetti = 100;
     accessoryQty = 4;
@@ -5652,13 +5665,16 @@ function SaleEditModal({
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
+  // Multiplicador desde 80 planchas también para Excepcional y Solo Avena.
+  const editSpecialMultiplier =
+    sale.mode === "PLANCHAS" && (sale.planchas || 0) >= 80 && !saleMiniOnly ? planchaMultiplier : 1;
   const calculatedRequirements =
     punoWithoutCanje
       ? zeroRedemptionStock()
       : editExceptional
-      ? exceptionalCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly)
+      ? scaleCanjeItems(exceptionalCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly), editSpecialMultiplier)
       : editSoloAvenaPlanchas
-      ? soloAvenaCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, planchaAccessory === "BATEA")
+      ? scaleCanjeItems(soloAvenaCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, planchaAccessory === "BATEA"), editSpecialMultiplier)
       : sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
@@ -5910,7 +5926,7 @@ function SaleEditModal({
                 }
               />
             )}
-            {(sale.planchas || 0) >= 80 && !editExceptional && !editSoloAvenaPlanchas && (
+            {(sale.planchas || 0) >= 80 && !saleMiniOnly && (
               <Field label="Multiplicador de canje *">
                 <select
                   className="select"
@@ -13043,7 +13059,7 @@ function PromoterApp({
           accessory:
             mode === "PLANCHAS" ? effectivePlanchaAccessory : "NINGUNO",
           date: saleDate,
-          multiplier: exceptionalCanje || soloAvenaCanje ? 1 : planchaMultiplier,
+          multiplier: planchaMultiplier,
         })
       : null;
 
@@ -13101,9 +13117,9 @@ function PromoterApp({
         : masterRuleMatch
           ? masterRuleMatch.items
           : exceptionalCanje && !redemptionRulesLoaded
-            ? exceptionalCanjeItems(mode, total, planchas, miniOnlyPlancha)
+            ? scaleCanjeItems(exceptionalCanjeItems(mode, total, planchas, miniOnlyPlancha), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
           : soloAvenaCanje && !redemptionRulesLoaded
-            ? soloAvenaCanjeItems(mode, total, planchas, miniOnlyPlancha, effectivePlanchaAccessory === "BATEA")
+            ? scaleCanjeItems(soloAvenaCanjeItems(mode, total, planchas, miniOnlyPlancha, effectivePlanchaAccessory === "BATEA"), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
           : redemptionRulesLoaded
             ? ({} as Partial<RedemptionStock>)
             : mode === "PLANCHAS"
@@ -13508,7 +13524,7 @@ function PromoterApp({
             : effectivePlanchaAccessory
           : undefined,
       planchaMultiplier:
-        mode === "PLANCHAS" ? (saleWithoutCanje || miniOnlyPlancha || exceptionalCanje || soloAvenaCanje ? 1 : planchaMultiplier) : undefined,
+        mode === "PLANCHAS" ? (saleWithoutCanje || miniOnlyPlancha ? 1 : planchaMultiplier) : undefined,
       comment: comment.trim() || undefined,
       receiptPhoto: receiptUrl,
       exchangePhoto: exchangeEvidenceRequired ? exchangeUrl : undefined,
@@ -14300,7 +14316,7 @@ function PromoterApp({
             </select>
           </Field>
         )}
-        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && !exceptionalCanje && !soloAvenaCanje && !miniOnlyPlancha && (
+        {!saleWithoutCanje && bonus && mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha && (
           <Field label="Multiplicador solicitado *">
             <select
               className="select"

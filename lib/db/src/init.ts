@@ -411,16 +411,29 @@ export async function ensureDatabaseSchema() {
         false,null,ARRAY[]::text[],'BATEA','{"AVENA":24,"SPAGHETTI":10,"BATEA":1}'::jsonb,52,'ACTIVO','{}'::jsonb
       ),
       (
-        'RR-ESC-006','ESCALA_6','Escala 6','PLANCHAS','PLANCHAS',80,null,true,
+        'RR-ESC-006','ESCALA_6','Escala 6','PLANCHAS','PLANCHAS',80,80,true,
         false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":144,"SPAGHETTI":100}'::jsonb,60,'ACTIVO','{}'::jsonb
       ),
       (
-        'RR-ESC-006-M','ESCALA_6_MANDIL','Escala 6 + Mandil','PLANCHAS','PLANCHAS',80,null,true,
+        'RR-ESC-006-M','ESCALA_6_MANDIL','Escala 6 + Mandil','PLANCHAS','PLANCHAS',80,80,true,
         false,null,ARRAY[]::text[],'MANDIL','{"AVENA":144,"SPAGHETTI":100,"MANDIL":4}'::jsonb,61,'ACTIVO','{}'::jsonb
       ),
       (
-        'RR-ESC-006-B','ESCALA_6_BATEA','Escala 6 + Batea','PLANCHAS','PLANCHAS',80,null,true,
+        'RR-ESC-006-B','ESCALA_6_BATEA','Escala 6 + Batea','PLANCHAS','PLANCHAS',80,80,true,
         false,null,ARRAY[]::text[],'BATEA','{"AVENA":144,"SPAGHETTI":100,"BATEA":4}'::jsonb,62,'ACTIVO','{}'::jsonb
+      ),
+      -- 81 planchas o más = dinámica de 80 + dinámica de 10 (como los bloques).
+      (
+        'RR-ESC-007','ESCALA_7','Escala 7 · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,
+        false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":168,"SPAGHETTI":110}'::jsonb,63,'ACTIVO','{"description":"81 planchas o más = Escala 6 (80) + Escala 5 (10)"}'::jsonb
+      ),
+      (
+        'RR-ESC-007-M','ESCALA_7_MANDIL','Escala 7 · 81 planchas o más + Mandil','PLANCHAS','PLANCHAS',81,null,false,
+        false,null,ARRAY[]::text[],'MANDIL','{"AVENA":168,"SPAGHETTI":110,"MANDIL":5}'::jsonb,64,'ACTIVO','{"description":"81 planchas o más = Escala 6 (80) + Escala 5 (10), con Mandil"}'::jsonb
+      ),
+      (
+        'RR-ESC-007-B','ESCALA_7_BATEA','Escala 7 · 81 planchas o más + Batea','PLANCHAS','PLANCHAS',81,null,false,
+        false,null,ARRAY[]::text[],'BATEA','{"AVENA":168,"SPAGHETTI":110,"BATEA":5}'::jsonb,65,'ACTIVO','{"description":"81 planchas o más = Escala 6 (80) + Escala 5 (10), con Batea"}'::jsonb
       )
     ON CONFLICT (id) DO NOTHING;
 
@@ -503,8 +516,10 @@ export async function ensureDatabaseSchema() {
       ('RR-SAV-P14-B','SAV_PLANCHAS_14_B','Solo Avena · 14 a 19 planchas + Batea','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":74,"BATEA":1}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"14 a 19 planchas = 74 Avenas + 1 Batea (10 planchas + 4 planchas)"}'::jsonb),
       ('RR-SAV-P20','SAV_PLANCHAS_20','Solo Avena · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":120}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"20 a 79 planchas = 120 Avenas (2 × 10 planchas)"}'::jsonb),
       ('RR-SAV-P20-B','SAV_PLANCHAS_20_B','Solo Avena · 20 a 79 planchas + Batea','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":100,"BATEA":2}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"20 a 79 planchas = 100 Avenas + 2 Bateas (2 × 10 planchas)"}'::jsonb),
-      ('RR-SAV-P80','SAV_PLANCHAS_80','Solo Avena · 80 planchas o más','PLANCHAS','PLANCHAS',80,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":432}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas o más = 432 Avenas (80 planchas)"}'::jsonb),
-      ('RR-SAV-P80-B','SAV_PLANCHAS_80_B','Solo Avena · 80 planchas o más + Batea','PLANCHAS','PLANCHAS',80,null,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":408,"BATEA":4}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas o más = 408 Avenas + 4 Bateas (80 planchas)"}'::jsonb)
+      ('RR-SAV-P80','SAV_PLANCHAS_80','Solo Avena · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":432}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas = 432 Avenas (80 planchas)"}'::jsonb),
+      ('RR-SAV-P81','SAV_PLANCHAS_81','Solo Avena · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":492}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"81 planchas o más = 492 Avenas (80 planchas + 10 planchas)"}'::jsonb),
+      ('RR-SAV-P80-B','SAV_PLANCHAS_80_B','Solo Avena · 80 planchas + Batea','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":408,"BATEA":4}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas = 408 Avenas + 4 Bateas (80 planchas)"}'::jsonb),
+      ('RR-SAV-P81-B','SAV_PLANCHAS_81_B','Solo Avena · 81 planchas o más + Batea','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":458,"BATEA":5}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"81 planchas o más = 458 Avenas + 5 Bateas (80 planchas + 10 planchas)"}'::jsonb)
     ON CONFLICT (id) DO NOTHING;
 
     -- Escala EXCEPCIONAL (solo Spaghetti), para almacenes sin Avena (p. ej.
@@ -525,7 +540,8 @@ export async function ensureDatabaseSchema() {
       ('RR-EXC-P11','EXC_PLANCHAS_11','Excepcional · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":22}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"11 a 13 planchas = 22 Spaghetti (10 planchas + 1 plancha)"}'::jsonb),
       ('RR-EXC-P14','EXC_PLANCHAS_14','Excepcional · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":28}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"14 a 19 planchas = 28 Spaghetti (10 planchas + 4 planchas)"}'::jsonb),
       ('RR-EXC-P20','EXC_PLANCHAS_20','Excepcional · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":40}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"20 a 79 planchas = 40 Spaghetti (2 × 10 planchas)"}'::jsonb),
-      ('RR-EXC-P80','EXC_PLANCHAS_80','Excepcional · 80 planchas o más','PLANCHAS','PLANCHAS',80,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":140,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"80 planchas o más = 140 Spaghetti + 4 Bateas"}'::jsonb)
+      ('RR-EXC-P80','EXC_PLANCHAS_80','Excepcional · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":140,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"80 planchas = 140 Spaghetti + 4 Bateas"}'::jsonb),
+      ('RR-EXC-P81','EXC_PLANCHAS_81','Excepcional · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":160,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"81 planchas o más = 160 Spaghetti + 4 Bateas (80 planchas + 10 planchas)"}'::jsonb)
     ON CONFLICT (id) DO NOTHING;
 
     -- Planchas solo de minis (Todinnito 85 g, Mini Costa Minions 80 g, Mini Costa
@@ -580,6 +596,13 @@ export async function ensureDatabaseSchema() {
     UPDATE redemption_rules SET max_quantity=10, name='Solo Avena · 10 planchas + Batea', 
       data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('10 planchas = 50 Avenas + 1 Batea (10 planchas)'::text),true), updated_at=now()
     WHERE id='RR-SAV-P10-B' AND max_quantity IN (79);
+
+    -- 80 planchas exactas = dinámica de 80; desde 81 planchas = dinámica de 80 + dinámica de 10 (escalas *-81 / RR-ESC-007).
+    UPDATE redemption_rules SET max_quantity=80, updated_at=now()
+    WHERE id IN ('RR-ESC-006','RR-ESC-006-M','RR-ESC-006-B','RR-EXC-P80','RR-SAV-P80','RR-SAV-P80-B') AND max_quantity IS NULL;
+    UPDATE redemption_rules SET name=replace(name,'80 planchas o más','80 planchas'),
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb(replace(COALESCE(data->>'description',''),'80 planchas o más','80 planchas')),true)
+    WHERE id IN ('RR-EXC-P80','RR-SAV-P80','RR-SAV-P80-B') AND name LIKE '%80 planchas o más%';
 
     UPDATE redemption_rules
     SET min_exclusive=false, updated_at=now()

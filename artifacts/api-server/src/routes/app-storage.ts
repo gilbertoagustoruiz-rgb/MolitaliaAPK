@@ -272,8 +272,10 @@ async function productCanjeExclusion(
 
 // Bloques de planchas, igual que la escala Tradicional: 2-3 = 2 × bloque de 1,
 // 5-7 = bloque de 4 + bloque de 1, 8-9 = 2 × bloque de 4, 11-13 = bloque de 10 + bloque de 1,
-// 14-19 = bloque de 10 + bloque de 4, 20-79 = 2 × bloque de 10, 80+ = bloque de 80.
+// 14-19 = bloque de 10 + bloque de 4, 20-79 = 2 × bloque de 10, 80 = bloque de 80,
+// 81 o más = bloque de 80 + bloque de 10. El multiplicador (x2-x4) se aplica aparte, sobre todo el canje.
 function canjePlanchaBlocks(planchas: number): number[] {
+  if (planchas >= 81) return [80, 10];
   if (planchas >= 80) return [80];
   if (planchas >= 20) return [10, 10];
   if (planchas >= 14) return [10, 4];
@@ -311,6 +313,16 @@ function normalizeCanjeProgram(raw: unknown): CanjeProgram {
 function canjeProgramOf(record: StoredRecord): CanjeProgram {
   return normalizeCanjeProgram(value(record, "canjeProgram"));
 }
+// Multiplicador pedido (x1-x4) para ventas de 80 planchas o más; multiplica todo el canje.
+function legacyCanjeMultiplier(record: StoredRecord, mode: string, planchas: number) {
+  if (mode !== "PLANCHAS" || planchas < 80) return 1;
+  return Math.max(1, Math.min(4, Math.floor(numeric(record, "planchaMultiplier") || 1)));
+}
+function scaleCanjeItems(items: Record<string, number>, factor: number) {
+  for (const key of Object.keys(items)) items[key] = (Number(items[key]) || 0) * factor;
+  return items;
+}
+
 function exceptionalCanjeItems(
   mode: string,
   units: number,
@@ -1834,9 +1846,9 @@ async function validateSubmittedRedemptionRule(
   if (
     value(sale, "mode") === "PLANCHAS" &&
     numeric(sale, "planchas") >= 80 &&
-    !miniOnlyRule &&
-    ruleProgram === "TRADICIONAL"
+    !miniOnlyRule
   ) {
+    // Multiplicador (x2-x4) desde 80 planchas: Tradicional, Excepcional y Solo Avena.
     factor *= Math.max(1, Math.min(4, Math.floor(numeric(sale, "planchaMultiplier") || 1)));
   }
 
@@ -5773,6 +5785,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
           inputPlanchaLines.length > 0 &&
           inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
       );
+      scaleCanjeItems(expected, legacyCanjeMultiplier(input, mode, planchas));
       if (redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
         throw new Error(
           `Canje Excepcional: para esta venta corresponde ${expected.SPAGHETTI} Spaghetti${expected.BATEA ? ` + ${expected.BATEA} Bateas` : ""}.`,
@@ -5800,6 +5813,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         inputPlanchaLines.length > 0 && inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
         Number(requested.BATEA) > 0,
       );
+      scaleCanjeItems(expected, legacyCanjeMultiplier(input, mode, planchas));
       if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
         throw new Error(
           `Canje Solo Avena: para esta venta corresponde ${expected.AVENA} Avena${expected.BATEA ? ` + ${expected.BATEA} Batea` : ""}.`,
