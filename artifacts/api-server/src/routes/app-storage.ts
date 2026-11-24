@@ -2442,7 +2442,7 @@ router.post("/app-storage/warehouses/regularize-history", async (req, res): Prom
 
 router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req, res): Promise<void> => {
   const actor = await authorizedWarehouseActor(req);
-  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar ventas de Juliaca." });
+  if (!actor) return void res.status(403).json({ message: "Solo Admin o Analista puede regularizar ventas de Juliaca y Puno." });
   const db = await pool.connect();
   try {
     await db.query("BEGIN");
@@ -2450,8 +2450,9 @@ router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req,
 
     const marketsResult = await db.query("SELECT id,data FROM markets");
     const punoMarketIds = marketsResult.rows
-      // Solo Juliaca: las ventas anteriores de Puno y VEGA - BELAUNDE conservan su canje.
-      .filter((row) => isRecord(row.data) && noCanjeLocationZone(row.data) === "JULIACA")
+      // Juliaca y Puno nunca debieron tener canje: se anulan todos sus canjes históricos.
+      // (VEGA - BELAUNDE tiene canje y no se toca.)
+      .filter((row) => isRecord(row.data) && noCanjeLocationZone(row.data) !== null)
       .map((row) => String(row.id));
     if (!punoMarketIds.length) {
       await db.query("COMMIT");
@@ -2575,7 +2576,7 @@ router.post("/app-storage/warehouses/regularize-puno-without-canje", async (req,
   } catch (error) {
     await db.query("ROLLBACK").catch(() => undefined);
     req.log.error({ err: error }, "Unable to regularize Puno sales without canje");
-    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudieron regularizar las ventas de Juliaca." });
+    res.status(409).json({ message: error instanceof Error ? error.message : "No se pudieron regularizar las ventas de Juliaca y Puno." });
   } finally {
     db.release();
   }
@@ -6000,10 +6001,10 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       isRecord(currentSale.data) ? currentSale.data : {},
       isRecord(currentMarketResult.rows[0]?.data) ? currentMarketData : null,
     );
-    // Juliaca: siempre sin canje. Puno y VEGA - BELAUNDE: las ventas que ya tenían
-    // canje antes de esta regla lo conservan al editarlas.
+    // Juliaca y Puno: siempre sin canje, también al editar ventas anteriores.
     const punoWithoutCanje =
       currentZone === "JULIACA" ||
+      currentZone === "PUNO" ||
       (currentZone !== null && !hasRedemptionConsumption(isRecord(currentSale.data) ? currentSale.data : {}));
     const hasCanjeEditedFlag = Object.prototype.hasOwnProperty.call(
       input,

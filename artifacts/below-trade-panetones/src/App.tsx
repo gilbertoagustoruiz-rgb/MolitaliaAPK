@@ -4385,18 +4385,18 @@ function WarehouseCatalog({
   };
   const regularizePunoWithoutCanje=async()=>{
     if(readOnly)return;
-    const confirmed=window.confirm("Se quitarán los canjes de todas las ventas de Región SUR · Departamento PUNO y se devolverá al Almacén el stock utilizado. Las ventas y productos vendidos se conservarán. ¿Continuar?");
+    const confirmed=window.confirm("Se quitarán TODOS los canjes (Avena, Spaghetti, Mandil y Batea) de las ventas de Juliaca y Puno desde el inicio del app, y se devolverá al Almacén del que salieron. Las ventas y los productos vendidos se conservan. ¿Continuar?");
     if(!confirmed)return;
     setPunoRegularizing(true);
     try{
       const r=await fetch("/api/app-storage/warehouses/regularize-puno-without-canje",{method:"POST",headers:{"Content-Type":"application/json","x-admin-dni":user.dni,"x-admin-key":sessionAdminKey(user)}});
       const text=await r.text();let p:any={};
       try{p=text?JSON.parse(text):{};}catch{p={message:text};}
-      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Juliaca.`);
+      if(!r.ok)throw new Error(p.message||`Error HTTP ${r.status} al regularizar Juliaca y Puno.`);
       await load();
-      notify(`${p.salesRegularized||0} venta(s) de Juliaca quedaron sin canje. ${p.restoredItems||0} movimiento(s) de stock fueron devueltos al Almacén.`);
+      notify(`${p.salesRegularized||0} venta(s) de Juliaca y Puno quedaron sin canje. ${p.restoredItems||0} movimiento(s) de stock fueron devueltos al Almacén.`);
     }catch(e){
-      notify(e instanceof Error?e.message:"No se pudieron regularizar las ventas de Juliaca.",true);
+      notify(e instanceof Error?e.message:"No se pudieron regularizar las ventas de Juliaca y Puno.",true);
     }finally{setPunoRegularizing(false);}
   };
   const regularizeSeptemberClosures=async()=>{
@@ -4431,6 +4431,7 @@ function WarehouseCatalog({
               <CsvImportButton label="Importar almacenes" onImport={importFile} testId="button-import-warehouses"/>
               <CsvExampleButton onDownload={example} testId="button-example-warehouses"/>
               <Btn onClick={()=>setModal(true)}><Plus/> Nuevo almacén</Btn>
+              <Btn variant="outline" disabled={punoRegularizing} onClick={()=>void regularizePunoWithoutCanje()} testId="button-regularize-juliaca-puno">{punoRegularizing?"Procesando...":"Quitar canjes Juliaca y Puno"}</Btn>
             </>
           )}
         </div>
@@ -5548,10 +5549,10 @@ function SaleEditModal({
   const saleMarket = markets.find((market) => market.id === sale.marketId);
   const editClient = clients.find((client) => client.id === sale.clientId);
   const editZone = noCanjeZoneOf(saleMarket, editClient);
-  // Juliaca: siempre sin canje. Puno y VEGA - BELAUNDE: si la venta ya tenía canje
-  // (registrada antes de esta regla) lo conserva.
+  // Juliaca y Puno: siempre sin canje, también al editar ventas anteriores.
   const punoWithoutCanje =
-    editZone === "JULIACA" || (editZone !== null && originalCount === 0 && !sale.bonus);
+    editZone === "JULIACA" ||
+    editZone === "PUNO" || (editZone !== null && originalCount === 0 && !sale.bonus);
   const editZoneTitle = noCanjeZoneTitle(editZone, editClient?.name);
   // Minis vendidos por unidad: no se les puede agregar canje
   // (si ya tenían uno registrado antes de esta regla, se conserva).
