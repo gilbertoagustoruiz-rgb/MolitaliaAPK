@@ -287,9 +287,10 @@ function canjePlanchaBlocks(planchas: number): number[] {
   if (planchas >= 2) return [1, 1];
   return planchas >= 1 ? [1] : [];
 }
-const EXCEPTIONAL_BLOCK_SPAGHETTI: Record<number, number> = { 1: 2, 4: 8, 10: 20, 80: 140 };
-// Excepcional oficial: el bloque de 80 planchas también entrega 4 Bateas.
-const EXCEPTIONAL_BLOCK_BATEA: Record<number, number> = { 80: 4 };
+// Excepcional Spaghetti oficial: bloque 1 = 1 Batea · 4 = 6 Spaghetti + 1 Batea · 10 = 13 Spaghetti + 3 Bateas
+// · 80 = 147 Spaghetti + 6 Bateas. Unidades y minis siguen dando solo Spaghetti.
+const EXCEPTIONAL_BLOCK_SPAGHETTI: Record<number, number> = { 1: 0, 4: 6, 10: 13, 80: 147 };
+const EXCEPTIONAL_BLOCK_BATEA: Record<number, number> = { 1: 1, 4: 1, 10: 3, 80: 6 };
 // Solo Avena oficial (Avena Clásica + Bateas): bloque 1 = 1 Batea · 4 = 18 Avena + 1 Batea
 // · 10 = 42 Avena + 3 Bateas · 80 = 394 Avena + 6 Bateas. Las Bateas vienen en la dinámica (sin opción aparte).
 const SOLO_AVENA_BLOCK: Record<number, { AVENA: number; BATEA: number }> = {

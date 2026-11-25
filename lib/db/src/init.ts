@@ -549,17 +549,17 @@ export async function ensureDatabaseSchema() {
       ('RR-EXC-MINI-HALF','EXC_MINI_MEDIA','Excepcional · Minis 1/2 plancha','PLANCHAS','UNITS',24,24,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"SPAGHETTI":1}'::jsonb,10,'ACTIVO','{"program":"EXCEPCIONAL","description":"Minis: 1/2 plancha (24 und) = 1 Spaghetti"}'::jsonb),
       ('RR-EXC-MINI-1','EXC_MINI_PLANCHAS','Excepcional · Minis 1 plancha o más','PLANCHAS','PLANCHAS',1,null,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"SPAGHETTI":2}'::jsonb,5,'ACTIVO','{"program":"EXCEPCIONAL","description":"Minis: 1 plancha o más = 2 Spaghetti fijo"}'::jsonb),
       ('RR-EXC-UNI','EXC_UNIDADES','Excepcional · Unidades','UNIDADES','UNITS',1,5,false,true,1,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":1}'::jsonb,20,'ACTIVO','{"program":"EXCEPCIONAL","description":"1 Spaghetti por unidad (1 a 5 und)"}'::jsonb),
-      ('RR-EXC-P1','EXC_PLANCHAS_1','Excepcional · 1 plancha','PLANCHAS','PLANCHAS',1,1,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":2}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"1 plancha = 2 Spaghetti (1 plancha)"}'::jsonb),
-      ('RR-EXC-P2','EXC_PLANCHAS_2','Excepcional · 2 a 3 planchas','PLANCHAS','PLANCHAS',2,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"2 a 3 planchas = 4 Spaghetti (2 × 1 plancha)"}'::jsonb),
-      ('RR-EXC-P4','EXC_PLANCHAS_4','Excepcional · 4 planchas','PLANCHAS','PLANCHAS',4,4,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":8}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"4 planchas = 8 Spaghetti (4 planchas)"}'::jsonb),
-      ('RR-EXC-P5','EXC_PLANCHAS_5','Excepcional · 5 a 7 planchas','PLANCHAS','PLANCHAS',5,7,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":10}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"5 a 7 planchas = 10 Spaghetti (4 planchas + 1 plancha)"}'::jsonb),
-      ('RR-EXC-P8','EXC_PLANCHAS_8','Excepcional · 8 a 9 planchas','PLANCHAS','PLANCHAS',8,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":16}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"8 a 9 planchas = 16 Spaghetti (2 × 4 planchas)"}'::jsonb),
-      ('RR-EXC-P10','EXC_PLANCHAS_10','Excepcional · 10 planchas','PLANCHAS','PLANCHAS',10,10,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":20}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"10 planchas = 20 Spaghetti (10 planchas)"}'::jsonb),
-      ('RR-EXC-P11','EXC_PLANCHAS_11','Excepcional · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":22}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"11 a 13 planchas = 22 Spaghetti (10 planchas + 1 plancha)"}'::jsonb),
-      ('RR-EXC-P14','EXC_PLANCHAS_14','Excepcional · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":28}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"14 a 19 planchas = 28 Spaghetti (10 planchas + 4 planchas)"}'::jsonb),
-      ('RR-EXC-P20','EXC_PLANCHAS_20','Excepcional · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":40}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"20 a 79 planchas = 40 Spaghetti (2 × 10 planchas)"}'::jsonb),
-      ('RR-EXC-P80','EXC_PLANCHAS_80','Excepcional · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":140,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"80 planchas = 140 Spaghetti + 4 Bateas"}'::jsonb),
-      ('RR-EXC-P81','EXC_PLANCHAS_81','Excepcional · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":160,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"81 planchas o más = 160 Spaghetti + 4 Bateas (80 planchas + 10 planchas)"}'::jsonb)
+      ('RR-EXC-P1','EXC_PLANCHAS_1','Excepcional · 1 plancha','PLANCHAS','PLANCHAS',1,1,false,false,null,ARRAY[]::text[],'NINGUNO','{"BATEA":1}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"1 plancha = 1 Batea"}'::jsonb),
+      ('RR-EXC-P2','EXC_PLANCHAS_2','Excepcional · 2 a 3 planchas','PLANCHAS','PLANCHAS',2,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"BATEA":2}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"2 a 3 planchas = 2 Bateas"}'::jsonb),
+      ('RR-EXC-P4','EXC_PLANCHAS_4','Excepcional · 4 planchas','PLANCHAS','PLANCHAS',4,4,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":6,"BATEA":1}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"4 planchas = 6 Spaghetti + 1 Batea"}'::jsonb),
+      ('RR-EXC-P5','EXC_PLANCHAS_5','Excepcional · 5 a 7 planchas','PLANCHAS','PLANCHAS',5,7,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":6,"BATEA":2}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"5 a 7 planchas = 6 Spaghetti + 2 Bateas"}'::jsonb),
+      ('RR-EXC-P8','EXC_PLANCHAS_8','Excepcional · 8 a 9 planchas','PLANCHAS','PLANCHAS',8,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":12,"BATEA":2}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"8 a 9 planchas = 12 Spaghetti + 2 Bateas"}'::jsonb),
+      ('RR-EXC-P10','EXC_PLANCHAS_10','Excepcional · 10 planchas','PLANCHAS','PLANCHAS',10,10,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":13,"BATEA":3}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"10 planchas = 13 Spaghetti + 3 Bateas"}'::jsonb),
+      ('RR-EXC-P11','EXC_PLANCHAS_11','Excepcional · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":13,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"11 a 13 planchas = 13 Spaghetti + 4 Bateas"}'::jsonb),
+      ('RR-EXC-P14','EXC_PLANCHAS_14','Excepcional · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":19,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"14 a 19 planchas = 19 Spaghetti + 4 Bateas"}'::jsonb),
+      ('RR-EXC-P20','EXC_PLANCHAS_20','Excepcional · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":26,"BATEA":6}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"20 a 79 planchas = 26 Spaghetti + 6 Bateas"}'::jsonb),
+      ('RR-EXC-P80','EXC_PLANCHAS_80','Excepcional · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":147,"BATEA":6}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"80 planchas = 147 Spaghetti + 6 Bateas"}'::jsonb),
+      ('RR-EXC-P81','EXC_PLANCHAS_81','Excepcional · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":160,"BATEA":9}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL","description":"81 planchas o más = 160 Spaghetti + 9 Bateas"}'::jsonb)
     ON CONFLICT (id) DO NOTHING;
 
     -- Planchas solo de minis (Todinnito 85 g, Mini Costa Minions 80 g, Mini Costa
@@ -622,6 +622,40 @@ export async function ensureDatabaseSchema() {
       data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb(replace(COALESCE(data->>'description',''),'80 planchas o más','80 planchas')),true)
     WHERE id IN ('RR-EXC-P80','RR-SAV-P80','RR-SAV-P80-B') AND name LIKE '%80 planchas o más%';
 
+    -- Excepcional Spaghetti oficial (Spaghetti + Bateas por bloques): actualiza las escalas que aún tengan los valores anteriores.
+    UPDATE redemption_rules SET items='{"BATEA":1}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('1 plancha = 1 Batea'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P1' AND items = '{"SPAGHETTI":2}'::jsonb;
+    UPDATE redemption_rules SET items='{"BATEA":2}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('2 a 3 planchas = 2 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P2' AND items = '{"SPAGHETTI":4}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":6,"BATEA":1}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('4 planchas = 6 Spaghetti + 1 Batea'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P4' AND items = '{"SPAGHETTI":8}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":6,"BATEA":2}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('5 a 7 planchas = 6 Spaghetti + 2 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P5' AND items = '{"SPAGHETTI":10}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":12,"BATEA":2}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('8 a 9 planchas = 12 Spaghetti + 2 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P8' AND items = '{"SPAGHETTI":16}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":13,"BATEA":3}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('10 planchas = 13 Spaghetti + 3 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P10' AND items = '{"SPAGHETTI":20}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":13,"BATEA":4}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('11 a 13 planchas = 13 Spaghetti + 4 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P11' AND items = '{"SPAGHETTI":22}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":19,"BATEA":4}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('14 a 19 planchas = 19 Spaghetti + 4 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P14' AND items = '{"SPAGHETTI":28}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":26,"BATEA":6}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('20 a 79 planchas = 26 Spaghetti + 6 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P20' AND items = '{"SPAGHETTI":40}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":147,"BATEA":6}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('80 planchas = 147 Spaghetti + 6 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P80' AND items = '{"SPAGHETTI":140,"BATEA":4}'::jsonb;
+    UPDATE redemption_rules SET items='{"SPAGHETTI":160,"BATEA":9}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('81 planchas o más = 160 Spaghetti + 9 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-EXC-P81' AND items = '{"SPAGHETTI":160,"BATEA":4}'::jsonb;
     -- Solo Avena oficial (Avena Clásica + Bateas): nuevos bloques; se quitan las variantes con Batea opcional.
     DELETE FROM redemption_rules WHERE id IN ('RR-SAV-P10-B','RR-SAV-P11-B','RR-SAV-P14-B','RR-SAV-P20-B','RR-SAV-P80-B','RR-SAV-P81-B');
     UPDATE redemption_rules SET items='{"BATEA":1}'::jsonb,
