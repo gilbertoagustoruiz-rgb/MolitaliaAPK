@@ -290,11 +290,13 @@ function canjePlanchaBlocks(planchas: number): number[] {
 const EXCEPTIONAL_BLOCK_SPAGHETTI: Record<number, number> = { 1: 2, 4: 8, 10: 20, 80: 140 };
 // Excepcional oficial: el bloque de 80 planchas también entrega 4 Bateas.
 const EXCEPTIONAL_BLOCK_BATEA: Record<number, number> = { 80: 4 };
-const SOLO_AVENA_BLOCK: Record<number, { avena: number; bateaAvena?: number; batea?: number }> = {
-  1: { avena: 6 },
-  4: { avena: 24 },
-  10: { avena: 60, bateaAvena: 50, batea: 1 },
-  80: { avena: 432, bateaAvena: 408, batea: 4 },
+// Solo Avena oficial (Avena Clásica + Bateas): bloque 1 = 1 Batea · 4 = 18 Avena + 1 Batea
+// · 10 = 42 Avena + 3 Bateas · 80 = 394 Avena + 6 Bateas. Las Bateas vienen en la dinámica (sin opción aparte).
+const SOLO_AVENA_BLOCK: Record<number, { AVENA: number; BATEA: number }> = {
+  1: { AVENA: 0, BATEA: 1 },
+  4: { AVENA: 18, BATEA: 1 },
+  10: { AVENA: 42, BATEA: 3 },
+  80: { AVENA: 394, BATEA: 6 },
 };
 
 // Canje EXCEPCIONAL (solo Spaghetti): en todos los mercados salvo zonas sin canje.
@@ -374,13 +376,13 @@ function exceptionalBateasCanjeItems(
 
 // Canje SOLO AVENA (debe coincidir con soloAvenaCanjeItems de la app).
 // Unidades: igual que Tradicional. Minis: ½ plancha = 2, 1 plancha o más = 4.
-// Planchas por bloques (como la Tradicional): bloque 1 = 6, 4 = 24, 10 = 60 (o 50 + 1 Batea), 80 = 432 (o 408 + 4 Bateas).
+// Planchas por bloques (como la Tradicional): ver SOLO_AVENA_BLOCK.
 function soloAvenaCanjeItems(
   mode: string,
   units: number,
   planchas: number,
   miniOnly: boolean,
-  batea: boolean,
+  _batea?: boolean,
 ): Record<string, number> {
   const none = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
   if (mode === "UNIDADES") return { ...none, AVENA: units >= 1 && units <= 5 ? legacyUnitAvenas(units) : 0 };
@@ -391,9 +393,8 @@ function soloAvenaCanjeItems(
   const result = { ...none };
   for (const block of canjePlanchaBlocks(planchas)) {
     const def = SOLO_AVENA_BLOCK[block];
-    const withBatea = batea && def.batea !== undefined;
-    result.AVENA += withBatea ? def.bateaAvena || 0 : def.avena;
-    result.BATEA += withBatea ? def.batea || 0 : 0;
+    result.AVENA += def.AVENA;
+    result.BATEA += def.BATEA;
   }
   return result;
 }

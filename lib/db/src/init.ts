@@ -527,23 +527,17 @@ export async function ensureDatabaseSchema() {
       ('RR-SAV-MINI-1','SAV_MINI_1','Solo Avena · Minis 1 plancha o más','PLANCHAS','PLANCHAS',1,null,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"AVENA":4}'::jsonb,5,'ACTIVO','{"program":"SOLO_AVENA","description":"Minis: 1 plancha o más = 4 Avenas"}'::jsonb),
       ('RR-SAV-UNI-1-2','SAV_UNI_1_2','Solo Avena · 1 a 2 unidades','UNIDADES','UNITS',1,2,false,true,1,ARRAY[]::text[],'NINGUNO','{"AVENA":1}'::jsonb,20,'ACTIVO','{"program":"SOLO_AVENA","description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas"}'::jsonb),
       ('RR-SAV-UNI-3-5','SAV_UNI_3_5','Solo Avena · 3 a 5 unidades','UNIDADES','UNITS',3,5,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":2}'::jsonb,21,'ACTIVO','{"program":"SOLO_AVENA","description":"3 a 5 unidades = 2 Avenas"}'::jsonb),
-      ('RR-SAV-P1','SAV_PLANCHAS_1','Solo Avena · 1 plancha','PLANCHAS','PLANCHAS',1,1,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":6}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"1 plancha = 6 Avenas (1 plancha)"}'::jsonb),
-      ('RR-SAV-P2','SAV_PLANCHAS_2','Solo Avena · 2 a 3 planchas','PLANCHAS','PLANCHAS',2,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":12}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"2 a 3 planchas = 12 Avenas (2 × 1 plancha)"}'::jsonb),
-      ('RR-SAV-P4','SAV_PLANCHAS_4','Solo Avena · 4 planchas','PLANCHAS','PLANCHAS',4,4,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":24}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"4 planchas = 24 Avenas (4 planchas)"}'::jsonb),
-      ('RR-SAV-P5','SAV_PLANCHAS_5','Solo Avena · 5 a 7 planchas','PLANCHAS','PLANCHAS',5,7,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":30}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"5 a 7 planchas = 30 Avenas (4 planchas + 1 plancha)"}'::jsonb),
-      ('RR-SAV-P8','SAV_PLANCHAS_8','Solo Avena · 8 a 9 planchas','PLANCHAS','PLANCHAS',8,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":48}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"8 a 9 planchas = 48 Avenas (2 × 4 planchas)"}'::jsonb),
-      ('RR-SAV-P10','SAV_PLANCHAS_10','Solo Avena · 10 planchas','PLANCHAS','PLANCHAS',10,10,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":60}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"10 planchas = 60 Avenas (10 planchas)"}'::jsonb),
-      ('RR-SAV-P10-B','SAV_PLANCHAS_10_B','Solo Avena · 10 planchas + Batea','PLANCHAS','PLANCHAS',10,10,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":50,"BATEA":1}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"10 planchas = 50 Avenas + 1 Batea (10 planchas)"}'::jsonb),
-      ('RR-SAV-P11','SAV_PLANCHAS_11','Solo Avena · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":66}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"11 a 13 planchas = 66 Avenas (10 planchas + 1 plancha)"}'::jsonb),
-      ('RR-SAV-P11-B','SAV_PLANCHAS_11_B','Solo Avena · 11 a 13 planchas + Batea','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":56,"BATEA":1}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"11 a 13 planchas = 56 Avenas + 1 Batea (10 planchas + 1 plancha)"}'::jsonb),
-      ('RR-SAV-P14','SAV_PLANCHAS_14','Solo Avena · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":84}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"14 a 19 planchas = 84 Avenas (10 planchas + 4 planchas)"}'::jsonb),
-      ('RR-SAV-P14-B','SAV_PLANCHAS_14_B','Solo Avena · 14 a 19 planchas + Batea','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":74,"BATEA":1}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"14 a 19 planchas = 74 Avenas + 1 Batea (10 planchas + 4 planchas)"}'::jsonb),
-      ('RR-SAV-P20','SAV_PLANCHAS_20','Solo Avena · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":120}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"20 a 79 planchas = 120 Avenas (2 × 10 planchas)"}'::jsonb),
-      ('RR-SAV-P20-B','SAV_PLANCHAS_20_B','Solo Avena · 20 a 79 planchas + Batea','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":100,"BATEA":2}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"20 a 79 planchas = 100 Avenas + 2 Bateas (2 × 10 planchas)"}'::jsonb),
-      ('RR-SAV-P80','SAV_PLANCHAS_80','Solo Avena · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":432}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas = 432 Avenas (80 planchas)"}'::jsonb),
-      ('RR-SAV-P81','SAV_PLANCHAS_81','Solo Avena · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":492}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"81 planchas o más = 492 Avenas (80 planchas + 10 planchas)"}'::jsonb),
-      ('RR-SAV-P80-B','SAV_PLANCHAS_80_B','Solo Avena · 80 planchas + Batea','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":408,"BATEA":4}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas = 408 Avenas + 4 Bateas (80 planchas)"}'::jsonb),
-      ('RR-SAV-P81-B','SAV_PLANCHAS_81_B','Solo Avena · 81 planchas o más + Batea','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'BATEA','{"AVENA":458,"BATEA":5}'::jsonb,31,'ACTIVO','{"program":"SOLO_AVENA","description":"81 planchas o más = 458 Avenas + 5 Bateas (80 planchas + 10 planchas)"}'::jsonb)
+      ('RR-SAV-P1','SAV_PLANCHAS_1','Solo Avena · 1 plancha','PLANCHAS','PLANCHAS',1,1,false,false,null,ARRAY[]::text[],'NINGUNO','{"BATEA":1}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"1 plancha = 1 Batea"}'::jsonb),
+      ('RR-SAV-P2','SAV_PLANCHAS_2','Solo Avena · 2 a 3 planchas','PLANCHAS','PLANCHAS',2,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"BATEA":2}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"2 a 3 planchas = 2 Bateas"}'::jsonb),
+      ('RR-SAV-P4','SAV_PLANCHAS_4','Solo Avena · 4 planchas','PLANCHAS','PLANCHAS',4,4,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":18,"BATEA":1}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"4 planchas = 18 Avena + 1 Batea"}'::jsonb),
+      ('RR-SAV-P5','SAV_PLANCHAS_5','Solo Avena · 5 a 7 planchas','PLANCHAS','PLANCHAS',5,7,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":18,"BATEA":2}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"5 a 7 planchas = 18 Avena + 2 Bateas"}'::jsonb),
+      ('RR-SAV-P8','SAV_PLANCHAS_8','Solo Avena · 8 a 9 planchas','PLANCHAS','PLANCHAS',8,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":36,"BATEA":2}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"8 a 9 planchas = 36 Avena + 2 Bateas"}'::jsonb),
+      ('RR-SAV-P10','SAV_PLANCHAS_10','Solo Avena · 10 planchas','PLANCHAS','PLANCHAS',10,10,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":42,"BATEA":3}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"10 planchas = 42 Avena + 3 Bateas"}'::jsonb),
+      ('RR-SAV-P11','SAV_PLANCHAS_11','Solo Avena · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":42,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"11 a 13 planchas = 42 Avena + 4 Bateas"}'::jsonb),
+      ('RR-SAV-P14','SAV_PLANCHAS_14','Solo Avena · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":60,"BATEA":4}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"14 a 19 planchas = 60 Avena + 4 Bateas"}'::jsonb),
+      ('RR-SAV-P20','SAV_PLANCHAS_20','Solo Avena · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":84,"BATEA":6}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"20 a 79 planchas = 84 Avena + 6 Bateas"}'::jsonb),
+      ('RR-SAV-P80','SAV_PLANCHAS_80','Solo Avena · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":394,"BATEA":6}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"80 planchas = 394 Avena + 6 Bateas"}'::jsonb),
+      ('RR-SAV-P81','SAV_PLANCHAS_81','Solo Avena · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":436,"BATEA":9}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA","description":"81 planchas o más = 436 Avena + 9 Bateas"}'::jsonb)
     ON CONFLICT (id) DO NOTHING;
 
     -- Escala EXCEPCIONAL (solo Spaghetti), para almacenes sin Avena (p. ej.
@@ -627,6 +621,42 @@ export async function ensureDatabaseSchema() {
     UPDATE redemption_rules SET name=replace(name,'80 planchas o más','80 planchas'),
       data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb(replace(COALESCE(data->>'description',''),'80 planchas o más','80 planchas')),true)
     WHERE id IN ('RR-EXC-P80','RR-SAV-P80','RR-SAV-P80-B') AND name LIKE '%80 planchas o más%';
+
+    -- Solo Avena oficial (Avena Clásica + Bateas): nuevos bloques; se quitan las variantes con Batea opcional.
+    DELETE FROM redemption_rules WHERE id IN ('RR-SAV-P10-B','RR-SAV-P11-B','RR-SAV-P14-B','RR-SAV-P20-B','RR-SAV-P80-B','RR-SAV-P81-B');
+    UPDATE redemption_rules SET items='{"BATEA":1}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('1 plancha = 1 Batea'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P1' AND items = '{"AVENA":6}'::jsonb;
+    UPDATE redemption_rules SET items='{"BATEA":2}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('2 a 3 planchas = 2 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P2' AND items = '{"AVENA":12}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":18,"BATEA":1}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('4 planchas = 18 Avena + 1 Batea'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P4' AND items = '{"AVENA":24}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":18,"BATEA":2}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('5 a 7 planchas = 18 Avena + 2 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P5' AND items = '{"AVENA":30}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":36,"BATEA":2}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('8 a 9 planchas = 36 Avena + 2 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P8' AND items = '{"AVENA":48}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":42,"BATEA":3}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('10 planchas = 42 Avena + 3 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P10' AND items = '{"AVENA":60}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":42,"BATEA":4}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('11 a 13 planchas = 42 Avena + 4 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P11' AND items = '{"AVENA":66}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":60,"BATEA":4}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('14 a 19 planchas = 60 Avena + 4 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P14' AND items = '{"AVENA":84}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":84,"BATEA":6}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('20 a 79 planchas = 84 Avena + 6 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P20' AND items = '{"AVENA":120}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":394,"BATEA":6}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('80 planchas = 394 Avena + 6 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P80' AND items = '{"AVENA":432}'::jsonb;
+    UPDATE redemption_rules SET items='{"AVENA":436,"BATEA":9}'::jsonb,
+      data=jsonb_set(COALESCE(data,'{}'::jsonb),'{description}',to_jsonb('81 planchas o más = 436 Avena + 9 Bateas'::text),true), updated_at=now()
+    WHERE id='RR-SAV-P81' AND items = '{"AVENA":492}'::jsonb;
 
     UPDATE redemption_rules
     SET min_exclusive=false, updated_at=now()
