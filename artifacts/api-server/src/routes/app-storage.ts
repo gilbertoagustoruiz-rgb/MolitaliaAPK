@@ -301,14 +301,15 @@ const SOLO_AVENA_BLOCK: Record<number, { avena: number; bateaAvena?: number; bat
 // El promotor elige Tradicional, Solo Avena o Excepcional.
 // Debe coincidir con exceptionalCanjeItems de la app.
 // Canje SOLO AVENA: disponible en todos los almacenes; el promotor lo elige en cada venta.
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA";
+type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA" | "EXCEPCIONAL_BATEAS";
 const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
   TRADICIONAL: "Tradicional",
   EXCEPCIONAL: "Excepcional",
   SOLO_AVENA: "Solo Avena",
+  EXCEPCIONAL_BATEAS: "Excepcional Bateas",
 };
 function normalizeCanjeProgram(raw: unknown): CanjeProgram {
-  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" ? raw : "TRADICIONAL";
+  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" || raw === "EXCEPCIONAL_BATEAS" ? raw : "TRADICIONAL";
 }
 function canjeProgramOf(record: StoredRecord): CanjeProgram {
   return normalizeCanjeProgram(value(record, "canjeProgram"));
@@ -339,6 +340,36 @@ function exceptionalCanjeItems(
   const spaghetti = blocks.reduce((sum, block) => sum + EXCEPTIONAL_BLOCK_SPAGHETTI[block], 0);
   const batea = blocks.reduce((sum, block) => sum + (EXCEPTIONAL_BLOCK_BATEA[block] || 0), 0);
   return { ...none, SPAGHETTI: spaghetti, BATEA: batea };
+}
+
+// Canje EXCEPCIONAL BATEAS (todos los mercados menos Juliaca y Puno), por bloques como la Tradicional.
+// Bloque 1 = 1 Batea · 4 = 9 Avena + 2 Spaghetti + 1 Batea · 10 = 24 Avena + 6 Spaghetti + 3 Bateas
+// · 80 = 144 Avena + 95 Spaghetti + 6 Bateas. Unidades y minis: igual que Tradicional.
+const EXCEPTIONAL_BATEAS_BLOCK: Record<number, { AVENA: number; SPAGHETTI: number; BATEA: number }> = {
+  1: { AVENA: 0, SPAGHETTI: 0, BATEA: 1 },
+  4: { AVENA: 9, SPAGHETTI: 2, BATEA: 1 },
+  10: { AVENA: 24, SPAGHETTI: 6, BATEA: 3 },
+  80: { AVENA: 144, SPAGHETTI: 95, BATEA: 6 },
+};
+function exceptionalBateasCanjeItems(
+  mode: string,
+  units: number,
+  planchas: number,
+  miniOnly: boolean,
+): Record<string, number> {
+  const result = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
+  if (mode === "UNIDADES") return { ...result, AVENA: units >= 1 && units <= 5 ? legacyUnitAvenas(units) : 0 };
+  if (miniOnly) {
+    if (planchas === 0.5 && units === 24) return { ...result, AVENA: 2 };
+    return { ...result, AVENA: planchas >= 1 ? MINI_PLANCHA_AVENAS : 0 };
+  }
+  for (const block of canjePlanchaBlocks(planchas)) {
+    const def = EXCEPTIONAL_BATEAS_BLOCK[block];
+    result.AVENA += def.AVENA;
+    result.SPAGHETTI += def.SPAGHETTI;
+    result.BATEA += def.BATEA;
+  }
+  return result;
 }
 
 // Canje SOLO AVENA (debe coincidir con soloAvenaCanjeItems de la app).
@@ -5818,6 +5849,24 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
         throw new Error(
           `Canje Solo Avena: para esta venta corresponde ${expected.AVENA} Avena${expected.BATEA ? ` + ${expected.BATEA} Batea` : ""}.`,
+        );
+    }
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && canjeProgramOf(input) === "EXCEPCIONAL_BATEAS" && bonus) {
+      // Excepcional Bateas sin escala (respaldo): se valida con los bloques fijos.
+      const expected = exceptionalBateasCanjeItems(
+        mode,
+        units,
+        planchas,
+        inputPlanchaLines.length > 0 && inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
+      );
+      scaleCanjeItems(expected, legacyCanjeMultiplier(input, mode, planchas));
+      if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
+        throw new Error(
+          `Canje Excepcional Bateas: para esta venta corresponde ${[
+            expected.AVENA ? `${expected.AVENA} Avena` : "",
+            expected.SPAGHETTI ? `${expected.SPAGHETTI} Spaghetti` : "",
+            expected.BATEA ? `${expected.BATEA} Batea${expected.BATEA > 1 ? "s" : ""}` : "",
+          ].filter(Boolean).join(" + ")}.`,
         );
     }
     if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && canjeProgramOf(input) === "TRADICIONAL") {

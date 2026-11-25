@@ -239,14 +239,15 @@ type ProductPrice = {
   status?: Status;
   updatedAt: string;
 };
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA";
+type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA" | "EXCEPCIONAL_BATEAS";
 const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
   TRADICIONAL: "Tradicional",
   EXCEPCIONAL: "Excepcional",
   SOLO_AVENA: "Solo Avena",
+  EXCEPCIONAL_BATEAS: "Excepcional Bateas",
 };
 function normalizeCanjeProgram(raw: unknown): CanjeProgram {
-  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" ? raw : "TRADICIONAL";
+  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" || raw === "EXCEPCIONAL_BATEAS" ? raw : "TRADICIONAL";
 }
 type Sale = {
   id: string;
@@ -465,6 +466,36 @@ const SOLO_AVENA_BLOCK: Record<number, { avena: number; bateaAvena?: number; bat
   10: { avena: 60, bateaAvena: 50, batea: 1 },
   80: { avena: 432, bateaAvena: 408, batea: 4 },
 };
+// Canje EXCEPCIONAL BATEAS (todos los mercados menos Juliaca y Puno), por bloques como la Tradicional.
+// Bloque 1 = 1 Batea · 4 = 9 Avena + 2 Spaghetti + 1 Batea · 10 = 24 Avena + 6 Spaghetti + 3 Bateas
+// · 80 = 144 Avena + 95 Spaghetti + 6 Bateas. Unidades y minis: igual que Tradicional.
+const EXCEPTIONAL_BATEAS_BLOCK: Record<number, { AVENA: number; SPAGHETTI: number; BATEA: number }> = {
+  1: { AVENA: 0, SPAGHETTI: 0, BATEA: 1 },
+  4: { AVENA: 9, SPAGHETTI: 2, BATEA: 1 },
+  10: { AVENA: 24, SPAGHETTI: 6, BATEA: 3 },
+  80: { AVENA: 144, SPAGHETTI: 95, BATEA: 6 },
+};
+function exceptionalBateasCanjeItems(
+  mode: "UNIDADES" | "PLANCHAS",
+  units: number,
+  planchas: number,
+  miniOnly: boolean,
+): Partial<RedemptionStock> {
+  if (mode === "UNIDADES")
+    return units >= 1 && units <= 5 ? { AVENA: units <= 2 ? units : 2 } : {};
+  if (miniOnly) {
+    if (planchas === 0.5 && units === 24) return { AVENA: 2 };
+    return planchas >= 1 ? { AVENA: MINI_PLANCHA_AVENAS } : {};
+  }
+  const result: Partial<RedemptionStock> = {};
+  for (const block of canjePlanchaBlocks(planchas)) {
+    const def = EXCEPTIONAL_BATEAS_BLOCK[block];
+    for (const [key, qty] of Object.entries(def) as Array<[keyof RedemptionStock, number]>)
+      if (qty) result[key] = (result[key] || 0) + qty;
+  }
+  return result;
+}
+
 // Canje SOLO AVENA (todos los almacenes). Debe coincidir con soloAvenaCanjeItems del servidor.
 // Unidades: igual que Tradicional. Minis: ½ plancha = 2, 1 plancha o más = 4.
 // Planchas por bloques (como la Tradicional): bloque 1 = 6, 4 = 24, 10 = 60 (o 50 + 1 Batea), 80 = 432 (o 408 + 4 Bateas).
@@ -5663,6 +5694,7 @@ function SaleEditModal({
   const editExceptional = sale.canjeProgram === "EXCEPCIONAL";
   // Venta con canje Solo Avena en planchas: su canje sigue la escala Solo Avena.
   const editSoloAvenaPlanchas = sale.canjeProgram === "SOLO_AVENA" && sale.mode === "PLANCHAS";
+  const editExceptionalBateasPlanchas = sale.canjeProgram === "EXCEPCIONAL_BATEAS" && sale.mode === "PLANCHAS";
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
   );
@@ -5676,6 +5708,8 @@ function SaleEditModal({
       ? scaleCanjeItems(exceptionalCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly), editSpecialMultiplier)
       : editSoloAvenaPlanchas
       ? scaleCanjeItems(soloAvenaCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, planchaAccessory === "BATEA"), editSpecialMultiplier)
+      : editExceptionalBateasPlanchas
+      ? scaleCanjeItems(exceptionalBateasCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly), editSpecialMultiplier)
       : sale.mode === "PLANCHAS"
       ? saleMiniHalfPlancha
         ? ({ AVENA: 2 } as Partial<RedemptionStock>)
@@ -5902,7 +5936,7 @@ function SaleEditModal({
           />
         ) : !editWithoutCanje && sale.mode === "PLANCHAS" ? (
           <>
-            {(sale.planchas || 0) >= 10 && (
+            {(sale.planchas || 0) >= 10 && !editExceptional && !editExceptionalBateasPlanchas && (
               <SelectField
                 label="Dinámica de canje"
                 value={planchaAccessory}
@@ -6509,6 +6543,8 @@ function RedemptionRulesModule({
                           ? "Excepcional (solo Spaghetti) · "
                           : redemptionRuleProgram(rule) === "SOLO_AVENA"
                             ? "Solo Avena · "
+                          : redemptionRuleProgram(rule) === "EXCEPCIONAL_BATEAS"
+                            ? "Excepcional Bateas · "
                             : "Tradicional · "}
                         {rule.accessory === "NINGUNO" ? "Sin accesorio" : rule.accessory}
                       </small>
@@ -6580,6 +6616,7 @@ function RedemptionRulesModule({
               items={[
                 { value: "TRADICIONAL", label: "Tradicional" },
                 { value: "SOLO_AVENA", label: "Solo Avena (todos los almacenes)" },
+                { value: "EXCEPCIONAL_BATEAS", label: "Excepcional Bateas (todos los almacenes)" },
                 { value: "EXCEPCIONAL", label: "Excepcional (solo Spaghetti)" },
               ]}
             />
@@ -13010,7 +13047,8 @@ function PromoterApp({
     saleWithoutCanje || (canjeProgram === "EXCEPCIONAL" && !exceptionalAllowed) ? "TRADICIONAL" : canjeProgram;
   const exceptionalCanje = effectiveCanjeProgram === "EXCEPCIONAL";
   const soloAvenaCanje = effectiveCanjeProgram === "SOLO_AVENA";
-  const availablePlanchaAccessories = planchas >= 10 && !miniOnlyPlancha && !exceptionalCanje
+  const exceptionalBateasCanje = effectiveCanjeProgram === "EXCEPCIONAL_BATEAS";
+  const availablePlanchaAccessories = planchas >= 10 && !miniOnlyPlancha && !exceptionalCanje && !exceptionalBateasCanje
     ? soloAvenaCanje
       ? (["NINGUNO" as const, "BATEA" as const])
       : (["MANDIL" as const, "BATEA" as const, "NINGUNO" as const])
@@ -13065,7 +13103,7 @@ function PromoterApp({
       : null;
 
   const bonusProducts =
-    saleWithoutCanje || redemptionRulesLoaded || exceptionalCanje || soloAvenaCanje
+    saleWithoutCanje || redemptionRulesLoaded || exceptionalCanje || soloAvenaCanje || exceptionalBateasCanje
       ? []
       : bonusProductsFor(
           mode,
@@ -13085,7 +13123,7 @@ function PromoterApp({
         : 0;
   const canjeCount = exceptionalCanje
     ? 1
-    : soloAvenaCanje && !masterRuleMatch
+    : (soloAvenaCanje || exceptionalBateasCanje) && !masterRuleMatch
     ? mode === "UNIDADES"
       ? automaticUnitCanjeCount
       : 1
@@ -13121,6 +13159,8 @@ function PromoterApp({
             ? scaleCanjeItems(exceptionalCanjeItems(mode, total, planchas, miniOnlyPlancha), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
           : soloAvenaCanje && !redemptionRulesLoaded
             ? scaleCanjeItems(soloAvenaCanjeItems(mode, total, planchas, miniOnlyPlancha, effectivePlanchaAccessory === "BATEA"), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
+          : exceptionalBateasCanje && !redemptionRulesLoaded
+            ? scaleCanjeItems(exceptionalBateasCanjeItems(mode, total, planchas, miniOnlyPlancha), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
           : redemptionRulesLoaded
             ? ({} as Partial<RedemptionStock>)
             : mode === "PLANCHAS"
@@ -14346,6 +14386,7 @@ function PromoterApp({
                 ["TRADICIONAL", "Tradicional", "Escala actual (Avena, Spaghetti…)"],
                 ["SOLO_AVENA", "Solo Avena", "Avena Clásica (desde 10 planchas, opción con Batea)"],
                 ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional", "Spaghetti (+ Batea desde 80 planchas)"]] as const) : []),
+                ...(exceptionalAllowed ? ([["EXCEPCIONAL_BATEAS", "Excepcional Bateas", "Batea + Avena y Spaghetti (desde 4 planchas)"]] as const) : []),
               ] as const).map(([value, label, detail]) => (
                 <button
                   key={value}
