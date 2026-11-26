@@ -162,6 +162,29 @@ function unitProductAllowsCanje(sku?: string, label?: string) {
 const UNIT_NO_CANJE_TITLE = "Mini por unidad: venta sin canje";
 const UNIT_NO_CANJE_DETAIL =
   "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.";
+// Tacna (departamento, provincia o distrito, o "TACNA" en el nombre del mercado):
+// canje solo desde 4 planchas. Unidades y 1 a 3 planchas (minis incluidos) van sin canje.
+// Aplica a los cuatro tipos de canje. Debe coincidir con tacnaCanjeExclusion del servidor.
+const TACNA_MIN_CANJE_PLANCHAS = 4;
+function isTacnaLocation(market?: Pick<Market, "name" | "department" | "province" | "district"> | null) {
+  if (!market) return false;
+  return (
+    normalizeLocationValue(market.department) === "TACNA" ||
+    normalizeLocationValue(market.province) === "TACNA" ||
+    normalizeLocationValue(market.district) === "TACNA" ||
+    normalizeLocationValue(market.name).includes("TACNA")
+  );
+}
+function tacnaWithoutCanje(
+  market: Pick<Market, "name" | "department" | "province" | "district"> | null | undefined,
+  mode: string | undefined,
+  planchas: number | undefined,
+) {
+  return isTacnaLocation(market) && (mode === "UNIDADES" || (Number(planchas) || 0) < TACNA_MIN_CANJE_PLANCHAS);
+}
+const TACNA_NO_CANJE_TITLE = "Tacna: canje desde 4 planchas";
+const TACNA_NO_CANJE_DETAIL =
+  "En Tacna, las ventas por unidad y de 1 a 3 planchas (minis incluidos) no llevan canje.";
 function isNoCanjeMarket(market?: Pick<Market, "name" | "province" | "district"> | null) {
   return Boolean(market) && isNoCanjeLocation(market!);
 }
@@ -239,15 +262,29 @@ type ProductPrice = {
   status?: Status;
   updatedAt: string;
 };
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA" | "EXCEPCIONAL_BATEAS";
+type CanjeProgram =
+  | "TRADICIONAL"
+  | "EXCEPCIONAL"
+  | "SOLO_AVENA"
+  | "EXCEPCIONAL_BATEAS"
+  | "SOLO_AVENA_ANTIGUA"
+  | "EXCEPCIONAL_ANTIGUA";
 const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
   TRADICIONAL: "Tradicional",
   EXCEPCIONAL: "Excepcional",
   SOLO_AVENA: "Solo Avena",
-  EXCEPCIONAL_BATEAS: "Excepcional Bateas",
+  EXCEPCIONAL_BATEAS: "Tradicional nueva",
+  SOLO_AVENA_ANTIGUA: "Solo Avena antigua",
+  EXCEPCIONAL_ANTIGUA: "Excepcional antigua",
 };
 function normalizeCanjeProgram(raw: unknown): CanjeProgram {
-  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" || raw === "EXCEPCIONAL_BATEAS" ? raw : "TRADICIONAL";
+  return raw === "EXCEPCIONAL" ||
+    raw === "SOLO_AVENA" ||
+    raw === "EXCEPCIONAL_BATEAS" ||
+    raw === "SOLO_AVENA_ANTIGUA" ||
+    raw === "EXCEPCIONAL_ANTIGUA"
+    ? raw
+    : "TRADICIONAL";
 }
 type Sale = {
   id: string;
@@ -469,7 +506,30 @@ const SOLO_AVENA_BLOCK: Record<number, { AVENA: number; BATEA: number }> = {
   10: { AVENA: 42, BATEA: 3 },
   80: { AVENA: 394, BATEA: 6 },
 };
-// Canje EXCEPCIONAL BATEAS (todos los mercados menos Juliaca y Puno), por bloques como la Tradicional.
+// Tradicional NUEVA (desde el 25/11/2026; id interno EXCEPCIONAL_BATEAS). Al elegir Tradicional, el promotor
+// escoge Nueva o Antigua; las ventas con fecha anterior al 25/11 solo pueden usar la Antigua.
+const TRADICIONAL_NUEVA_DESDE = new Date("2026-11-25T00:00:00-05:00");
+// Cada tipo de canje tiene versión Nueva (desde 25/11) y Antigua.
+type CanjeGroup = "TRADICIONAL" | "SOLO_AVENA" | "EXCEPCIONAL";
+const CANJE_GROUP_OF: Record<CanjeProgram, CanjeGroup> = {
+  TRADICIONAL: "TRADICIONAL",
+  EXCEPCIONAL_BATEAS: "TRADICIONAL",
+  SOLO_AVENA: "SOLO_AVENA",
+  SOLO_AVENA_ANTIGUA: "SOLO_AVENA",
+  EXCEPCIONAL: "EXCEPCIONAL",
+  EXCEPCIONAL_ANTIGUA: "EXCEPCIONAL",
+};
+const CANJE_GROUP_VERSIONS: Record<CanjeGroup, { nueva: CanjeProgram; antigua: CanjeProgram; nuevaDetail: string; antiguaDetail: string }> = {
+  TRADICIONAL: { nueva: "EXCEPCIONAL_BATEAS", antigua: "TRADICIONAL", nuevaDetail: "Batea + Avena y Spaghetti", antiguaDetail: "Avena + Spaghetti (Mandil / Batea desde 10)" },
+  SOLO_AVENA: { nueva: "SOLO_AVENA", antigua: "SOLO_AVENA_ANTIGUA", nuevaDetail: "Avena Clásica + Bateas", antiguaDetail: "Solo Avena Clásica" },
+  EXCEPCIONAL: { nueva: "EXCEPCIONAL", antigua: "EXCEPCIONAL_ANTIGUA", nuevaDetail: "Spaghetti + Bateas", antiguaDetail: "Solo Spaghetti" },
+};
+const CANJE_ANTIGUA_OF = {
+  EXCEPCIONAL_BATEAS: "TRADICIONAL",
+  SOLO_AVENA: "SOLO_AVENA_ANTIGUA",
+  EXCEPCIONAL: "EXCEPCIONAL_ANTIGUA",
+} as const satisfies Partial<Record<CanjeProgram, CanjeProgram>>;
+// Escala por bloques como la Tradicional antigua.
 // Bloque 1 = 1 Batea · 4 = 9 Avena + 2 Spaghetti + 1 Batea · 10 = 24 Avena + 6 Spaghetti + 3 Bateas
 // · 80 = 144 Avena + 95 Spaghetti + 6 Bateas. Unidades y minis: igual que Tradicional.
 const EXCEPTIONAL_BATEAS_BLOCK: Record<number, { AVENA: number; SPAGHETTI: number; BATEA: number }> = {
@@ -508,6 +568,7 @@ function soloAvenaCanjeItems(
   planchas: number,
   miniOnly: boolean,
   _batea?: boolean,
+  antigua = false,
 ): Partial<RedemptionStock> {
   if (mode === "UNIDADES")
     return units >= 1 && units <= 5 ? { AVENA: units <= 2 ? units : 2 } : {};
@@ -517,6 +578,10 @@ function soloAvenaCanjeItems(
   }
   const result = { AVENA: 0, BATEA: 0 };
   for (const block of canjePlanchaBlocks(planchas)) {
+    if (antigua) {
+      result.AVENA += SOLO_AVENA_ANTIGUA_BLOCK[block];
+      continue;
+    }
     const def = SOLO_AVENA_BLOCK[block];
     result.AVENA += def.AVENA;
     result.BATEA += def.BATEA;
@@ -529,11 +594,16 @@ function scaleCanjeItems(items: Partial<RedemptionStock>, factor: number): Parti
     Object.entries(items).map(([key, qty]) => [key, (Number(qty) || 0) * factor]),
   ) as Partial<RedemptionStock>;
 }
+// Versiones ANTIGUAS (antes del 25/11) de Solo Avena y Excepcional, por bloques:
+// Solo Avena antigua: 1 = 6 Avena · 4 = 24 · 10 = 60 · 80 = 432. Excepcional antigua: 1 = 2 Spaghetti · 4 = 8 · 10 = 20 · 80 = 160.
+const SOLO_AVENA_ANTIGUA_BLOCK: Record<number, number> = { 1: 6, 4: 24, 10: 60, 80: 432 };
+const EXCEPTIONAL_ANTIGUA_BLOCK_SPAGHETTI: Record<number, number> = { 1: 2, 4: 8, 10: 20, 80: 160 };
 function exceptionalCanjeItems(
   mode: "UNIDADES" | "PLANCHAS",
   units: number,
   planchas: number,
   miniOnly: boolean,
+  antigua = false,
 ): Partial<RedemptionStock> {
   if (mode === "UNIDADES") return units >= 1 && units <= 5 ? { SPAGHETTI: units } : {};
   if (miniOnly) {
@@ -541,8 +611,11 @@ function exceptionalCanjeItems(
     return planchas >= 1 ? { SPAGHETTI: 2 } : {};
   }
   const blocks = canjePlanchaBlocks(planchas);
-  const spaghetti = blocks.reduce((sum, block) => sum + EXCEPTIONAL_BLOCK_SPAGHETTI[block], 0);
-  const batea = blocks.reduce((sum, block) => sum + (EXCEPTIONAL_BLOCK_BATEA[block] || 0), 0);
+  const spaghetti = blocks.reduce(
+    (sum, block) => sum + (antigua ? EXCEPTIONAL_ANTIGUA_BLOCK_SPAGHETTI : EXCEPTIONAL_BLOCK_SPAGHETTI)[block],
+    0,
+  );
+  const batea = antigua ? 0 : blocks.reduce((sum, block) => sum + (EXCEPTIONAL_BLOCK_BATEA[block] || 0), 0);
   const result: Partial<RedemptionStock> = {};
   if (spaghetti) result.SPAGHETTI = spaghetti;
   if (batea) result.BATEA = batea;
@@ -5602,7 +5675,10 @@ function SaleEditModal({
         UNIT_SALE_PRODUCTS.find((item) => item.sku === editSaleSku)?.label ||
         "",
     );
-  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje;
+  // Tacna: solo desde 4 planchas. Si la venta ya tenía canje registrado, se conserva.
+  const tacnaEditWithoutCanje =
+    !punoWithoutCanje && originalCount === 0 && tacnaWithoutCanje(saleMarket, sale.mode, sale.planchas);
+  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje || tacnaEditWithoutCanje;
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -5696,9 +5772,11 @@ function SaleEditModal({
   const saleMiniPlanchas =
     sale.mode === "PLANCHAS" && saleMiniOnly && (Number(sale.planchas) || 0) >= 1;
   // Venta con canje Excepcional: su canje sigue la escala de solo Spaghetti.
-  const editExceptional = sale.canjeProgram === "EXCEPCIONAL";
+  const editExceptional = sale.canjeProgram === "EXCEPCIONAL" || sale.canjeProgram === "EXCEPCIONAL_ANTIGUA";
+  const editAntigua = sale.canjeProgram === "EXCEPCIONAL_ANTIGUA" || sale.canjeProgram === "SOLO_AVENA_ANTIGUA";
   // Venta con canje Solo Avena en planchas: su canje sigue la escala Solo Avena.
-  const editSoloAvenaPlanchas = sale.canjeProgram === "SOLO_AVENA" && sale.mode === "PLANCHAS";
+  const editSoloAvenaPlanchas =
+    (sale.canjeProgram === "SOLO_AVENA" || sale.canjeProgram === "SOLO_AVENA_ANTIGUA") && sale.mode === "PLANCHAS";
   const editExceptionalBateasPlanchas = sale.canjeProgram === "EXCEPCIONAL_BATEAS" && sale.mode === "PLANCHAS";
   const selectedCanje = availableCanjes.find(
     (product) => product.id === canjeProductId,
@@ -5710,9 +5788,9 @@ function SaleEditModal({
     punoWithoutCanje
       ? zeroRedemptionStock()
       : editExceptional
-      ? scaleCanjeItems(exceptionalCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly), editSpecialMultiplier)
+      ? scaleCanjeItems(exceptionalCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, editAntigua), editSpecialMultiplier)
       : editSoloAvenaPlanchas
-      ? scaleCanjeItems(soloAvenaCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, planchaAccessory === "BATEA"), editSpecialMultiplier)
+      ? scaleCanjeItems(soloAvenaCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly, planchaAccessory === "BATEA", editAntigua), editSpecialMultiplier)
       : editExceptionalBateasPlanchas
       ? scaleCanjeItems(exceptionalBateasCanjeItems(sale.mode, Number(sale.units) || 0, Number(sale.planchas) || 0, saleMiniOnly), editSpecialMultiplier)
       : sale.mode === "PLANCHAS"
@@ -5877,6 +5955,12 @@ function SaleEditModal({
         <div className="notice">
           <strong>{UNIT_NO_CANJE_TITLE}</strong>
           <p>{UNIT_NO_CANJE_DETAIL}</p>
+        </div>
+      )}
+      {tacnaEditWithoutCanje && !weightWithoutCanje && (
+        <div className="notice">
+          <strong>{TACNA_NO_CANJE_TITLE}</strong>
+          <p>{TACNA_NO_CANJE_DETAIL}</p>
         </div>
       )}
       <div className="form-grid">
@@ -6549,7 +6633,11 @@ function RedemptionRulesModule({
                           : redemptionRuleProgram(rule) === "SOLO_AVENA"
                             ? "Solo Avena · "
                           : redemptionRuleProgram(rule) === "EXCEPCIONAL_BATEAS"
-                            ? "Excepcional Bateas · "
+                            ? "Tradicional nueva (desde 25/11) · "
+                          : redemptionRuleProgram(rule) === "SOLO_AVENA_ANTIGUA"
+                            ? "Solo Avena antigua · "
+                          : redemptionRuleProgram(rule) === "EXCEPCIONAL_ANTIGUA"
+                            ? "Excepcional antigua (solo Spaghetti) · "
                             : "Tradicional · "}
                         {rule.accessory === "NINGUNO" ? "Sin accesorio" : rule.accessory}
                       </small>
@@ -6619,10 +6707,12 @@ function RedemptionRulesModule({
               value={redemptionRuleProgram(editing)}
               onChange={(value) => setEditing({ ...editing, program: value as CanjeProgram })}
               items={[
-                { value: "TRADICIONAL", label: "Tradicional" },
+                { value: "TRADICIONAL", label: "Tradicional antigua" },
                 { value: "SOLO_AVENA", label: "Solo Avena · Avena Clásica + Bateas (todos los almacenes)" },
-                { value: "EXCEPCIONAL_BATEAS", label: "Excepcional Bateas (todos los almacenes)" },
+                { value: "EXCEPCIONAL_BATEAS", label: "Tradicional nueva (desde 25/11)" },
                 { value: "EXCEPCIONAL", label: "Excepcional · Spaghetti + Bateas" },
+                { value: "SOLO_AVENA_ANTIGUA", label: "Solo Avena antigua" },
+                { value: "EXCEPCIONAL_ANTIGUA", label: "Excepcional antigua (solo Spaghetti)" },
               ]}
             />
             <SelectField
@@ -12802,7 +12892,7 @@ function PromoterApp({
   const [redemptionCount, setRedemptionCount] = useState(1);
   const [planchaAccessory, setPlanchaAccessory] = useState<"MANDIL" | "BATEA" | "NINGUNO">("NINGUNO");
   const [planchaMultiplier, setPlanchaMultiplier] = useState(1);
-  const [canjeProgram, setCanjeProgram] = useState<CanjeProgram>("TRADICIONAL");
+  const [canjeProgram, setCanjeProgram] = useState<CanjeProgram>("EXCEPCIONAL_BATEAS");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [redemptionRules, setRedemptionRules] = useState<RedemptionRule[]>([]);
   const [redemptionRulesLoaded, setRedemptionRulesLoaded] = useState(false);
@@ -13042,16 +13132,28 @@ function PromoterApp({
   // Minis por planchas: canje solo en 1/2 plancha y 1 plancha; desde 2 planchas, sin canje.
   // Planchas solo de minis desde 1 plancha: 4 Avenas fijas.
   const miniPlanchaCanje = mode === "PLANCHAS" && miniOnlyPlancha && planchas >= 1;
-  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje;
+  const tacnaSaleWithoutCanje = !punoWithoutCanje && tacnaWithoutCanje(selectedMarket, mode, planchas);
+  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje || tacnaSaleWithoutCanje;
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
   // Canje Excepcional y Solo Avena: en todos los mercados, salvo zonas sin canje (Juliaca y Puno).
   const exceptionalAllowed = !saleWithoutCanje;
-  const effectiveCanjeProgram: CanjeProgram =
-    saleWithoutCanje || (canjeProgram === "EXCEPCIONAL" && !exceptionalAllowed) ? "TRADICIONAL" : canjeProgram;
-  const exceptionalCanje = effectiveCanjeProgram === "EXCEPCIONAL";
-  const soloAvenaCanje = effectiveCanjeProgram === "SOLO_AVENA";
+  // Tradicional nueva: solo para ventas con fecha desde el 25/11.
+  const nuevaTradicionalAllowed = saleDate.getTime() >= TRADICIONAL_NUEVA_DESDE.getTime();
+  // Antes del 25/11 cada tipo usa su versión antigua.
+  const effectiveCanjeProgram: CanjeProgram = saleWithoutCanje
+    ? "TRADICIONAL"
+    : (canjeProgram === "EXCEPCIONAL" || canjeProgram === "EXCEPCIONAL_ANTIGUA") && !exceptionalAllowed
+      ? "TRADICIONAL"
+      : !nuevaTradicionalAllowed && canjeProgram in CANJE_ANTIGUA_OF
+        ? CANJE_ANTIGUA_OF[canjeProgram as keyof typeof CANJE_ANTIGUA_OF]
+        : canjeProgram;
+  const canjeGroup = CANJE_GROUP_OF[effectiveCanjeProgram];
+  const traditionalGroupActive = canjeGroup === "TRADICIONAL";
+  const exceptionalCanje = canjeGroup === "EXCEPCIONAL";
+  const soloAvenaCanje = canjeGroup === "SOLO_AVENA";
+  const antiguaCanje = effectiveCanjeProgram === "EXCEPCIONAL_ANTIGUA" || effectiveCanjeProgram === "SOLO_AVENA_ANTIGUA";
   const exceptionalBateasCanje = effectiveCanjeProgram === "EXCEPCIONAL_BATEAS";
   const availablePlanchaAccessories = planchas >= 10 && !miniOnlyPlancha && !exceptionalCanje && !exceptionalBateasCanje
     ? soloAvenaCanje
@@ -13161,9 +13263,9 @@ function PromoterApp({
         : masterRuleMatch
           ? masterRuleMatch.items
           : exceptionalCanje && !redemptionRulesLoaded
-            ? scaleCanjeItems(exceptionalCanjeItems(mode, total, planchas, miniOnlyPlancha), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
+            ? scaleCanjeItems(exceptionalCanjeItems(mode, total, planchas, miniOnlyPlancha, antiguaCanje), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
           : soloAvenaCanje && !redemptionRulesLoaded
-            ? scaleCanjeItems(soloAvenaCanjeItems(mode, total, planchas, miniOnlyPlancha, effectivePlanchaAccessory === "BATEA"), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
+            ? scaleCanjeItems(soloAvenaCanjeItems(mode, total, planchas, miniOnlyPlancha, effectivePlanchaAccessory === "BATEA", antiguaCanje), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
           : exceptionalBateasCanje && !redemptionRulesLoaded
             ? scaleCanjeItems(exceptionalBateasCanjeItems(mode, total, planchas, miniOnlyPlancha), mode === "PLANCHAS" && planchas >= 80 && !miniOnlyPlancha ? planchaMultiplier : 1)
           : redemptionRulesLoaded
@@ -14383,30 +14485,70 @@ function PromoterApp({
             <p>{UNIT_NO_CANJE_DETAIL}</p>
           </div>
         )}
+        {tacnaSaleWithoutCanje && !unitProductWithoutCanje && (
+          <div className="notice" data-testid="notice-tacna-no-canje">
+            <strong>{TACNA_NO_CANJE_TITLE}</strong>
+            <p>{TACNA_NO_CANJE_DETAIL}</p>
+          </div>
+        )}
         {!saleWithoutCanje && (
           <div className="canje-program" data-testid="canje-program">
             <span className="canje-program-label">Tipo de canje</span>
             <div className="canje-program-options" role="radiogroup" aria-label="Tipo de canje">
               {([
-                ["TRADICIONAL", "Tradicional", "Escala actual (Avena, Spaghetti…)"],
-                ["SOLO_AVENA", "Solo Avena", "Avena Clásica + Bateas"],
-                ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional", "Spaghetti + Bateas"]] as const) : []),
-                ...(exceptionalAllowed ? ([["EXCEPCIONAL_BATEAS", "Excepcional Bateas", "Batea + Avena y Spaghetti (desde 4 planchas)"]] as const) : []),
-              ] as const).map(([value, label, detail]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={effectiveCanjeProgram === value}
-                  className={`canje-program-option${effectiveCanjeProgram === value ? " is-active" : ""}`}
-                  onClick={() => setCanjeProgram(value)}
-                  data-testid={`button-canje-${value.toLowerCase().replace("_", "-")}`}
-                >
-                  <strong>{label}</strong>
-                  <small>{detail}</small>
-                </button>
-              ))}
+                ["TRADICIONAL", "Tradicional"],
+                ["SOLO_AVENA", "Solo Avena"],
+                ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional"]] as const) : []),
+              ] as const).map(([group, label]) => {
+                const active = canjeGroup === group;
+                const versions = CANJE_GROUP_VERSIONS[group];
+                return (
+                  <button
+                    key={group}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    className={`canje-program-option${active ? " is-active" : ""}`}
+                    onClick={() =>
+                      setCanjeProgram(active ? effectiveCanjeProgram : nuevaTradicionalAllowed ? versions.nueva : versions.antigua)
+                    }
+                    data-testid={`button-canje-${group.toLowerCase().replace("_", "-")}`}
+                  >
+                    <strong>{label}</strong>
+                    <small>{nuevaTradicionalAllowed ? "Nueva (desde 25/11) o Antigua" : "Versión antigua"}</small>
+                  </button>
+                );
+              })}
             </div>
+            {nuevaTradicionalAllowed && (
+              <div className="canje-program-sub" role="radiogroup" aria-label="Escala" data-testid="canje-escala">
+                <span className="canje-program-sub-label">
+                  Escala {canjeGroup === "TRADICIONAL" ? "Tradicional" : canjeGroup === "SOLO_AVENA" ? "Solo Avena" : "Excepcional"}
+                </span>
+                {([
+                  ["nueva", "Nueva (desde 25/11)"],
+                  ["antigua", "Antigua"],
+                ] as const).map(([version, label]) => {
+                  const versions = CANJE_GROUP_VERSIONS[canjeGroup];
+                  const value = versions[version];
+                  const groupKey = canjeGroup.toLowerCase().replace("_", "-");
+                  return (
+                    <button
+                      key={version}
+                      type="button"
+                      role="radio"
+                      aria-checked={effectiveCanjeProgram === value}
+                      className={`canje-program-option${effectiveCanjeProgram === value ? " is-active" : ""}`}
+                      onClick={() => setCanjeProgram(value)}
+                      data-testid={`button-canje-${groupKey}-${version}`}
+                    >
+                      <strong>{label}</strong>
+                      <small>{version === "nueva" ? versions.nuevaDetail : versions.antiguaDetail}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
         {punoWithoutCanje && (
