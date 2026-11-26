@@ -267,7 +267,7 @@ const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
   TRADICIONAL: "Tradicional",
   EXCEPCIONAL: "Excepcional",
   SOLO_AVENA: "Solo Avena",
-  EXCEPCIONAL_BATEAS: "Excepcional Bateas",
+  EXCEPCIONAL_BATEAS: "Tradicional nueva",
 };
 function normalizeCanjeProgram(raw: unknown): CanjeProgram {
   return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" || raw === "EXCEPCIONAL_BATEAS" ? raw : "TRADICIONAL";
@@ -492,7 +492,10 @@ const SOLO_AVENA_BLOCK: Record<number, { AVENA: number; BATEA: number }> = {
   10: { AVENA: 42, BATEA: 3 },
   80: { AVENA: 394, BATEA: 6 },
 };
-// Canje EXCEPCIONAL BATEAS (todos los mercados menos Juliaca y Puno), por bloques como la Tradicional.
+// Tradicional NUEVA (desde el 25/11/2026; id interno EXCEPCIONAL_BATEAS). Al elegir Tradicional, el promotor
+// escoge Nueva o Antigua; las ventas con fecha anterior al 25/11 solo pueden usar la Antigua.
+const TRADICIONAL_NUEVA_DESDE = new Date("2026-11-25T00:00:00-05:00");
+// Escala por bloques como la Tradicional antigua.
 // Bloque 1 = 1 Batea · 4 = 9 Avena + 2 Spaghetti + 1 Batea · 10 = 24 Avena + 6 Spaghetti + 3 Bateas
 // · 80 = 144 Avena + 95 Spaghetti + 6 Bateas. Unidades y minis: igual que Tradicional.
 const EXCEPTIONAL_BATEAS_BLOCK: Record<number, { AVENA: number; SPAGHETTI: number; BATEA: number }> = {
@@ -6581,7 +6584,7 @@ function RedemptionRulesModule({
                           : redemptionRuleProgram(rule) === "SOLO_AVENA"
                             ? "Solo Avena · "
                           : redemptionRuleProgram(rule) === "EXCEPCIONAL_BATEAS"
-                            ? "Excepcional Bateas · "
+                            ? "Tradicional nueva (desde 25/11) · "
                             : "Tradicional · "}
                         {rule.accessory === "NINGUNO" ? "Sin accesorio" : rule.accessory}
                       </small>
@@ -6651,9 +6654,9 @@ function RedemptionRulesModule({
               value={redemptionRuleProgram(editing)}
               onChange={(value) => setEditing({ ...editing, program: value as CanjeProgram })}
               items={[
-                { value: "TRADICIONAL", label: "Tradicional" },
+                { value: "TRADICIONAL", label: "Tradicional antigua" },
                 { value: "SOLO_AVENA", label: "Solo Avena · Avena Clásica + Bateas (todos los almacenes)" },
-                { value: "EXCEPCIONAL_BATEAS", label: "Excepcional Bateas (todos los almacenes)" },
+                { value: "EXCEPCIONAL_BATEAS", label: "Tradicional nueva (desde 25/11)" },
                 { value: "EXCEPCIONAL", label: "Excepcional · Spaghetti + Bateas" },
               ]}
             />
@@ -12834,7 +12837,7 @@ function PromoterApp({
   const [redemptionCount, setRedemptionCount] = useState(1);
   const [planchaAccessory, setPlanchaAccessory] = useState<"MANDIL" | "BATEA" | "NINGUNO">("NINGUNO");
   const [planchaMultiplier, setPlanchaMultiplier] = useState(1);
-  const [canjeProgram, setCanjeProgram] = useState<CanjeProgram>("TRADICIONAL");
+  const [canjeProgram, setCanjeProgram] = useState<CanjeProgram>("EXCEPCIONAL_BATEAS");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [redemptionRules, setRedemptionRules] = useState<RedemptionRule[]>([]);
   const [redemptionRulesLoaded, setRedemptionRulesLoaded] = useState(false);
@@ -13081,8 +13084,15 @@ function PromoterApp({
     : new Date();
   // Canje Excepcional y Solo Avena: en todos los mercados, salvo zonas sin canje (Juliaca y Puno).
   const exceptionalAllowed = !saleWithoutCanje;
+  // Tradicional nueva: solo para ventas con fecha desde el 25/11.
+  const nuevaTradicionalAllowed = saleDate.getTime() >= TRADICIONAL_NUEVA_DESDE.getTime();
   const effectiveCanjeProgram: CanjeProgram =
-    saleWithoutCanje || (canjeProgram === "EXCEPCIONAL" && !exceptionalAllowed) ? "TRADICIONAL" : canjeProgram;
+    saleWithoutCanje ||
+    (canjeProgram === "EXCEPCIONAL" && !exceptionalAllowed) ||
+    (canjeProgram === "EXCEPCIONAL_BATEAS" && !nuevaTradicionalAllowed)
+      ? "TRADICIONAL"
+      : canjeProgram;
+  const traditionalGroupActive = effectiveCanjeProgram === "TRADICIONAL" || effectiveCanjeProgram === "EXCEPCIONAL_BATEAS";
   const exceptionalCanje = effectiveCanjeProgram === "EXCEPCIONAL";
   const soloAvenaCanje = effectiveCanjeProgram === "SOLO_AVENA";
   const exceptionalBateasCanje = effectiveCanjeProgram === "EXCEPCIONAL_BATEAS";
@@ -14427,25 +14437,59 @@ function PromoterApp({
             <span className="canje-program-label">Tipo de canje</span>
             <div className="canje-program-options" role="radiogroup" aria-label="Tipo de canje">
               {([
-                ["TRADICIONAL", "Tradicional", "Escala actual (Avena, Spaghetti…)"],
+                ["TRADICIONAL", "Tradicional", nuevaTradicionalAllowed ? "Nueva (desde 25/11) o Antigua" : "Escala antigua"],
                 ["SOLO_AVENA", "Solo Avena", "Avena Clásica + Bateas"],
                 ...(exceptionalAllowed ? ([["EXCEPCIONAL", "Excepcional", "Spaghetti + Bateas"]] as const) : []),
-                ...(exceptionalAllowed ? ([["EXCEPCIONAL_BATEAS", "Excepcional Bateas", "Batea + Avena y Spaghetti (desde 4 planchas)"]] as const) : []),
-              ] as const).map(([value, label, detail]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={effectiveCanjeProgram === value}
-                  className={`canje-program-option${effectiveCanjeProgram === value ? " is-active" : ""}`}
-                  onClick={() => setCanjeProgram(value)}
-                  data-testid={`button-canje-${value.toLowerCase().replace("_", "-")}`}
-                >
-                  <strong>{label}</strong>
-                  <small>{detail}</small>
-                </button>
-              ))}
+              ] as const).map(([value, label, detail]) => {
+                const active = value === "TRADICIONAL" ? traditionalGroupActive : effectiveCanjeProgram === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    className={`canje-program-option${active ? " is-active" : ""}`}
+                    onClick={() =>
+                      setCanjeProgram(
+                        value === "TRADICIONAL"
+                          ? traditionalGroupActive
+                            ? effectiveCanjeProgram
+                            : nuevaTradicionalAllowed
+                              ? "EXCEPCIONAL_BATEAS"
+                              : "TRADICIONAL"
+                          : value,
+                      )
+                    }
+                    data-testid={`button-canje-${value.toLowerCase().replace("_", "-")}`}
+                  >
+                    <strong>{label}</strong>
+                    <small>{detail}</small>
+                  </button>
+                );
+              })}
             </div>
+            {traditionalGroupActive && nuevaTradicionalAllowed && (
+              <div className="canje-program-sub" role="radiogroup" aria-label="Escala Tradicional" data-testid="canje-tradicional-escala">
+                <span className="canje-program-sub-label">Escala Tradicional</span>
+                {([
+                  ["EXCEPCIONAL_BATEAS", "Nueva (desde 25/11)", "Batea + Avena y Spaghetti", "button-canje-tradicional-nueva"],
+                  ["TRADICIONAL", "Antigua", "Avena + Spaghetti (Mandil / Batea desde 10)", "button-canje-tradicional-antigua"],
+                ] as const).map(([value, label, detail, testId]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={effectiveCanjeProgram === value}
+                    className={`canje-program-option${effectiveCanjeProgram === value ? " is-active" : ""}`}
+                    onClick={() => setCanjeProgram(value)}
+                    data-testid={testId}
+                  >
+                    <strong>{label}</strong>
+                    <small>{detail}</small>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {punoWithoutCanje && (

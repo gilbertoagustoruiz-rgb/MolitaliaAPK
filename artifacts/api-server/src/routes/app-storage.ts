@@ -340,7 +340,7 @@ const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
   TRADICIONAL: "Tradicional",
   EXCEPCIONAL: "Excepcional",
   SOLO_AVENA: "Solo Avena",
-  EXCEPCIONAL_BATEAS: "Excepcional Bateas",
+  EXCEPCIONAL_BATEAS: "Tradicional nueva",
 };
 function normalizeCanjeProgram(raw: unknown): CanjeProgram {
   return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" || raw === "EXCEPCIONAL_BATEAS" ? raw : "TRADICIONAL";
@@ -376,7 +376,8 @@ function exceptionalCanjeItems(
   return { ...none, SPAGHETTI: spaghetti, BATEA: batea };
 }
 
-// Canje EXCEPCIONAL BATEAS (todos los mercados menos Juliaca y Puno), por bloques como la Tradicional.
+// Tradicional NUEVA (id interno EXCEPCIONAL_BATEAS), desde el 25/11/2026. Por bloques como la antigua.
+const TRADICIONAL_NUEVA_DESDE = new Date("2026-11-25T00:00:00-05:00");
 // Bloque 1 = 1 Batea · 4 = 9 Avena + 2 Spaghetti + 1 Batea · 10 = 24 Avena + 6 Spaghetti + 3 Bateas
 // · 80 = 144 Avena + 95 Spaghetti + 6 Bateas. Unidades y minis: igual que Tradicional.
 const EXCEPTIONAL_BATEAS_BLOCK: Record<number, { AVENA: number; SPAGHETTI: number; BATEA: number }> = {
@@ -5694,6 +5695,9 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     if (punoWithoutCanje) input.canjeProgram = "TRADICIONAL";
     const exceptionalProgram = canjeProgramOf(input) === "EXCEPCIONAL";
     const date = new Date(value(input, "date"));
+    // Tradicional nueva (id EXCEPCIONAL_BATEAS) solo desde el 25/11/2026.
+    if (canjeProgramOf(input) === "EXCEPCIONAL_BATEAS" && date.getTime() < TRADICIONAL_NUEVA_DESDE.getTime())
+      throw new Error("La Tradicional nueva aplica desde el 25/11. Para ventas anteriores usa la Tradicional antigua.");
     const units = Number(input.units);
     const planchas = Number(input.planchas);
     const mode = value(input, "mode");
@@ -5898,7 +5902,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       scaleCanjeItems(expected, legacyCanjeMultiplier(input, mode, planchas));
       if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
         throw new Error(
-          `Canje Excepcional Bateas: para esta venta corresponde ${[
+          `Canje Tradicional nueva: para esta venta corresponde ${[
             expected.AVENA ? `${expected.AVENA} Avena` : "",
             expected.SPAGHETTI ? `${expected.SPAGHETTI} Spaghetti` : "",
             expected.BATEA ? `${expected.BATEA} Batea${expected.BATEA > 1 ? "s" : ""}` : "",
