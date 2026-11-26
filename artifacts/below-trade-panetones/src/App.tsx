@@ -162,6 +162,29 @@ function unitProductAllowsCanje(sku?: string, label?: string) {
 const UNIT_NO_CANJE_TITLE = "Mini por unidad: venta sin canje";
 const UNIT_NO_CANJE_DETAIL =
   "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.";
+// Tacna (departamento, provincia o distrito, o "TACNA" en el nombre del mercado):
+// canje solo desde 4 planchas. Unidades y 1 a 3 planchas (minis incluidos) van sin canje.
+// Aplica a los cuatro tipos de canje. Debe coincidir con tacnaCanjeExclusion del servidor.
+const TACNA_MIN_CANJE_PLANCHAS = 4;
+function isTacnaLocation(market?: Pick<Market, "name" | "department" | "province" | "district"> | null) {
+  if (!market) return false;
+  return (
+    normalizeLocationValue(market.department) === "TACNA" ||
+    normalizeLocationValue(market.province) === "TACNA" ||
+    normalizeLocationValue(market.district) === "TACNA" ||
+    normalizeLocationValue(market.name).includes("TACNA")
+  );
+}
+function tacnaWithoutCanje(
+  market: Pick<Market, "name" | "department" | "province" | "district"> | null | undefined,
+  mode: string | undefined,
+  planchas: number | undefined,
+) {
+  return isTacnaLocation(market) && (mode === "UNIDADES" || (Number(planchas) || 0) < TACNA_MIN_CANJE_PLANCHAS);
+}
+const TACNA_NO_CANJE_TITLE = "Tacna: canje desde 4 planchas";
+const TACNA_NO_CANJE_DETAIL =
+  "En Tacna, las ventas por unidad y de 1 a 3 planchas (minis incluidos) no llevan canje.";
 function isNoCanjeMarket(market?: Pick<Market, "name" | "province" | "district"> | null) {
   return Boolean(market) && isNoCanjeLocation(market!);
 }
@@ -5602,7 +5625,10 @@ function SaleEditModal({
         UNIT_SALE_PRODUCTS.find((item) => item.sku === editSaleSku)?.label ||
         "",
     );
-  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje;
+  // Tacna: solo desde 4 planchas. Si la venta ya tenía canje registrado, se conserva.
+  const tacnaEditWithoutCanje =
+    !punoWithoutCanje && originalCount === 0 && tacnaWithoutCanje(saleMarket, sale.mode, sale.planchas);
+  const editWithoutCanje = punoWithoutCanje || weightWithoutCanje || tacnaEditWithoutCanje;
   const saleWarehouse =
     warehouses.find((warehouse) => warehouse.id === saleMarket?.warehouseId) ||
     warehouses.find((warehouse) => warehouse.marketIds?.includes(sale.marketId));
@@ -5877,6 +5903,12 @@ function SaleEditModal({
         <div className="notice">
           <strong>{UNIT_NO_CANJE_TITLE}</strong>
           <p>{UNIT_NO_CANJE_DETAIL}</p>
+        </div>
+      )}
+      {tacnaEditWithoutCanje && !weightWithoutCanje && (
+        <div className="notice">
+          <strong>{TACNA_NO_CANJE_TITLE}</strong>
+          <p>{TACNA_NO_CANJE_DETAIL}</p>
         </div>
       )}
       <div className="form-grid">
@@ -13042,7 +13074,8 @@ function PromoterApp({
   // Minis por planchas: canje solo en 1/2 plancha y 1 plancha; desde 2 planchas, sin canje.
   // Planchas solo de minis desde 1 plancha: 4 Avenas fijas.
   const miniPlanchaCanje = mode === "PLANCHAS" && miniOnlyPlancha && planchas >= 1;
-  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje;
+  const tacnaSaleWithoutCanje = !punoWithoutCanje && tacnaWithoutCanje(selectedMarket, mode, planchas);
+  const saleWithoutCanje = punoWithoutCanje || unitProductWithoutCanje || tacnaSaleWithoutCanje;
   const saleDate = administrative
     ? new Date(administrative.date + "-05:00")
     : new Date();
@@ -14381,6 +14414,12 @@ function PromoterApp({
           <div className="notice" data-testid="notice-unit-no-canje">
             <strong>{UNIT_NO_CANJE_TITLE}</strong>
             <p>{UNIT_NO_CANJE_DETAIL}</p>
+          </div>
+        )}
+        {tacnaSaleWithoutCanje && !unitProductWithoutCanje && (
+          <div className="notice" data-testid="notice-tacna-no-canje">
+            <strong>{TACNA_NO_CANJE_TITLE}</strong>
+            <p>{TACNA_NO_CANJE_DETAIL}</p>
           </div>
         )}
         {!saleWithoutCanje && (

@@ -197,11 +197,42 @@ function isNoCanjeMarketData(record: StoredRecord) {
 // - por unidad: sin canje;
 // - por planchas (solo minis): 1/2 plancha (24 und) = 2 Avenas; 1 plancha o más
 //   (48 und por plancha) = 4 Avenas fijas. Mezclas con otros productos: escala normal.
-type CanjeExclusion = "MINI_UNIDAD";
+type CanjeExclusion = "MINI_UNIDAD" | "TACNA_MENOS_4";
 const CANJE_EXCLUSION_MESSAGE: Record<CanjeExclusion, string> = {
   MINI_UNIDAD:
     "En ventas por unidad, Todinnito 85 g, Mini Costa Minions 80 g y Mini Costa Jurassic 80 g no llevan canje.",
+  TACNA_MENOS_4:
+    "En Tacna el canje se activa desde 4 planchas: las ventas por unidad y de 1 a 3 planchas no llevan canje.",
 };
+
+// Tacna (departamento, provincia o distrito, o "TACNA" en el nombre del mercado):
+// canje solo desde 4 planchas. Unidades y 1 a 3 planchas (minis incluidos) van sin canje.
+// Aplica a los cuatro tipos de canje. Debe coincidir con tacnaWithoutCanje de la app.
+const TACNA_MIN_CANJE_PLANCHAS = 4;
+function isTacnaLocation(location: StoredRecord | null | undefined) {
+  if (!location) return false;
+  return (
+    normalizeLocationValue(location.department) === "TACNA" ||
+    normalizeLocationValue(location.province) === "TACNA" ||
+    normalizeLocationValue(location.district) === "TACNA" ||
+    normalizeLocationValue(location.name).includes("TACNA")
+  );
+}
+function tacnaCanjeExclusion(
+  marketData: StoredRecord | null | undefined,
+  record: StoredRecord,
+): CanjeExclusion | null {
+  const market = marketData || {
+    name: record.marketName,
+    department: record.marketDepartment,
+    province: record.marketProvince,
+    district: record.marketDistrict,
+  };
+  if (!isTacnaLocation(market)) return null;
+  const mode = value(record, "mode");
+  if (mode === "UNIDADES") return "TACNA_MENOS_4";
+  return numeric(record, "planchas") < TACNA_MIN_CANJE_PLANCHAS ? "TACNA_MENOS_4" : null;
+}
 const MINI_UNITS_PER_PLANCHA = 48;
 const MINI_PLANCHA_AVENAS = 4;
 /** SKU de referencia de un mini (las escalas usan estos códigos), aunque el catálogo use otro. */
@@ -437,7 +468,7 @@ function stripCanjeFromSale(
           noCanjeZone: reason === "CLIENTE" ? "CLIENTE VEGA - BELAUNDE" : reason,
         }
       : {
-          noCanjeReason: "MINI_POR_UNIDAD",
+          noCanjeReason: reason === "TACNA_MENOS_4" ? "TACNA_MENOS_4_PLANCHAS" : "MINI_POR_UNIDAD",
         }),
   };
 }
@@ -1639,8 +1670,11 @@ async function syncSnapshot(
               record.canjeProgram = "TRADICIONAL";
             }
             else {
-              const exclusion = await productCanjeExclusion(client as unknown as QueryClient, record);
+              const exclusion =
+                tacnaCanjeExclusion(saleMarketData, record) ||
+                (await productCanjeExclusion(client as unknown as QueryClient, record));
               if (exclusion) enforceSaleWithoutCanje(record, exclusion);
+              if (exclusion === "TACNA_MENOS_4") record.canjeProgram = "TRADICIONAL";
             }
             const validatedRule = await validateSubmittedRedemptionRule(
               client as unknown as QueryClient,
@@ -5645,7 +5679,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
     const juliacaWithoutCanje = Boolean(zoneWithoutCanje);
     const productExclusion = juliacaWithoutCanje
       ? null
-      : await productCanjeExclusion(db as unknown as QueryClient, input);
+      : tacnaCanjeExclusion(marketData, input) || (await productCanjeExclusion(db as unknown as QueryClient, input));
     // Variable con nombre histórico: aquí significa "esta venta va sin canje".
     const punoWithoutCanje = juliacaWithoutCanje || Boolean(productExclusion);
     if (zoneWithoutCanje) {
@@ -6083,7 +6117,8 @@ router.put("/app-storage/admin/sales/:id", async (req, res): Promise<void> => {
       !punoWithoutCanje &&
       !hasRedemptionConsumption(currentSale.data) &&
       hasRedemptionConsumption(input)
-        ? await productCanjeExclusion(client as unknown as QueryClient, currentSale.data)
+        ? tacnaCanjeExclusion(isRecord(currentMarketResult.rows[0]?.data) ? currentMarketData : null, currentSale.data) ||
+          (await productCanjeExclusion(client as unknown as QueryClient, currentSale.data))
         : null;
     if (editExclusion) {
       await client.query("ROLLBACK");
