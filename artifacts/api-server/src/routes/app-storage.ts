@@ -335,15 +335,29 @@ const SOLO_AVENA_BLOCK: Record<number, { AVENA: number; BATEA: number }> = {
 // El promotor elige Tradicional, Solo Avena o Excepcional.
 // Debe coincidir con exceptionalCanjeItems de la app.
 // Canje SOLO AVENA: disponible en todos los almacenes; el promotor lo elige en cada venta.
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA" | "EXCEPCIONAL_BATEAS";
+type CanjeProgram =
+  | "TRADICIONAL"
+  | "EXCEPCIONAL"
+  | "SOLO_AVENA"
+  | "EXCEPCIONAL_BATEAS"
+  | "SOLO_AVENA_ANTIGUA"
+  | "EXCEPCIONAL_ANTIGUA";
 const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
   TRADICIONAL: "Tradicional",
   EXCEPCIONAL: "Excepcional",
   SOLO_AVENA: "Solo Avena",
   EXCEPCIONAL_BATEAS: "Tradicional nueva",
+  SOLO_AVENA_ANTIGUA: "Solo Avena antigua",
+  EXCEPCIONAL_ANTIGUA: "Excepcional antigua",
 };
 function normalizeCanjeProgram(raw: unknown): CanjeProgram {
-  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" || raw === "EXCEPCIONAL_BATEAS" ? raw : "TRADICIONAL";
+  return raw === "EXCEPCIONAL" ||
+    raw === "SOLO_AVENA" ||
+    raw === "EXCEPCIONAL_BATEAS" ||
+    raw === "SOLO_AVENA_ANTIGUA" ||
+    raw === "EXCEPCIONAL_ANTIGUA"
+    ? raw
+    : "TRADICIONAL";
 }
 function canjeProgramOf(record: StoredRecord): CanjeProgram {
   return normalizeCanjeProgram(value(record, "canjeProgram"));
@@ -358,11 +372,16 @@ function scaleCanjeItems(items: Record<string, number>, factor: number) {
   return items;
 }
 
+// Versiones ANTIGUAS (antes del 25/11) de Solo Avena y Excepcional, por bloques:
+// Solo Avena antigua: 1 = 6 Avena · 4 = 24 · 10 = 60 · 80 = 432. Excepcional antigua: 1 = 2 Spaghetti · 4 = 8 · 10 = 20 · 80 = 160.
+const SOLO_AVENA_ANTIGUA_BLOCK: Record<number, number> = { 1: 6, 4: 24, 10: 60, 80: 432 };
+const EXCEPTIONAL_ANTIGUA_BLOCK_SPAGHETTI: Record<number, number> = { 1: 2, 4: 8, 10: 20, 80: 160 };
 function exceptionalCanjeItems(
   mode: string,
   units: number,
   planchas: number,
   miniOnly: boolean,
+  antigua = false,
 ): Record<string, number> {
   const none = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
   if (mode === "UNIDADES") return { ...none, SPAGHETTI: units >= 1 && units <= 5 ? units : 0 };
@@ -371,8 +390,11 @@ function exceptionalCanjeItems(
     return { ...none, SPAGHETTI: planchas >= 1 ? 2 : 0 };
   }
   const blocks = canjePlanchaBlocks(planchas);
-  const spaghetti = blocks.reduce((sum, block) => sum + EXCEPTIONAL_BLOCK_SPAGHETTI[block], 0);
-  const batea = blocks.reduce((sum, block) => sum + (EXCEPTIONAL_BLOCK_BATEA[block] || 0), 0);
+  const spaghetti = blocks.reduce(
+    (sum, block) => sum + (antigua ? EXCEPTIONAL_ANTIGUA_BLOCK_SPAGHETTI : EXCEPTIONAL_BLOCK_SPAGHETTI)[block],
+    0,
+  );
+  const batea = antigua ? 0 : blocks.reduce((sum, block) => sum + (EXCEPTIONAL_BLOCK_BATEA[block] || 0), 0);
   return { ...none, SPAGHETTI: spaghetti, BATEA: batea };
 }
 
@@ -416,6 +438,7 @@ function soloAvenaCanjeItems(
   planchas: number,
   miniOnly: boolean,
   _batea?: boolean,
+  antigua = false,
 ): Record<string, number> {
   const none = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
   if (mode === "UNIDADES") return { ...none, AVENA: units >= 1 && units <= 5 ? legacyUnitAvenas(units) : 0 };
@@ -425,6 +448,10 @@ function soloAvenaCanjeItems(
   }
   const result = { ...none };
   for (const block of canjePlanchaBlocks(planchas)) {
+    if (antigua) {
+      result.AVENA += SOLO_AVENA_ANTIGUA_BLOCK[block];
+      continue;
+    }
     const def = SOLO_AVENA_BLOCK[block];
     result.AVENA += def.AVENA;
     result.BATEA += def.BATEA;
@@ -5693,11 +5720,15 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       requireFinalClientForCanje(input);
     }
     if (punoWithoutCanje) input.canjeProgram = "TRADICIONAL";
-    const exceptionalProgram = canjeProgramOf(input) === "EXCEPCIONAL";
+    const exceptionalProgram =
+      canjeProgramOf(input) === "EXCEPCIONAL" || canjeProgramOf(input) === "EXCEPCIONAL_ANTIGUA";
     const date = new Date(value(input, "date"));
-    // Tradicional nueva (id EXCEPCIONAL_BATEAS) solo desde el 25/11/2026.
-    if (canjeProgramOf(input) === "EXCEPCIONAL_BATEAS" && date.getTime() < TRADICIONAL_NUEVA_DESDE.getTime())
-      throw new Error("La Tradicional nueva aplica desde el 25/11. Para ventas anteriores usa la Tradicional antigua.");
+    // Escalas nuevas (Tradicional nueva, Solo Avena y Excepcional) solo desde el 25/11/2026.
+    if (
+      ["EXCEPCIONAL_BATEAS", "SOLO_AVENA", "EXCEPCIONAL"].includes(canjeProgramOf(input)) &&
+      date.getTime() < TRADICIONAL_NUEVA_DESDE.getTime()
+    )
+      throw new Error("Las escalas nuevas aplican desde el 25/11. Para ventas anteriores usa la versión antigua.");
     const units = Number(input.units);
     const planchas = Number(input.planchas);
     const mode = value(input, "mode");
@@ -5856,6 +5887,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         mode === "PLANCHAS" &&
           inputPlanchaLines.length > 0 &&
           inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
+        canjeProgramOf(input) === "EXCEPCIONAL_ANTIGUA",
       );
       scaleCanjeItems(expected, legacyCanjeMultiplier(input, mode, planchas));
       if (redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
@@ -5876,7 +5908,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       throw new Error(
         "En unidades: 1 und = 1 Avena, 2 und = 2 Avenas y de 3 a 5 und = 2 Avenas.",
       );
-    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && canjeProgramOf(input) === "SOLO_AVENA" && bonus) {
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && (canjeProgramOf(input) === "SOLO_AVENA" || canjeProgramOf(input) === "SOLO_AVENA_ANTIGUA") && bonus) {
       // Solo Avena sin escala (respaldo): se valida con la dinámica fija.
       const expected = soloAvenaCanjeItems(
         mode,
@@ -5884,6 +5916,7 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
         planchas,
         inputPlanchaLines.length > 0 && inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
         Number(requested.BATEA) > 0,
+        canjeProgramOf(input) === "SOLO_AVENA_ANTIGUA",
       );
       scaleCanjeItems(expected, legacyCanjeMultiplier(input, mode, planchas));
       if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))

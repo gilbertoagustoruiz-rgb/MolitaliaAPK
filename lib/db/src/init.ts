@@ -518,6 +518,49 @@ export async function ensureDatabaseSchema() {
       ('RR-EXB-P81','EXB_PLANCHAS_81','Tradicional nueva · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":168,"SPAGHETTI":101,"BATEA":9}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_BATEAS","description":"81 planchas o más = 168 Avena + 101 Spaghetti + 9 Bateas"}'::jsonb)
     ON CONFLICT (id) DO NOTHING;
 
+    -- Escala SOLO AVENA ANTIGUA (ventas anteriores al 25/11 o cuando el promotor elige 'Antigua'), por bloques.
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES
+      ('RR-SAVA-MINI-HALF','SAVA_MINI_MEDIA','Solo Avena antigua · Minis 1/2 plancha','PLANCHAS','UNITS',24,24,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"AVENA":2}'::jsonb,10,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"Minis: 1/2 plancha (24 und) = 2 Avenas"}'::jsonb),
+      ('RR-SAVA-MINI-1','SAVA_MINI_1','Solo Avena antigua · Minis 1 plancha o más','PLANCHAS','PLANCHAS',1,null,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"AVENA":4}'::jsonb,5,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"Minis: 1 plancha o más = 4 Avenas"}'::jsonb),
+      ('RR-SAVA-UNI-1-2','SAVA_UNI_1_2','Solo Avena antigua · 1 a 2 unidades','UNIDADES','UNITS',1,2,false,true,1,ARRAY[]::text[],'NINGUNO','{"AVENA":1}'::jsonb,20,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"1 unidad = 1 Avena; 2 unidades = 2 Avenas"}'::jsonb),
+      ('RR-SAVA-UNI-3-5','SAVA_UNI_3_5','Solo Avena antigua · 3 a 5 unidades','UNIDADES','UNITS',3,5,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":2}'::jsonb,21,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"3 a 5 unidades = 2 Avenas"}'::jsonb),
+      ('RR-SAVA-P1','SAVA_PLANCHAS_1','Solo Avena antigua · 1 plancha','PLANCHAS','PLANCHAS',1,1,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":6}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"1 plancha = 6 Avena"}'::jsonb),
+      ('RR-SAVA-P2','SAVA_PLANCHAS_2','Solo Avena antigua · 2 a 3 planchas','PLANCHAS','PLANCHAS',2,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":12}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"2 a 3 planchas = 12 Avena"}'::jsonb),
+      ('RR-SAVA-P4','SAVA_PLANCHAS_4','Solo Avena antigua · 4 planchas','PLANCHAS','PLANCHAS',4,4,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":24}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"4 planchas = 24 Avena"}'::jsonb),
+      ('RR-SAVA-P5','SAVA_PLANCHAS_5','Solo Avena antigua · 5 a 7 planchas','PLANCHAS','PLANCHAS',5,7,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":30}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"5 a 7 planchas = 30 Avena"}'::jsonb),
+      ('RR-SAVA-P8','SAVA_PLANCHAS_8','Solo Avena antigua · 8 a 9 planchas','PLANCHAS','PLANCHAS',8,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":48}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"8 a 9 planchas = 48 Avena"}'::jsonb),
+      ('RR-SAVA-P10','SAVA_PLANCHAS_10','Solo Avena antigua · 10 planchas','PLANCHAS','PLANCHAS',10,10,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":60}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"10 planchas = 60 Avena"}'::jsonb),
+      ('RR-SAVA-P11','SAVA_PLANCHAS_11','Solo Avena antigua · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":66}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"11 a 13 planchas = 66 Avena"}'::jsonb),
+      ('RR-SAVA-P14','SAVA_PLANCHAS_14','Solo Avena antigua · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":84}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"14 a 19 planchas = 84 Avena"}'::jsonb),
+      ('RR-SAVA-P20','SAVA_PLANCHAS_20','Solo Avena antigua · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":120}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"20 a 79 planchas = 120 Avena"}'::jsonb),
+      ('RR-SAVA-P80','SAVA_PLANCHAS_80','Solo Avena antigua · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":432}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"80 planchas = 432 Avena"}'::jsonb),
+      ('RR-SAVA-P81','SAVA_PLANCHAS_81','Solo Avena antigua · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"AVENA":492}'::jsonb,30,'ACTIVO','{"program":"SOLO_AVENA_ANTIGUA","description":"81 planchas o más = 492 Avena"}'::jsonb)
+    ON CONFLICT (id) DO NOTHING;
+
+    -- Escala EXCEPCIONAL ANTIGUA (ventas anteriores al 25/11 o cuando el promotor elige 'Antigua'), por bloques.
+    INSERT INTO redemption_rules (
+      id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
+      repeatable,step_quantity,eligible_skus,accessory,items,priority,status,data
+    ) VALUES
+      ('RR-EXCA-MINI-HALF','EXCA_MINI_MEDIA','Excepcional antigua · Minis 1/2 plancha','PLANCHAS','UNITS',24,24,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"SPAGHETTI":1}'::jsonb,10,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"Minis: 1/2 plancha (24 und) = 1 Spaghetti"}'::jsonb),
+      ('RR-EXCA-MINI-1','EXCA_MINI_1','Excepcional antigua · Minis 1 plancha o más','PLANCHAS','PLANCHAS',1,null,false,false,null,ARRAY['TODINNITO-85','MINI-COSTA-MINIONS-80','MINI-COSTA-JURASSIC-80'],'NINGUNO','{"SPAGHETTI":2}'::jsonb,5,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"Minis: 1 plancha o más = 2 Spaghetti"}'::jsonb),
+      ('RR-EXCA-UNI','EXCA_UNI','Excepcional antigua · 1 a 5 unidades','UNIDADES','UNITS',1,5,false,true,1,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":1}'::jsonb,20,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"1 a 5 unidades = 1 Spaghetti por unidad"}'::jsonb),
+      ('RR-EXCA-P1','EXCA_PLANCHAS_1','Excepcional antigua · 1 plancha','PLANCHAS','PLANCHAS',1,1,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":2}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"1 plancha = 2 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P2','EXCA_PLANCHAS_2','Excepcional antigua · 2 a 3 planchas','PLANCHAS','PLANCHAS',2,3,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":4}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"2 a 3 planchas = 4 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P4','EXCA_PLANCHAS_4','Excepcional antigua · 4 planchas','PLANCHAS','PLANCHAS',4,4,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":8}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"4 planchas = 8 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P5','EXCA_PLANCHAS_5','Excepcional antigua · 5 a 7 planchas','PLANCHAS','PLANCHAS',5,7,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":10}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"5 a 7 planchas = 10 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P8','EXCA_PLANCHAS_8','Excepcional antigua · 8 a 9 planchas','PLANCHAS','PLANCHAS',8,9,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":16}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"8 a 9 planchas = 16 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P10','EXCA_PLANCHAS_10','Excepcional antigua · 10 planchas','PLANCHAS','PLANCHAS',10,10,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":20}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"10 planchas = 20 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P11','EXCA_PLANCHAS_11','Excepcional antigua · 11 a 13 planchas','PLANCHAS','PLANCHAS',11,13,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":22}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"11 a 13 planchas = 22 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P14','EXCA_PLANCHAS_14','Excepcional antigua · 14 a 19 planchas','PLANCHAS','PLANCHAS',14,19,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":28}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"14 a 19 planchas = 28 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P20','EXCA_PLANCHAS_20','Excepcional antigua · 20 a 79 planchas','PLANCHAS','PLANCHAS',20,79,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":40}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"20 a 79 planchas = 40 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P80','EXCA_PLANCHAS_80','Excepcional antigua · 80 planchas','PLANCHAS','PLANCHAS',80,80,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":160}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"80 planchas = 160 Spaghetti"}'::jsonb),
+      ('RR-EXCA-P81','EXCA_PLANCHAS_81','Excepcional antigua · 81 planchas o más','PLANCHAS','PLANCHAS',81,null,false,false,null,ARRAY[]::text[],'NINGUNO','{"SPAGHETTI":180}'::jsonb,30,'ACTIVO','{"program":"EXCEPCIONAL_ANTIGUA","description":"81 planchas o más = 180 Spaghetti"}'::jsonb)
+    ON CONFLICT (id) DO NOTHING;
+
     -- Escala SOLO AVENA: en todos los almacenes, el promotor la elige en cada venta.
     INSERT INTO redemption_rules (
       id,code,name,sale_mode,quantity_basis,min_quantity,max_quantity,min_exclusive,
