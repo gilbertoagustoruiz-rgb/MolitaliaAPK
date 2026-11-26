@@ -287,28 +287,32 @@ function canjePlanchaBlocks(planchas: number): number[] {
   if (planchas >= 2) return [1, 1];
   return planchas >= 1 ? [1] : [];
 }
-const EXCEPTIONAL_BLOCK_SPAGHETTI: Record<number, number> = { 1: 2, 4: 8, 10: 20, 80: 140 };
-// Excepcional oficial: el bloque de 80 planchas también entrega 4 Bateas.
-const EXCEPTIONAL_BLOCK_BATEA: Record<number, number> = { 80: 4 };
-const SOLO_AVENA_BLOCK: Record<number, { avena: number; bateaAvena?: number; batea?: number }> = {
-  1: { avena: 6 },
-  4: { avena: 24 },
-  10: { avena: 60, bateaAvena: 50, batea: 1 },
-  80: { avena: 432, bateaAvena: 408, batea: 4 },
+// Excepcional Spaghetti oficial: bloque 1 = 1 Batea · 4 = 6 Spaghetti + 1 Batea · 10 = 13 Spaghetti + 3 Bateas
+// · 80 = 147 Spaghetti + 6 Bateas. Unidades y minis siguen dando solo Spaghetti.
+const EXCEPTIONAL_BLOCK_SPAGHETTI: Record<number, number> = { 1: 0, 4: 6, 10: 13, 80: 147 };
+const EXCEPTIONAL_BLOCK_BATEA: Record<number, number> = { 1: 1, 4: 1, 10: 3, 80: 6 };
+// Solo Avena oficial (Avena Clásica + Bateas): bloque 1 = 1 Batea · 4 = 18 Avena + 1 Batea
+// · 10 = 42 Avena + 3 Bateas · 80 = 394 Avena + 6 Bateas. Las Bateas vienen en la dinámica (sin opción aparte).
+const SOLO_AVENA_BLOCK: Record<number, { AVENA: number; BATEA: number }> = {
+  1: { AVENA: 0, BATEA: 1 },
+  4: { AVENA: 18, BATEA: 1 },
+  10: { AVENA: 42, BATEA: 3 },
+  80: { AVENA: 394, BATEA: 6 },
 };
 
 // Canje EXCEPCIONAL (solo Spaghetti): en todos los mercados salvo zonas sin canje.
 // El promotor elige Tradicional, Solo Avena o Excepcional.
 // Debe coincidir con exceptionalCanjeItems de la app.
 // Canje SOLO AVENA: disponible en todos los almacenes; el promotor lo elige en cada venta.
-type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA";
+type CanjeProgram = "TRADICIONAL" | "EXCEPCIONAL" | "SOLO_AVENA" | "EXCEPCIONAL_BATEAS";
 const CANJE_PROGRAM_LABEL: Record<CanjeProgram, string> = {
   TRADICIONAL: "Tradicional",
   EXCEPCIONAL: "Excepcional",
   SOLO_AVENA: "Solo Avena",
+  EXCEPCIONAL_BATEAS: "Excepcional Bateas",
 };
 function normalizeCanjeProgram(raw: unknown): CanjeProgram {
-  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" ? raw : "TRADICIONAL";
+  return raw === "EXCEPCIONAL" || raw === "SOLO_AVENA" || raw === "EXCEPCIONAL_BATEAS" ? raw : "TRADICIONAL";
 }
 function canjeProgramOf(record: StoredRecord): CanjeProgram {
   return normalizeCanjeProgram(value(record, "canjeProgram"));
@@ -341,15 +345,45 @@ function exceptionalCanjeItems(
   return { ...none, SPAGHETTI: spaghetti, BATEA: batea };
 }
 
+// Canje EXCEPCIONAL BATEAS (todos los mercados menos Juliaca y Puno), por bloques como la Tradicional.
+// Bloque 1 = 1 Batea · 4 = 9 Avena + 2 Spaghetti + 1 Batea · 10 = 24 Avena + 6 Spaghetti + 3 Bateas
+// · 80 = 144 Avena + 95 Spaghetti + 6 Bateas. Unidades y minis: igual que Tradicional.
+const EXCEPTIONAL_BATEAS_BLOCK: Record<number, { AVENA: number; SPAGHETTI: number; BATEA: number }> = {
+  1: { AVENA: 0, SPAGHETTI: 0, BATEA: 1 },
+  4: { AVENA: 9, SPAGHETTI: 2, BATEA: 1 },
+  10: { AVENA: 24, SPAGHETTI: 6, BATEA: 3 },
+  80: { AVENA: 144, SPAGHETTI: 95, BATEA: 6 },
+};
+function exceptionalBateasCanjeItems(
+  mode: string,
+  units: number,
+  planchas: number,
+  miniOnly: boolean,
+): Record<string, number> {
+  const result = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
+  if (mode === "UNIDADES") return { ...result, AVENA: units >= 1 && units <= 5 ? legacyUnitAvenas(units) : 0 };
+  if (miniOnly) {
+    if (planchas === 0.5 && units === 24) return { ...result, AVENA: 2 };
+    return { ...result, AVENA: planchas >= 1 ? MINI_PLANCHA_AVENAS : 0 };
+  }
+  for (const block of canjePlanchaBlocks(planchas)) {
+    const def = EXCEPTIONAL_BATEAS_BLOCK[block];
+    result.AVENA += def.AVENA;
+    result.SPAGHETTI += def.SPAGHETTI;
+    result.BATEA += def.BATEA;
+  }
+  return result;
+}
+
 // Canje SOLO AVENA (debe coincidir con soloAvenaCanjeItems de la app).
 // Unidades: igual que Tradicional. Minis: ½ plancha = 2, 1 plancha o más = 4.
-// Planchas por bloques (como la Tradicional): bloque 1 = 6, 4 = 24, 10 = 60 (o 50 + 1 Batea), 80 = 432 (o 408 + 4 Bateas).
+// Planchas por bloques (como la Tradicional): ver SOLO_AVENA_BLOCK.
 function soloAvenaCanjeItems(
   mode: string,
   units: number,
   planchas: number,
   miniOnly: boolean,
-  batea: boolean,
+  _batea?: boolean,
 ): Record<string, number> {
   const none = { AVENA: 0, BATEA: 0, MANDIL: 0, SPAGHETTI: 0 };
   if (mode === "UNIDADES") return { ...none, AVENA: units >= 1 && units <= 5 ? legacyUnitAvenas(units) : 0 };
@@ -360,9 +394,8 @@ function soloAvenaCanjeItems(
   const result = { ...none };
   for (const block of canjePlanchaBlocks(planchas)) {
     const def = SOLO_AVENA_BLOCK[block];
-    const withBatea = batea && def.batea !== undefined;
-    result.AVENA += withBatea ? def.bateaAvena || 0 : def.avena;
-    result.BATEA += withBatea ? def.batea || 0 : 0;
+    result.AVENA += def.AVENA;
+    result.BATEA += def.BATEA;
   }
   return result;
 }
@@ -5818,6 +5851,24 @@ router.post("/app-storage/admin/sales", async (req, res): Promise<void> => {
       if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
         throw new Error(
           `Canje Solo Avena: para esta venta corresponde ${expected.AVENA} Avena${expected.BATEA ? ` + ${expected.BATEA} Batea` : ""}.`,
+        );
+    }
+    if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && canjeProgramOf(input) === "EXCEPCIONAL_BATEAS" && bonus) {
+      // Excepcional Bateas sin escala (respaldo): se valida con los bloques fijos.
+      const expected = exceptionalBateasCanjeItems(
+        mode,
+        units,
+        planchas,
+        inputPlanchaLines.length > 0 && inputPlanchaLines.every((line) => isMiniHalfPlanchaLine(line)),
+      );
+      scaleCanjeItems(expected, legacyCanjeMultiplier(input, mode, planchas));
+      if (count !== 1 || redemptionItemIds.some((item) => (Number(requested[item]) || 0) !== (Number(expected[item]) || 0)))
+        throw new Error(
+          `Canje Excepcional Bateas: para esta venta corresponde ${[
+            expected.AVENA ? `${expected.AVENA} Avena` : "",
+            expected.SPAGHETTI ? `${expected.SPAGHETTI} Spaghetti` : "",
+            expected.BATEA ? `${expected.BATEA} Batea${expected.BATEA > 1 ? "s" : ""}` : "",
+          ].filter(Boolean).join(" + ")}.`,
         );
     }
     if (!validatedRule && mode === "PLANCHAS" && !punoWithoutCanje && canjeProgramOf(input) === "TRADICIONAL") {
